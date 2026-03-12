@@ -1,0 +1,205 @@
+/* Layout */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  font-size: 1.25rem;
+  color: #888;
+}
+
+/* Auth */
+.auth-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+}
+
+.auth-container h1 {
+  margin-bottom: 2rem;
+  font-size: 2rem;
+}
+
+.auth-card {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 400px;
+}
+
+.auth-card h2 {
+  margin: 0 0 1.5rem;
+  text-align: center;
+}
+
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.auth-card input {
+  padding: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #0d0d0d;
+  color: #fff;
+  font-size: 1rem;
+}
+
+.auth-card button[type="submit"] {
+  padding: 0.75rem;
+  border-radius: 6px;
+  border: none;
+  background: #646cff;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  margin-top: 0.25rem;
+}
+
+.auth-card button[type="submit"]:hover {
+  background: #535bf2;
+}
+
+.auth-toggle {
+  display: block;
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.5rem;
+  background: none;
+  border: none;
+  color: #646cff;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.auth-toggle:hover {
+  text-decoration: underline;
+}
+
+.auth-error {
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid #f85149;
+  color: #f85149;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+}
+
+/* Dashboard */
+.dashboard {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.dashboard-header h1 {
+  margin: 0;
+}
+
+.sign-out-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: transparent;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.sign-out-btn:hover {
+  background: #333;
+}
+
+/* Log form */
+.log-form {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.log-form select {
+  padding: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #1a1a1a;
+  color: #fff;
+}
+
+.log-form input {
+  flex: 1;
+  padding: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #1a1a1a;
+  color: #fff;
+}
+
+.log-form button {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: none;
+  background: #646cff;
+  color: #fff;
+  cursor: pointer;
+}
+
+.log-form button:hover {
+  background: #535bf2;
+}
+
+/* Log list */
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.empty-state {
+  color: #888;
+  text-align: center;
+  padding: 2rem;
+}
+
+.log-entry {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.875rem;
+  background: #1a1a1a;
+}
+
+.log-level {
+  font-weight: bold;
+  min-width: 60px;
+}
+
+.log-message {
+  flex: 1;
+}
+
+.log-time {
+  color: #888;
+  white-space: nowrap;
+}
+
+.log-info .log-level { color: #58a6ff; }
+.log-warn .log-level { color: #d29922; }
+.log-error .log-level { color: #f85149; }
+.log-debug .log-level { color: #8b949e; }
