@@ -1,6 +1,6 @@
 import { useConvexAuth } from "convex/react";
 import { SignIn } from "./components/SignIn";
-import { Dashboard } from "./components/Dashboard";
+import { Layout } from "./components/Layout";
 import "./App.css";
 
 function App() {
@@ -10,7 +10,7 @@ function App() {
     return <div className="loading">Loading...</div>;
   }
 
-  return isAuthenticated ? <Dashboard /> : <SignIn />;
+  return isAuthenticated ? <Layout /> : <SignIn />;
 }
 
 export default App;

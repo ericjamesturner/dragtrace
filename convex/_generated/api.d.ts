@@ -9,8 +9,15 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as channelCategories from "../channelCategories.js";
+import type * as channelMappings from "../channelMappings.js";
+import type * as events from "../events.js";
+import type * as files from "../files.js";
 import type * as http from "../http.js";
-import type * as logs from "../logs.js";
+import type * as timeslips from "../timeslips.js";
+import type * as vehicleChannelOverrides from "../vehicleChannelOverrides.js";
+import type * as vehicles from "../vehicles.js";
+import type * as workspaces from "../workspaces.js";
 
 import type {
   ApiFromModules,
@@ -20,8 +27,15 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  channelCategories: typeof channelCategories;
+  channelMappings: typeof channelMappings;
+  events: typeof events;
+  files: typeof files;
   http: typeof http;
-  logs: typeof logs;
+  timeslips: typeof timeslips;
+  vehicleChannelOverrides: typeof vehicleChannelOverrides;
+  vehicles: typeof vehicles;
+  workspaces: typeof workspaces;
 }>;
 
 /**

@@ -12,6 +12,15 @@ dist
 dist-ssr
 *.local
 
+# Secrets / env
+.env
+.env.*
+!.env.example
+
+# Tooling / debug artifacts
+.playwright-mcp/
+/*.png
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

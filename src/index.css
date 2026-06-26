@@ -127,3 +127,23 @@
     @apply font-sans;
     }
 }
+
+/* Prevent uPlot axis label elements from intercepting mouse events */
+.uplot .u-axis {
+  pointer-events: none;
+}
+
+/* Make cursor crosshair more visible against grid lines */
+.u-cursor-x {
+  border-right: 1px solid rgba(255, 255, 255, 0.5) !important;
+}
+.u-cursor-y {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Style uPlot's drag selection to match our selection highlight */
+.u-select {
+  background: rgba(59, 130, 246, 0.12) !important;
+  border-left: 1.5px solid rgba(59, 130, 246, 0.5);
+  border-right: 1.5px solid rgba(59, 130, 246, 0.5);
+}
