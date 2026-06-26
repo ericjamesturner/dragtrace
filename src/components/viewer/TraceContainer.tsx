@@ -68,7 +68,6 @@ export function TraceContainer({
   globalRange,
   offsets,
   hiddenLogIds,
-  mirroredLogIds,
   selection,
   onSelection,
   onClearSelection,
@@ -581,7 +580,6 @@ export function TraceContainer({
         onUpdateZone={onUpdateZone}
         onRemoveZone={onRemoveZone}
         onToggleZone={onToggleZone}
-        logs={logs}
         unitSystem={unitSystem}
         unitOverrides={unitOverrides}
         evaluatedZones={evaluatedZones}

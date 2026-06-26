@@ -4,7 +4,6 @@ import "uplot/dist/uPlot.min.css";
 import { resolveChannelStyle } from "@/lib/viewer-types";
 import type { ChannelOnTrace, LoadedLog } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
-import type { Id } from "../../../convex/_generated/dataModel";
 import { convertForDisplay, getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { formatValue, formatDuration } from "@/lib/cursor-utils";
 

@@ -89,7 +89,6 @@ export function ViewerSidebar({
   logs,
   vehicleId,
   loadedFileIds,
-  traces,
   hiddenLogIds,
   mirroredLogIds,
   onAddFile,
@@ -239,7 +238,6 @@ export function ViewerSidebar({
       <div className="flex-1 overflow-y-auto p-2">
         {logs.map((log, logIndex) => {
           const isLogOpen = expandedLogs.has(log.fileId);
-          const session = log.parsed.sessions[log.activeSessionIndex];
           const emptySet = emptyChannelsByLog.get(log.fileId) ?? new Set<string>();
 
           const logDefNames = new Set(log.parsed.channelDefs.map((d) => d.name));

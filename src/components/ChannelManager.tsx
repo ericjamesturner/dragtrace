@@ -220,7 +220,7 @@ export function ChannelManager() {
     e: React.DragEvent,
     parentCatId: string,
     itemIndex: number,
-    itemCount: number,
+    _itemCount: number,
   ) => {
     e.preventDefault();
     e.stopPropagation();
@@ -455,7 +455,6 @@ export function ChannelManager() {
 
 function ChannelDetail({
   mapping: m,
-  ecuType,
   catPath,
   categories,
   onSetDisplayName,

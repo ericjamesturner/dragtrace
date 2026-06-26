@@ -8,7 +8,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import { ChevronLeftIcon, ChevronRightIcon, FileIcon, PlusIcon } from "lucide-react";
 
 type PickerView =

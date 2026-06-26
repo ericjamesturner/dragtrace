@@ -122,7 +122,7 @@ export function useChannelGroups(
     }
 
     // Recursive tree builder
-    function buildNode(cat: typeof categories[0]): GroupNode | null {
+    function buildNode(cat: NonNullable<typeof categories>[number]): GroupNode | null {
       const kids = childrenOf.get(cat._id) ?? [];
       const channels = (channelsByCat.get(cat._id) ?? []).map(({ ch }) => ({
         ...ch,

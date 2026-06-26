@@ -13,7 +13,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { PlusIcon, XIcon, ChevronDownIcon, ChevronRightIcon, PencilIcon, SparklesIcon, ZapIcon } from "lucide-react";
+import { PlusIcon, XIcon, ChevronDownIcon, ChevronRightIcon, PencilIcon, SparklesIcon } from "lucide-react";
 import { GROUP_COLORS, type GroupNode } from "@/lib/channel-groups";
 import { useChannelGroups } from "@/hooks/useChannelGroups";
 
@@ -86,7 +86,6 @@ function ChannelSettings({
   onSetAxisRange,
   onRemove,
   channelIndex,
-  totalLogs,
 }: {
   ch: ChannelOnTrace;
   log: LoadedLog | undefined;

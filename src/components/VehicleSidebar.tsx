@@ -22,7 +22,7 @@ export function VehicleSidebar({ onSelect }: { onSelect?: () => void }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<Id<"vehicles"> | null>(null);
 
-  const selectedId = nav.view !== "vehicles" ? nav.vehicleId : null;
+  const selectedId = "vehicleId" in nav ? nav.vehicleId : null;
 
   const editingVehicle = editingId
     ? vehicles?.find((v) => v._id === editingId)

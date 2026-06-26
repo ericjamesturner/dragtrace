@@ -173,7 +173,7 @@ function LogViewerReady({
 
   // Save to DB (debounced, flushed on unmount)
   const saveWorkspace = useMutation(api.workspaces.save);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const configRef = useRef(config);
   configRef.current = config;
   const unsavedRef = useRef(false);
