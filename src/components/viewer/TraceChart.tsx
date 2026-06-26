@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
+import { buildSelectionCsv } from "@/lib/csv-export";
 import "uplot/dist/uPlot.min.css";
 import { resolveChannelStyle } from "@/lib/viewer-types";
 import type { ChannelOnTrace, LoadedLog } from "@/lib/viewer-types";
@@ -121,6 +122,8 @@ interface Props {
   // Race-start marker line style + right-click handler.
   raceLine?: { color?: string; width?: number; dash?: number[] };
   onRaceLineContextMenu?: (clientX: number, clientY: number) => void;
+  // Only the top trace shows the "copy selection CSV" button.
+  isTopTrace?: boolean;
   // Live color preview (e.g. hovering a swatch): transiently strokes the matching
   // series without committing. key = "logFileId:channelName".
   previewColorKey?: string | null;
@@ -208,12 +211,17 @@ export function TraceChart({
   onChannelContextMenu,
   raceLine,
   onRaceLineContextMenu,
+  isTopTrace,
   previewColorKey,
   previewColor,
   highlightKey,
   maxYAxes,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  // Position of the "copy CSV" button at the top-right of a range selection.
+  const [copyBtn, setCopyBtn] = useState<{ left: number; top: number } | null>(null);
+  const [copied, setCopied] = useState(false);
   const chartRef = useRef<uPlot | null>(null);
   // Maps series index (1-based) to channel key, original color hex and width for highlight
   const seriesKeysRef = useRef<string[]>([]);
@@ -1284,5 +1292,51 @@ export function TraceChart({
     u.redraw();
   }, [highlightKey]);
 
-  return <div ref={containerRef} />;
+  // Position the "copy CSV" button at the top-right of a range selection.
+  useEffect(() => {
+    const u = chartRef.current;
+    const wrap = wrapperRef.current;
+    if (!u || !wrap || !isTopTrace || !selection || selection[0] === selection[1]) {
+      setCopyBtn(null);
+      return;
+    }
+    const overRect = u.over.getBoundingClientRect();
+    const wrapRect = wrap.getBoundingClientRect();
+    const xRight = u.valToPos(Math.max(selection[0], selection[1]), "x", false); // CSS px in plot
+    setCopyBtn({
+      left: overRect.left - wrapRect.left + xRight,
+      top: overRect.top - wrapRect.top,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection, isTopTrace, width, height, zoomRange?.[0], zoomRange?.[1], globalRange[0], globalRange[1], showAxes, maxYAxes]);
+
+  const handleCopyCsv = async () => {
+    const group = logGroups[0];
+    if (!group || !selection) return;
+    const csv = buildSelectionCsv(group.log, selection, group.timeOffset, unitSystem, unitOverrides);
+    if (!csv) return;
+    try {
+      await navigator.clipboard.writeText(csv);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard unavailable (insecure context / denied)
+    }
+  };
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <div ref={containerRef} />
+      {copyBtn && (
+        <button
+          onClick={handleCopyCsv}
+          title="Copy CSV of all channels over this range to the clipboard"
+          className="absolute z-20 flex items-center gap-1 px-1.5 py-0.5 rounded bg-popover/95 border border-border text-[10px] font-medium text-foreground hover:bg-muted cursor-pointer shadow"
+          style={{ left: copyBtn.left, top: copyBtn.top + 3, transform: "translateX(calc(-100% - 3px))" }}
+        >
+          {copied ? "Copied!" : "Copy CSV"}
+        </button>
+      )}
+    </div>
+  );
 }

@@ -443,10 +443,11 @@ export function TracePanel({
           </div>
         ) : (
           <>
-            {traces.map((trace) => (
+            {traces.map((trace, i) => (
               <TraceContainer
                 key={trace.id}
                 trace={trace}
+                isTopTrace={i === 0}
                 logs={logs}
                 width={containerWidth - 24}
                 syncKey={syncKey}

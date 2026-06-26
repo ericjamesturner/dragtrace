@@ -84,6 +84,7 @@ interface Props {
   // Race-start marker line style + setter (global; persisted in config).
   raceLine?: { color?: string; width?: number; dash?: number[] };
   onSetRaceLineStyle?: (style: { color?: string; width?: number; dash?: number[] }) => void;
+  isTopTrace?: boolean;
   maxYAxes?: number;
 }
 
@@ -136,6 +137,7 @@ export function TraceContainer({
   onToggleTimeslipExpand,
   raceLine,
   onSetRaceLineStyle,
+  isTopTrace,
   maxYAxes,
 }: Props) {
   const [dragOver, setDragOver] = useState(false);
@@ -441,6 +443,7 @@ export function TraceContainer({
             }
             raceLine={raceLine}
             onRaceLineContextMenu={(x, y) => setRaceMenu({ x, y })}
+            isTopTrace={isTopTrace}
             previewColorKey={colorPreview?.key ?? null}
             previewColor={colorPreview?.color ?? null}
             highlightKey={hoveredChannel}
