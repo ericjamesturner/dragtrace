@@ -10,6 +10,21 @@ import { formatValue, formatDuration } from "@/lib/cursor-utils";
 const GRID_POINTS = 2000;
 const Y_AXIS_SIZE = 45;
 
+// Channels in the same scale group share a common Y axis (union range, single
+// axis) so they're directly comparable — e.g. all EGTs on one scale, engine +
+// driveshaft RPM on one scale. Returns the group id, or null for ungrouped.
+// Note: RPM matching is exact on purpose — there are many other channels
+// containing "RPM" (Idle Target RPM, Limiter RPM, TM Engine RPM…) that must NOT
+// be grouped with engine/driveshaft RPM.
+const SCALE_GROUP_LABELS: Record<string, string> = { egt: "EGT", rpm: "RPM" };
+
+function scaleGroupKey(name: string): string | null {
+  const n = name.toLowerCase();
+  if (n.includes("exhaust gas temp") || /^egt\b/.test(n)) return "egt";
+  if (name === "RPM" || name === "Driveshaft RPM") return "rpm";
+  return null;
+}
+
 /** Convert a hex color + opacity (0-1) to an rgba() string. */
 function hexToRgba(hex: string, opacity: number): string {
   if (opacity >= 1) return hex;
@@ -234,8 +249,17 @@ export function TraceChart({
       }
     }
 
-    // Group channels by name to share y-scales
-    const scaleByChannel = new Map<string, string>();
+    // Share y-scales: channels in the same scale group (EGTs, engine+driveshaft
+    // RPM) share one axis, as do same-named channels overlaid across logs.
+    // Everything else gets its own scale.
+    const scaleIdOf = (channelName: string) => {
+      const g = scaleGroupKey(channelName);
+      return g ? `g_${g}` : channelName;
+    };
+
+    const scaleKeyById = new Map<string, string>(); // scaleId -> "y0"/"y1"…
+    const channelsInScale = new Map<string, string[]>(); // scaleId -> distinct channel names
+    const scaleGroupByKey = new Map<string, string | null>(); // scaleKey -> group id (for label)
     const scaleColor = new Map<string, string>();
     // Track manual axis ranges per scale
     const scaleManualMin = new Map<string, number>();
@@ -243,28 +267,38 @@ export function TraceChart({
     const scaleMetricUnit = new Map<string, string>();
     let scaleIdx = 0;
 
-    // First pass: determine scales
+    // First pass: assign each channel to a scale (grouped or per-channel)
     for (const meta of seriesMeta) {
-      if (!scaleByChannel.has(meta.channelName)) {
+      const scaleId = scaleIdOf(meta.channelName);
+      if (!scaleKeyById.has(scaleId)) {
         const scaleKey = `y${scaleIdx++}`;
-        scaleByChannel.set(meta.channelName, scaleKey);
+        scaleKeyById.set(scaleId, scaleKey);
         scaleColor.set(scaleKey, meta.color);
+        scaleGroupByKey.set(scaleKey, scaleGroupKey(meta.channelName));
         const mu = metricUnitByChannel.get(meta.channelName);
         if (mu) scaleMetricUnit.set(scaleKey, mu);
       }
-      // Use manual axis ranges if set (last writer wins, but typically same channel name = same range)
-      const sk = scaleByChannel.get(meta.channelName)!;
-      if (meta.axisMin !== undefined) scaleManualMin.set(sk, meta.axisMin);
-      if (meta.axisMax !== undefined) scaleManualMax.set(sk, meta.axisMax);
+      const scaleKey = scaleKeyById.get(scaleId)!;
+      const members = channelsInScale.get(scaleId) ?? [];
+      if (!members.includes(meta.channelName)) members.push(meta.channelName);
+      channelsInScale.set(scaleId, members);
+      // Use manual axis ranges if set (per scale)
+      if (meta.axisMin !== undefined) scaleManualMin.set(scaleKey, meta.axisMin);
+      if (meta.axisMax !== undefined) scaleManualMax.set(scaleKey, meta.axisMax);
     }
 
-    // Build scales with ranges
-    for (const [channelName, scaleKey] of scaleByChannel) {
+    // Build scales, unioning the data ranges of every channel sharing the scale
+    for (const [scaleId, scaleKey] of scaleKeyById) {
       const manualMin = scaleManualMin.get(scaleKey);
       const manualMax = scaleManualMax.get(scaleKey);
-      const shared = sharedYRanges.get(channelName);
-      let autoMin = shared?.[0] ?? 0;
-      let autoMax = shared?.[1] ?? 1;
+      let autoMin = Infinity;
+      let autoMax = -Infinity;
+      for (const channelName of channelsInScale.get(scaleId) ?? []) {
+        const shared = sharedYRanges.get(channelName);
+        if (!shared) continue;
+        if (shared[0] < autoMin) autoMin = shared[0];
+        if (shared[1] > autoMax) autoMax = shared[1];
+      }
       if (autoMin === Infinity) { autoMin = 0; autoMax = 1; }
       const pad = (autoMax - autoMin) * 0.05 || 1;
       const lo = manualMin ?? (autoMin - pad);
@@ -287,7 +321,8 @@ export function TraceChart({
     // Build series and axes
     const addedScales = new Set<string>();
     for (const meta of seriesMeta) {
-      const scaleKey = scaleByChannel.get(meta.channelName)!;
+      const scaleId = scaleIdOf(meta.channelName);
+      const scaleKey = scaleKeyById.get(scaleId)!;
 
       series.push({
         label: meta.channelName,
@@ -304,8 +339,14 @@ export function TraceChart({
         if (showAxes) leftAxisCount++;
         const mu = scaleMetricUnit.get(scaleKey) ?? "";
         const displayUnit = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
+        // When 2+ channels share a group scale, label the axis with the group
+        // name (e.g. "RPM") instead of whichever channel happened to draw it.
+        const groupId = scaleGroupByKey.get(scaleKey) ?? null;
+        const memberCount = channelsInScale.get(scaleId)?.length ?? 1;
+        const baseLabel =
+          groupId && memberCount > 1 ? SCALE_GROUP_LABELS[groupId] : meta.channelName;
         const axisLabel = showAxes && showAxisLabels
-          ? (displayUnit ? `${meta.channelName} (${displayUnit})` : meta.channelName)
+          ? (displayUnit ? `${baseLabel} (${displayUnit})` : baseLabel)
           : "";
         axes.push({
           show: showAxes,
@@ -327,7 +368,7 @@ export function TraceChart({
 
     // Add invisible spacer axes so all charts have the same total left width
     if (showAxes && maxYAxes && leftAxisCount < maxYAxes) {
-      const firstScale = scaleByChannel.values().next().value ?? "y0";
+      const firstScale = scaleKeyById.values().next().value ?? "y0";
       for (let i = leftAxisCount; i < maxYAxes; i++) {
         axes.push({
           show: true,
