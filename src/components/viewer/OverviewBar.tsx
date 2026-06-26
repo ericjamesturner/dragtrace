@@ -275,6 +275,34 @@ export function OverviewBar({
           </span>
         )}
       </div>
+      {/* Timeslip strip — its own band above the RPM minimap (60'/330'/660'/1320') */}
+      {(timeslipZones?.length ?? 0) > 0 && (
+        <div className="relative border-t border-border/40" style={{ height: 15 }}>
+          {timeslipZones!.map((z) =>
+            z.regions.map((r, i) => (
+              <div
+                key={`${z.config.id}:${i}`}
+                className="absolute inset-y-0 flex items-center justify-center overflow-hidden"
+                style={{
+                  left: `${((r.start - fullMin) / fullSpan) * 100}%`,
+                  width: `${((r.end - r.start) / fullSpan) * 100}%`,
+                  backgroundColor: r.color ?? z.config.color,
+                }}
+                title={r.label ? `${r.label} — ${r.time?.toFixed(3)}s` : z.config.label}
+              >
+                {r.label && (
+                  <span
+                    className="text-[9px] font-semibold leading-none text-white truncate px-0.5"
+                    style={{ textShadow: "0 1px 1px rgba(0,0,0,0.55)" }}
+                  >
+                    {r.label}{r.time != null ? ` ${r.time.toFixed(2)}` : ""}
+                  </span>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
       <div
         className="relative"
         style={{ height: OVERVIEW_HEIGHT, cursor }}
@@ -325,31 +353,6 @@ export function OverviewBar({
               style={{ left: `${previewLeft + previewWidth}%`, right: 0 }}
             />
           </>
-        )}
-        {/* Timeslip segments (60'/330'/660'/1320') as a labeled strip along the top */}
-        {(timeslipZones ?? []).map((z) =>
-          z.regions.map((r, i) => (
-            <div
-              key={`${z.config.id}:${i}`}
-              className="absolute top-0 pointer-events-none flex items-center justify-center overflow-hidden"
-              style={{
-                left: `${((r.start - fullMin) / fullSpan) * 100}%`,
-                width: `${((r.end - r.start) / fullSpan) * 100}%`,
-                height: 15,
-                backgroundColor: r.color ?? z.config.color,
-              }}
-              title={r.label ? `${r.label} — ${r.time?.toFixed(3)}s` : z.config.label}
-            >
-              {r.label && (
-                <span
-                  className="text-[9px] font-semibold leading-none text-white truncate px-0.5"
-                  style={{ textShadow: "0 1px 1px rgba(0,0,0,0.55)" }}
-                >
-                  {r.label}{r.time != null ? ` ${r.time.toFixed(2)}` : ""}
-                </span>
-              )}
-            </div>
-          ))
         )}
       </div>
     </div>
