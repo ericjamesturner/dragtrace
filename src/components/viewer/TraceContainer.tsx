@@ -49,6 +49,7 @@ interface Props {
   onSetChannelWidth: (logFileId: Id<"files">, channelName: string, width: number) => void;
   onSetChannelDash: (logFileId: Id<"files">, channelName: string, dash: number[] | undefined) => void;
   onSetChannelAxisRange: (logFileId: Id<"files">, channelName: string, axisMin?: number, axisMax?: number) => void;
+  onSetChannelColorBy: (logFileId: Id<"files">, channelName: string, colorBy?: string, colorByMin?: number, colorByMax?: number) => void;
   isActive: boolean;
   onSetActive: () => void;
   pinned: boolean;
@@ -95,6 +96,7 @@ export function TraceContainer({
   onSetChannelWidth,
   onSetChannelDash,
   onSetChannelAxisRange,
+  onSetChannelColorBy,
   isActive,
   onSetActive,
   pinned,
@@ -607,6 +609,7 @@ export function TraceContainer({
         onSetChannelWidth={onSetChannelWidth}
         onSetChannelDash={onSetChannelDash}
         onSetChannelAxisRange={onSetChannelAxisRange}
+        onSetChannelColorBy={onSetChannelColorBy}
         onRemoveChannel={onRemoveChannel}
         onAddChannel={onAddChannel}
         highlightZones={trace.highlightZones}

@@ -43,6 +43,7 @@ interface Props {
   onSetChannelWidth: (logFileId: Id<"files">, channelName: string, width: number) => void;
   onSetChannelDash: (logFileId: Id<"files">, channelName: string, dash: number[] | undefined) => void;
   onSetChannelAxisRange: (logFileId: Id<"files">, channelName: string, axisMin?: number, axisMax?: number) => void;
+  onSetChannelColorBy: (logFileId: Id<"files">, channelName: string, colorBy?: string, colorByMin?: number, colorByMax?: number) => void;
   onRemoveChannel: (logFileId: Id<"files">, channelName: string) => void;
   onAddChannel: (channel: ChannelOnTrace) => void;
   highlightZones?: HighlightZoneConfig[];
@@ -86,6 +87,7 @@ function ChannelSettings({
   onSetWidth,
   onSetDash,
   onSetAxisRange,
+  onSetColorBy,
   onRemove,
   channelIndex,
 }: {
@@ -99,6 +101,7 @@ function ChannelSettings({
   onSetWidth: (width: number) => void;
   onSetDash: (dash: number[] | undefined) => void;
   onSetAxisRange: (axisMin?: number, axisMax?: number) => void;
+  onSetColorBy: (colorBy?: string, colorByMin?: number, colorByMax?: number) => void;
   onRemove: () => void;
   channelIndex: number;
 }) {
@@ -115,6 +118,21 @@ function ChannelSettings({
     const axisMin = min !== undefined && !isNaN(min) ? min : undefined;
     const axisMax = max !== undefined && !isNaN(max) ? max : undefined;
     onSetAxisRange(axisMin, axisMax);
+  };
+
+  // ── Color By Channel ──
+  const [showColorByPicker, setShowColorByPicker] = useState(false);
+  const [cbLowInput, setCbLowInput] = useState(ch.colorByMin?.toString() ?? "");
+  const [cbHighInput, setCbHighInput] = useState(ch.colorByMax?.toString() ?? "");
+
+  const commitColorByRange = () => {
+    const low = cbLowInput.trim() === "" ? undefined : parseFloat(cbLowInput);
+    const high = cbHighInput.trim() === "" ? undefined : parseFloat(cbHighInput);
+    onSetColorBy(
+      ch.colorBy,
+      low !== undefined && !isNaN(low) ? low : undefined,
+      high !== undefined && !isNaN(high) ? high : undefined,
+    );
   };
 
   return (
@@ -266,6 +284,93 @@ function ChannelSettings({
                   />
                 </div>
               </div>
+          </div>
+
+          {/* Color By Channel */}
+          <div>
+            <div className="text-xs font-medium text-muted-foreground mb-1.5">Color By Channel</div>
+            {ch.colorBy ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div
+                    className="h-3 flex-1 rounded"
+                    style={{ background: "linear-gradient(to right,#0000b4,#0064ff,#00c8c8,#00c850,#b4dc00,#ffc800,#ff7800,#ff0000)" }}
+                  />
+                  <button
+                    onClick={() => { onSetColorBy(undefined, undefined, undefined); setCbLowInput(""); setCbHighInput(""); }}
+                    className="text-muted-foreground hover:text-destructive cursor-pointer shrink-0"
+                    title="Clear color-by channel"
+                  >
+                    <XIcon className="size-3.5" />
+                  </button>
+                </div>
+                <div className="text-xs text-primary font-medium truncate" title={ch.colorBy}>
+                  {ch.colorBy}
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <label className="text-xs text-muted-foreground">Low (blue)</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="auto"
+                      value={cbLowInput}
+                      onChange={(e) => setCbLowInput(e.target.value)}
+                      onBlur={commitColorByRange}
+                      onKeyDown={(e) => { if (e.key === "Enter") commitColorByRange(); }}
+                      className="w-full px-2 py-1 rounded bg-muted border border-border text-sm placeholder:text-muted-foreground outline-none focus:border-primary"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-xs text-muted-foreground">High (red)</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="auto"
+                      value={cbHighInput}
+                      onChange={(e) => setCbHighInput(e.target.value)}
+                      onBlur={commitColorByRange}
+                      onKeyDown={(e) => { if (e.key === "Enter") commitColorByRange(); }}
+                      className="w-full px-2 py-1 rounded bg-muted border border-border text-sm placeholder:text-muted-foreground outline-none focus:border-primary"
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowColorByPicker((v) => !v)}
+                  className="text-xs text-primary hover:text-primary/80 cursor-pointer"
+                >
+                  {showColorByPicker ? "Hide picker" : "Change channel"}
+                </button>
+                {showColorByPicker && (
+                  <ChannelPicker
+                    logs={log ? [log] : logs}
+                    selected={ch.colorBy}
+                    onSelect={(name) => {
+                      if (name === ch.channelName) return; // can't color by self
+                      onSetColorBy(name, ch.colorByMin, ch.colorByMax);
+                      setShowColorByPicker(false);
+                    }}
+                  />
+                )}
+              </div>
+            ) : showColorByPicker ? (
+              <ChannelPicker
+                logs={log ? [log] : logs}
+                selected=""
+                onSelect={(name) => {
+                  if (name === ch.channelName) return; // can't color by self
+                  onSetColorBy(name, ch.colorByMin, ch.colorByMax);
+                  setShowColorByPicker(false);
+                }}
+              />
+            ) : (
+              <button
+                onClick={() => setShowColorByPicker(true)}
+                className="text-sm text-primary hover:text-primary/80 cursor-pointer"
+              >
+                Color by a channel…
+              </button>
+            )}
           </div>
 
           {/* Remove */}
@@ -711,6 +816,7 @@ export function TraceSettingsPanel({
   onSetChannelWidth,
   onSetChannelDash,
   onSetChannelAxisRange,
+  onSetChannelColorBy,
   onRemoveChannel,
   onAddChannel,
   highlightZones,
@@ -830,6 +936,7 @@ export function TraceSettingsPanel({
                     onSetWidth={(width) => onSetChannelWidth(ch.logFileId, ch.channelName, width)}
                     onSetDash={(dash) => onSetChannelDash(ch.logFileId, ch.channelName, dash)}
                     onSetAxisRange={(axisMin, axisMax) => onSetChannelAxisRange(ch.logFileId, ch.channelName, axisMin, axisMax)}
+                    onSetColorBy={(colorBy, colorByMin, colorByMax) => onSetChannelColorBy(ch.logFileId, ch.channelName, colorBy, colorByMin, colorByMax)}
                     onRemove={() => onRemoveChannel(ch.logFileId, ch.channelName)}
                     channelIndex={perLogIdx.get(key)!}
                   />

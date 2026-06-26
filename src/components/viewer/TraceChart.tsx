@@ -57,6 +57,32 @@ function hexToRgba(hex: string, opacity: number): string {
   return `rgba(${r},${g},${b},${opacity})`;
 }
 
+// ── Color-by-channel gradient: blue → cyan → green → yellow → red ──
+const COLOR_STOPS: [number, number, number][] = [
+  [0, 0, 180], [0, 100, 255], [0, 200, 200], [0, 200, 80],
+  [180, 220, 0], [255, 200, 0], [255, 120, 0], [255, 0, 0],
+];
+
+/** Map a normalized value t∈[0,1] to an interpolated gradient RGB triple. */
+function valueToColor(t: number): [number, number, number] {
+  const c = Math.max(0, Math.min(1, t));
+  const idx = c * (COLOR_STOPS.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.min(lo + 1, COLOR_STOPS.length - 1);
+  const f = idx - lo;
+  return [
+    Math.round(COLOR_STOPS[lo][0] + (COLOR_STOPS[hi][0] - COLOR_STOPS[lo][0]) * f),
+    Math.round(COLOR_STOPS[lo][1] + (COLOR_STOPS[hi][1] - COLOR_STOPS[lo][1]) * f),
+    Math.round(COLOR_STOPS[lo][2] + (COLOR_STOPS[hi][2] - COLOR_STOPS[lo][2]) * f),
+  ];
+}
+
+/** Format a legend value compactly: ≥100→0dp, ≥10→1dp, else 2dp. */
+function fmtLegendVal(v: number): string {
+  const a = Math.abs(v);
+  return a >= 100 ? v.toFixed(0) : a >= 10 ? v.toFixed(1) : v.toFixed(2);
+}
+
 interface LogGroup {
   log: LoadedLog;
   channels: ChannelOnTrace[];
@@ -176,6 +202,9 @@ export function TraceChart({
   const seriesKeysRef = useRef<string[]>([]);
   const seriesColorsRef = useRef<string[]>([]);
   const seriesWidthsRef = useRef<number[]>([]);
+  // True for series indices rendered as a color-by gradient (no solid stroke),
+  // so the hover/dim highlight effect leaves their transparent stroke alone.
+  const seriesColorByRef = useRef<boolean[]>([]);
   const onSelectionRef = useRef(onSelection);
   onSelectionRef.current = onSelection;
   const onClearSelectionRef = useRef(onClearSelection);
@@ -212,7 +241,7 @@ export function TraceChart({
   // Build a stable key for dependencies
   const groupsKey = logGroups
     .map((g) =>
-      `${g.log.fileId}:${g.timeOffset}:${g.channels.map((c) => `${c.channelName}:${c.color ?? ""}:${c.opacity ?? ""}:${c.width ?? ""}:${(c.dash ?? []).join(".")}:${c.axisMin ?? ""}:${c.axisMax ?? ""}`).join(",")}`
+      `${g.log.fileId}:${g.timeOffset}:${g.channels.map((c) => `${c.channelName}:${c.color ?? ""}:${c.opacity ?? ""}:${c.width ?? ""}:${(c.dash ?? []).join(".")}:${c.axisMin ?? ""}:${c.axisMax ?? ""}:${c.colorBy ?? ""}:${c.colorByMin ?? ""}:${c.colorByMax ?? ""}`).join(",")}`
     )
     .join("|");
 
@@ -244,6 +273,12 @@ export function TraceChart({
       dash?: number[];
       axisMin?: number;
       axisMax?: number;
+      // Color-by-channel: paint this line as a gradient of a 3rd channel's value.
+      colorBy?: string;
+      colorByVals?: (number | null)[] | null;
+      colorByMetricUnit?: string;
+      colorByMin?: number;
+      colorByMax?: number;
     }
     const seriesData: (number | null)[][] = [];
     const seriesMeta: SeriesMeta[] = [];
@@ -262,6 +297,17 @@ export function TraceChart({
 
         const resolved = resolveChannelStyle(ch, chIdx, group.log.logIndex);
 
+        // Color-by: resample the 3rd channel onto the same grid + capture its unit.
+        let colorByVals: (number | null)[] | null = null;
+        let colorByMetricUnit: string | undefined;
+        if (ch.colorBy) {
+          const cbData = session.channels.get(ch.colorBy);
+          if (cbData) {
+            colorByVals = resampleToGrid(session.timestamps, cbData, group.timeOffset, gridTs);
+            colorByMetricUnit = group.log.parsed.channelDefs.find((d) => d.name === ch.colorBy)?.metricUnit;
+          }
+        }
+
         seriesMeta.push({
           key: `${ch.logFileId}:${ch.channelName}`,
           channelName: ch.channelName,
@@ -271,6 +317,11 @@ export function TraceChart({
           dash: resolved.dash,
           axisMin: ch.axisMin,
           axisMax: ch.axisMax,
+          colorBy: ch.colorBy,
+          colorByVals,
+          colorByMetricUnit,
+          colorByMin: ch.colorByMin,
+          colorByMax: ch.colorByMax,
         });
       }
     }
@@ -371,13 +422,16 @@ export function TraceChart({
       const scaleId = scaleIdOf(meta.channelName);
       const scaleKey = scaleKeyById.get(scaleId)!;
 
+      const isColorBy = !!(meta.colorBy && meta.colorByVals);
       series.push({
         label: meta.channelName,
-        stroke: hexToRgba(meta.color, meta.opacity),
+        stroke: isColorBy ? "transparent" : hexToRgba(meta.color, meta.opacity),
         width: meta.width,
         scale: scaleKey,
         spanGaps: false,
         dash: meta.dash,
+        // Suppress uPlot's own line; the gradient is painted by the draw plugin.
+        ...(isColorBy ? { paths: (() => null) as unknown as uPlot.Series.PathBuilder } : {}),
       });
 
       if (!addedScales.has(scaleKey)) {
@@ -452,6 +506,112 @@ export function TraceChart({
                 ctx.lineTo(x0, u.bbox.top + u.bbox.height);
                 ctx.stroke();
                 ctx.restore();
+              }
+            },
+          ],
+        },
+      });
+    }
+
+    // Color-by-channel gradient plugin — paints each colorBy line segment-by-
+    // segment along the blue→red gradient, plus a right-edge legend bar (only
+    // when exactly one colorBy line is active, to avoid overlap). Drawn before
+    // selection/zones so those overlay on top.
+    const colorBySeries = seriesMeta
+      .map((m, i) => ({ meta: m, idx: i }))
+      .filter((s) => s.meta.colorBy && s.meta.colorByVals);
+    if (colorBySeries.length > 0) {
+      plugins.push({
+        hooks: {
+          draw: [
+            (u: uPlot) => {
+              const ctx = u.ctx;
+              const dpr = devicePixelRatio;
+              const left = u.bbox.left;
+              const right = u.bbox.left + u.bbox.width;
+
+              for (const { meta, idx } of colorBySeries) {
+                const yVals = seriesData[idx];
+                const cbVals = meta.colorByVals!;
+                const scaleId = scaleIdOf(meta.channelName);
+                const scaleKey = scaleKeyById.get(scaleId)!;
+                const mu = meta.colorByMetricUnit;
+                const conv = (v: number) =>
+                  mu ? convertForDisplay(v, mu, unitSystem, unitOverrides) : v;
+
+                // Color range over converted colorBy values, with optional lock.
+                let cMin = Infinity;
+                let cMax = -Infinity;
+                for (let j = 0; j < cbVals.length; j++) {
+                  const cv = cbVals[j];
+                  if (cv == null) continue;
+                  const d = conv(cv);
+                  if (d < cMin) cMin = d;
+                  if (d > cMax) cMax = d;
+                }
+                if (cMin === Infinity) continue; // no colorBy data in view
+                if (meta.colorByMin != null) cMin = meta.colorByMin;
+                if (meta.colorByMax != null) cMax = meta.colorByMax;
+                const span = cMax - cMin || 1;
+
+                ctx.save();
+                ctx.lineWidth = (meta.width || 1.5) * dpr;
+                ctx.lineCap = "round";
+                let prevPx = -Infinity;
+                let prevPy = -Infinity;
+                let prevOk = false;
+                for (let j = 0; j < gridTs.length; j++) {
+                  const yv = yVals[j];
+                  if (yv == null) { prevOk = false; continue; }
+                  const px = u.valToPos(gridTs[j], "x", true);
+                  const py = u.valToPos(yv, scaleKey, true);
+                  if (
+                    prevOk &&
+                    (Math.abs(px - prevPx) >= 0.5 || Math.abs(py - prevPy) >= 0.5)
+                  ) {
+                    if ((px >= left && px <= right) || (prevPx >= left && prevPx <= right)) {
+                      const cv = cbVals[j];
+                      const t = cv == null ? 0 : (conv(cv) - cMin) / span;
+                      const [r, g, b] = valueToColor(t);
+                      ctx.strokeStyle = `rgb(${r},${g},${b})`;
+                      ctx.beginPath();
+                      ctx.moveTo(prevPx, prevPy);
+                      ctx.lineTo(px, py);
+                      ctx.stroke();
+                    }
+                  }
+                  prevPx = px;
+                  prevPy = py;
+                  prevOk = true;
+                }
+                ctx.restore();
+
+                // Legend bar — only when a single colorBy line is shown.
+                if (colorBySeries.length === 1) {
+                  const lw = 12 * dpr;
+                  const lh = Math.min(u.bbox.height * 0.6, 200 * dpr);
+                  const lx = u.bbox.left + u.bbox.width - lw - 8 * dpr;
+                  const ly = u.bbox.top + (u.bbox.height - lh) / 2;
+                  ctx.save();
+                  for (let k = 0; k < lh; k++) {
+                    const [r, g, b] = valueToColor(1 - k / lh);
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                    ctx.fillRect(lx, ly + k, lw, 1.5);
+                  }
+                  ctx.strokeStyle = "rgba(255,255,255,0.15)";
+                  ctx.lineWidth = 1;
+                  ctx.strokeRect(lx, ly, lw, lh);
+                  ctx.fillStyle = "rgba(255,255,255,0.6)";
+                  ctx.font = `${9 * dpr}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+                  ctx.textAlign = "left";
+                  ctx.textBaseline = "top";
+                  ctx.fillText(fmtLegendVal(cMax), lx + lw + 3 * dpr, ly);
+                  ctx.textBaseline = "bottom";
+                  ctx.fillText(fmtLegendVal(cMin), lx + lw + 3 * dpr, ly + lh);
+                  ctx.textBaseline = "middle";
+                  ctx.fillText(meta.colorBy!, lx + lw + 3 * dpr, ly + lh / 2);
+                  ctx.restore();
+                }
               }
             },
           ],
@@ -675,6 +835,7 @@ export function TraceChart({
     seriesKeysRef.current = seriesMeta.map((m) => m.key);
     seriesColorsRef.current = seriesMeta.map((m) => hexToRgba(m.color, m.opacity));
     seriesWidthsRef.current = seriesMeta.map((m) => m.width);
+    seriesColorByRef.current = seriesMeta.map((m) => !!(m.colorBy && m.colorByVals));
 
     // Detect clicks (mousedown+mouseup with minimal movement) on the chart
     const over = plot.over; // uPlot's interaction overlay element
@@ -864,10 +1025,16 @@ export function TraceChart({
     const keys = seriesKeysRef.current;
     const colors = seriesColorsRef.current;
     const widths = seriesWidthsRef.current;
+    const colorByFlags = seriesColorByRef.current;
 
     for (let i = 0; i < keys.length; i++) {
       const sIdx = i + 1; // series[0] is x-axis
       if (!u.series[sIdx]) continue;
+
+      // Color-by-gradient series have a transparent uPlot stroke (the gradient
+      // is painted by the draw plugin); never restyle them or hover/dim would
+      // paint a solid line over the gradient.
+      if (colorByFlags[i]) continue;
 
       if (highlightKey === null) {
         // Restore original
