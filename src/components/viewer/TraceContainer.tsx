@@ -634,15 +634,16 @@ export function TraceContainer({
         const seg = "flex-1 h-6 rounded border flex items-center justify-center cursor-pointer";
         return (
           <div
-            className="fixed z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[190px]"
+            className="fixed z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[270px]"
             style={{ left: contextMenu.x, top: contextMenu.y }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-3 pt-0.5 pb-1 text-[11px] text-muted-foreground truncate max-w-[210px]">
+            <div className="px-3 pt-0.5 pb-1 text-[11px] text-muted-foreground truncate max-w-[250px]">
               {contextMenu.channelName}
             </div>
-            {/* Quick color swatches — hover to preview live on the line, click to set */}
-            <div className="px-3 py-1 flex flex-wrap gap-1.5 max-w-[210px]">
+            {/* Quick color swatches — hover to preview live on the line, click to set.
+                Last two: pick ANY color (rainbow), and reset to default. */}
+            <div className="px-3 py-1 flex flex-nowrap items-center gap-1">
               {CHART_COLORS.map((c) => (
                 <button
                   key={c}
@@ -650,14 +651,29 @@ export function TraceContainer({
                   onMouseEnter={() => setColorPreview({ key: cmKey, color: c })}
                   onMouseLeave={() => setColorPreview(null)}
                   onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c); setColorPreview(null); }}
-                  className="w-4 h-4 rounded-full border border-white/20 cursor-pointer hover:scale-110 transition-transform"
+                  className="w-4 h-4 rounded-full border border-white/20 cursor-pointer hover:scale-110 transition-transform shrink-0"
                   style={{ backgroundColor: c }}
                 />
               ))}
+              {/* Custom color — opens the native picker; previews live as you drag */}
+              <label
+                key={cmKey}
+                title="Custom color…"
+                className="w-4 h-4 rounded-full border border-white/40 cursor-pointer hover:scale-110 transition-transform shrink-0 relative overflow-hidden block"
+                style={{ background: "conic-gradient(from 90deg, #ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)" }}
+              >
+                <input
+                  type="color"
+                  defaultValue={cmCh?.color ?? "#3b82f6"}
+                  onInput={(e) => setColorPreview({ key: cmKey, color: (e.target as HTMLInputElement).value })}
+                  onChange={(e) => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, (e.target as HTMLInputElement).value); setColorPreview(null); }}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </label>
               <button
                 title="Reset to default color"
                 onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, undefined); setColorPreview(null); }}
-                className="w-4 h-4 rounded-full border border-white/30 cursor-pointer text-[9px] leading-none flex items-center justify-center text-muted-foreground hover:text-foreground"
+                className="w-4 h-4 rounded-full border border-white/30 cursor-pointer text-[9px] leading-none flex items-center justify-center text-muted-foreground hover:text-foreground shrink-0"
               >
                 ↺
               </button>
