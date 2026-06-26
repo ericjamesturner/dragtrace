@@ -432,6 +432,9 @@ function LogViewerReady({
           onAddScatter={(scatter) => dispatch({ type: "addScatter", scatter })}
           onRemoveScatter={(scatterId) => dispatch({ type: "removeScatter", scatterId })}
           onUpdateScatter={(scatterId, updates) => dispatch({ type: "updateScatter", scatterId, updates })}
+          onAddHeatmap={(heatmap) => dispatch({ type: "addHeatmap", heatmap })}
+          onRemoveHeatmap={(heatmapId) => dispatch({ type: "removeHeatmap", heatmapId })}
+          onUpdateHeatmap={(heatmapId, updates) => dispatch({ type: "updateHeatmap", heatmapId, updates })}
         />
       </div>
     </div>

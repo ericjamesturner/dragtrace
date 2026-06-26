@@ -1,11 +1,13 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { LoadedLog, TraceConfig, ChannelOnTrace, PageConfig, HighlightZoneConfig, ScatterConfig } from "@/lib/viewer-types";
+import type { LoadedLog, TraceConfig, ChannelOnTrace, PageConfig, HighlightZoneConfig, ScatterConfig, HeatmapConfig } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import type { UnitSystem, UnitOverrides } from "@/lib/units";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { TraceContainer } from "./TraceContainer";
 import { ScatterContainer } from "./ScatterContainer";
 import { ScatterConfigDialog } from "./ScatterConfigDialog";
+import { HeatmapContainer } from "./HeatmapContainer";
+import { HeatmapConfigDialog } from "./HeatmapConfigDialog";
 import { OverviewBar } from "./OverviewBar";
 import { PlusIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
@@ -58,6 +60,9 @@ interface Props {
   onAddScatter: (scatter: Omit<ScatterConfig, "id">) => void;
   onRemoveScatter: (scatterId: string) => void;
   onUpdateScatter: (scatterId: string, updates: Partial<Omit<ScatterConfig, "id">>) => void;
+  onAddHeatmap: (heatmap: Omit<HeatmapConfig, "id">) => void;
+  onRemoveHeatmap: (heatmapId: string) => void;
+  onUpdateHeatmap: (heatmapId: string, updates: Partial<Omit<HeatmapConfig, "id">>) => void;
 }
 
 export function TracePanel({
@@ -108,6 +113,9 @@ export function TracePanel({
   onAddScatter,
   onRemoveScatter,
   onUpdateScatter,
+  onAddHeatmap,
+  onRemoveHeatmap,
+  onUpdateHeatmap,
 }: Props) {
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
   const [selection, setSelection] = useState<[number, number] | null>(persistedSelection ?? null);
@@ -126,8 +134,15 @@ export function TracePanel({
     { mode: "new" } | { mode: "edit"; scatter: ScatterConfig } | null
   >(null);
 
-  // Scatters live on the active page (page-local, like halog).
-  const scatters = pages.find((p) => p.id === activePageId)?.scatters ?? [];
+  // Heatmap config dialog state (new or editing an existing heatmap)
+  const [heatmapDialog, setHeatmapDialog] = useState<
+    { mode: "new" } | { mode: "edit"; heatmap: HeatmapConfig } | null
+  >(null);
+
+  // Scatters / heatmaps live on the active page (page-local, like halog).
+  const activePage = pages.find((p) => p.id === activePageId);
+  const scatters = activePage?.scatters ?? [];
+  const heatmaps = activePage?.heatmaps ?? [];
 
   // Measure container width
   useEffect(() => {
@@ -319,7 +334,7 @@ export function TracePanel({
         {pages.map((page) => {
           const isActive = page.id === activePageId;
           const isRenaming = tabRename?.id === page.id;
-          const traceCount = page.traces.length + (page.scatters?.length ?? 0);
+          const traceCount = page.traces.length + (page.scatters?.length ?? 0) + (page.heatmaps?.length ?? 0);
           return (
             <div
               key={page.id}
@@ -383,6 +398,14 @@ export function TracePanel({
             <PlusIcon className="size-3" /> Scatter
           </button>
         </Tip>
+        <Tip content="Add a heatmap / tuning-table to this page">
+          <button
+            onClick={() => setHeatmapDialog({ mode: "new" })}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+          >
+            <PlusIcon className="size-3" /> Heatmap
+          </button>
+        </Tip>
       </div>
 
       {/* Scrollable trace area */}
@@ -390,7 +413,7 @@ export function TracePanel({
         className="flex-1 overflow-y-auto overflow-x-hidden p-3 flex flex-col"
         onMouseLeave={() => setCursorTime(null)}
       >
-        {traces.length === 0 && scatters.length === 0 ? (
+        {traces.length === 0 && scatters.length === 0 && heatmaps.length === 0 ? (
           <div
             className="flex items-center justify-center h-full text-sm text-muted-foreground"
             onDragEnter={handleBlankDragEnter}
@@ -405,7 +428,7 @@ export function TracePanel({
                 </div>
               </div>
             ) : (
-              "Click \u201C+ Trace\u201D to add a trace, or \u201C+ Scatter\u201D for an XY plot, then drag channels from the sidebar"
+              "Click \u201C+ Trace\u201D to add a trace, \u201C+ Scatter\u201D for an XY plot, or \u201C+ Heatmap\u201D for a tuning table, then drag channels from the sidebar"
             )}
           </div>
         ) : (
@@ -497,6 +520,24 @@ export function TracePanel({
                 onConfigure={() => setScatterDialog({ mode: "edit", scatter: sc })}
               />
             ))}
+            {/* Heatmap / tuning-table panels (page-local) */}
+            {heatmaps.map((hm) => (
+              <HeatmapContainer
+                key={hm.id}
+                heatmap={hm}
+                logs={logs}
+                width={containerWidth - 24}
+                offsets={offsets}
+                zoomRange={zoomRange}
+                selection={selection}
+                cursorTime={cursorTime}
+                unitSystem={unitSystem}
+                unitOverrides={unitOverrides}
+                onUpdate={(u) => onUpdateHeatmap(hm.id, u)}
+                onRemove={() => onRemoveHeatmap(hm.id)}
+                onConfigure={() => setHeatmapDialog({ mode: "edit", heatmap: hm })}
+              />
+            ))}
             {/* Blank space drop zone */}
             <div
               className="flex-1 min-h-[100px]"
@@ -543,6 +584,24 @@ export function TracePanel({
               onUpdateScatter(scatterDialog.scatter.id, cfg);
             } else {
               onAddScatter(cfg);
+            }
+          }}
+        />
+      )}
+
+      {heatmapDialog && (
+        <HeatmapConfigDialog
+          open
+          onOpenChange={(o) => { if (!o) setHeatmapDialog(null); }}
+          logs={logs}
+          existing={heatmapDialog.mode === "edit" ? heatmapDialog.heatmap : undefined}
+          unitSystem={unitSystem}
+          unitOverrides={unitOverrides}
+          onSubmit={(cfg) => {
+            if (heatmapDialog.mode === "edit") {
+              onUpdateHeatmap(heatmapDialog.heatmap.id, cfg);
+            } else {
+              onAddHeatmap(cfg);
             }
           }}
         />
