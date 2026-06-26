@@ -6,10 +6,9 @@ import { evaluateZoneExpression, scanTrueRegions } from "@/lib/zone-evaluator";
 
 export interface EvaluatedZone {
   config: HighlightZoneConfig;
-  // Each region may carry its own fill color (used by timeslip overlay
-  // segments); expression zones leave it undefined and fall back to the
-  // zone-level color.
-  regions: { start: number; end: number; color?: string }[];
+  // Each region may carry its own fill color, plus a label + cumulative time
+  // (used by timeslip overlay segments); expression zones leave these undefined.
+  regions: { start: number; end: number; color?: string; label?: string; time?: number }[];
   error: string | null;
 }
 

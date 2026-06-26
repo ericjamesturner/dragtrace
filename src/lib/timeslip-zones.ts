@@ -35,7 +35,7 @@ export function buildTimeslipZones(
     if (log.raceStartTime == null) continue; // no detectable launch -> skip
     const launch = log.raceStartTime + (offsets.get(log.fileId) ?? 0);
     for (const slip of timeslipsByFile.get(log.fileId) ?? []) {
-      const regions: { start: number; end: number; color: string }[] = [];
+      const regions: { start: number; end: number; color: string; label: string; time: number }[] = [];
       let prev = launch;
       let lastLabel = "";
       let lastEt = 0;
@@ -43,7 +43,8 @@ export function buildTimeslipZones(
         const elapsed = slip[seg.key];
         if (elapsed == null || elapsed <= 0) continue;
         const end = launch + elapsed;
-        regions.push({ start: prev, end, color: seg.color });
+        // label = distance marker, time = cumulative ET at that marker
+        regions.push({ start: prev, end, color: seg.color, label: seg.label, time: elapsed });
         prev = end;
         lastLabel = seg.label;
         lastEt = elapsed;

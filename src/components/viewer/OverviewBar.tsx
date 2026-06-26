@@ -326,20 +326,29 @@ export function OverviewBar({
             />
           </>
         )}
-        {/* Timeslip segments (60'/330'/660'/1320') as a strip along the bottom */}
+        {/* Timeslip segments (60'/330'/660'/1320') as a labeled strip along the top */}
         {(timeslipZones ?? []).map((z) =>
           z.regions.map((r, i) => (
             <div
               key={`${z.config.id}:${i}`}
-              className="absolute bottom-0 pointer-events-none"
+              className="absolute top-0 pointer-events-none flex items-center justify-center overflow-hidden"
               style={{
                 left: `${((r.start - fullMin) / fullSpan) * 100}%`,
                 width: `${((r.end - r.start) / fullSpan) * 100}%`,
-                height: 7,
+                height: 15,
                 backgroundColor: r.color ?? z.config.color,
               }}
-              title={z.config.label}
-            />
+              title={r.label ? `${r.label} — ${r.time?.toFixed(3)}s` : z.config.label}
+            >
+              {r.label && (
+                <span
+                  className="text-[9px] font-semibold leading-none text-white truncate px-0.5"
+                  style={{ textShadow: "0 1px 1px rgba(0,0,0,0.55)" }}
+                >
+                  {r.label}{r.time != null ? ` ${r.time.toFixed(2)}` : ""}
+                </span>
+              )}
+            </div>
           ))
         )}
       </div>
