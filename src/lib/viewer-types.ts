@@ -72,6 +72,10 @@ export interface ChannelOnTrace {
   dash?: number[];
   axisMin?: number;
   axisMax?: number;
+  // Color-by-channel: color this line by a 3rd channel's value (gradient).
+  colorBy?: string;
+  colorByMin?: number;
+  colorByMax?: number;
 }
 
 export interface HighlightZoneConfig {
@@ -80,6 +84,9 @@ export interface HighlightZoneConfig {
   color: string;
   label: string;
   enabled: boolean;
+  // Vertical position of the zone label/strip row, as a fraction (0..1) of
+  // chart height. undefined = default stacked position.
+  labelYFraction?: number;
 }
 
 export interface TraceConfig {
@@ -90,10 +97,48 @@ export interface TraceConfig {
   highlightZones?: HighlightZoneConfig[];
 }
 
+// ── Non-trace viz panel types, persisted inside the same workspace JSON blob ──
+
+export interface ScatterConfig {
+  id: string;
+  logFileId: Id<"files">;
+  xChannel: string;
+  yChannel: string;
+  colorChannel?: string;
+  height: number;
+  pointSize?: number;
+  opacity?: number;
+}
+
+export type HeatmapAggregation = "average" | "min" | "max" | "count";
+
+export interface HeatmapConfig {
+  id: string;
+  logFileId: Id<"files">;
+  xChannel: string;
+  yChannel: string;
+  valueChannel: string;
+  xBins: number;
+  yBins: number;
+  height: number;
+  aggregation: HeatmapAggregation;
+}
+
+// An AI-suggested scatter pairing (a recommendation, not a chart instance).
+export interface ScatterSuggestion {
+  xChannel: string;
+  yChannel: string;
+  colorChannel?: string;
+  label: string;
+  description: string;
+}
+
 export interface PageConfig {
   id: string;
   label: string;
   traces: TraceConfig[];
+  scatters?: ScatterConfig[];
+  heatmaps?: HeatmapConfig[];
 }
 
 export interface ViewerConfig {
@@ -106,6 +151,17 @@ export interface ViewerConfig {
   mirroredLogIds?: string[];
   unitSystem?: UnitSystem;
   unitOverrides?: UnitOverrides;
+  // Cursor-centered mouse-wheel zoom (default on; factor default 1.25).
+  wheelZoomEnabled?: boolean;
+  wheelZoomFactor?: number;
+  // Show AVG over a drag-selected range in the readout (default on).
+  avgOnSelection?: boolean;
+  // Timeslip overlay strip on traces.
+  showTimeslip?: boolean;
+  expandedTimeslipIds?: string[];
+  // AI scatter suggestions cached for the current set of loaded channels.
+  scatterSuggestions?: ScatterSuggestion[];
+  scatterSuggestionsKey?: string;
 }
 
 export type ViewerAction =
@@ -136,6 +192,19 @@ export type ViewerAction =
   | { type: "updateZone"; traceId: string; zoneId: string; updates: Partial<Omit<HighlightZoneConfig, "id">> }
   | { type: "removeZone"; traceId: string; zoneId: string }
   | { type: "toggleZone"; traceId: string; zoneId: string }
+  | { type: "setWheelZoomEnabled"; enabled: boolean }
+  | { type: "setWheelZoomFactor"; factor: number }
+  | { type: "toggleAvgOnSelection" }
+  | { type: "setChannelColorBy"; traceId: string; logFileId: Id<"files">; channelName: string; colorBy: string | undefined; colorByMin?: number; colorByMax?: number }
+  | { type: "toggleTimeslip" }
+  | { type: "toggleTimeslipExpand"; id: string }
+  | { type: "addScatter"; scatter: Omit<ScatterConfig, "id">; id?: string }
+  | { type: "removeScatter"; scatterId: string }
+  | { type: "updateScatter"; scatterId: string; updates: Partial<Omit<ScatterConfig, "id">> }
+  | { type: "addHeatmap"; heatmap: Omit<HeatmapConfig, "id">; id?: string }
+  | { type: "removeHeatmap"; heatmapId: string }
+  | { type: "updateHeatmap"; heatmapId: string; updates: Partial<Omit<HeatmapConfig, "id">> }
+  | { type: "setScatterSuggestions"; suggestions: ScatterSuggestion[]; key: string }
   | { type: "purgeFile"; logFileId: Id<"files"> };
 
 let traceCounter = 0;
@@ -372,6 +441,87 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
           ),
         })),
       };
+    case "setWheelZoomEnabled":
+      return { ...state, wheelZoomEnabled: action.enabled };
+    case "setWheelZoomFactor":
+      return { ...state, wheelZoomFactor: action.factor };
+    case "toggleAvgOnSelection":
+      return { ...state, avgOnSelection: !(state.avgOnSelection ?? true) };
+    case "setChannelColorBy":
+      return {
+        ...state,
+        pages: mapChannelInPages(
+          state.pages, action.traceId, action.logFileId, action.channelName,
+          (c) => ({ ...c, colorBy: action.colorBy, colorByMin: action.colorByMin, colorByMax: action.colorByMax }),
+        ),
+      };
+    case "toggleTimeslip":
+      return { ...state, showTimeslip: !state.showTimeslip };
+    case "toggleTimeslipExpand": {
+      const ids = state.expandedTimeslipIds ?? [];
+      const has = ids.includes(action.id);
+      return { ...state, expandedTimeslipIds: has ? ids.filter((i) => i !== action.id) : [...ids, action.id] };
+    }
+    case "addScatter": {
+      const id = action.id ?? `scatter-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      return {
+        ...state,
+        pages: state.pages.map((p) =>
+          p.id === state.activePageId
+            ? { ...p, scatters: [...(p.scatters ?? []), { ...action.scatter, id }] }
+            : p,
+        ),
+      };
+    }
+    case "removeScatter":
+      return {
+        ...state,
+        pages: state.pages.map((p) => ({
+          ...p,
+          scatters: (p.scatters ?? []).filter((s) => s.id !== action.scatterId),
+        })),
+      };
+    case "updateScatter":
+      return {
+        ...state,
+        pages: state.pages.map((p) => ({
+          ...p,
+          scatters: (p.scatters ?? []).map((s) =>
+            s.id === action.scatterId ? { ...s, ...action.updates } : s,
+          ),
+        })),
+      };
+    case "addHeatmap": {
+      const id = action.id ?? `hm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      return {
+        ...state,
+        pages: state.pages.map((p) =>
+          p.id === state.activePageId
+            ? { ...p, heatmaps: [...(p.heatmaps ?? []), { ...action.heatmap, id }] }
+            : p,
+        ),
+      };
+    }
+    case "removeHeatmap":
+      return {
+        ...state,
+        pages: state.pages.map((p) => ({
+          ...p,
+          heatmaps: (p.heatmaps ?? []).filter((h) => h.id !== action.heatmapId),
+        })),
+      };
+    case "updateHeatmap":
+      return {
+        ...state,
+        pages: state.pages.map((p) => ({
+          ...p,
+          heatmaps: (p.heatmaps ?? []).map((h) =>
+            h.id === action.heatmapId ? { ...h, ...action.updates } : h,
+          ),
+        })),
+      };
+    case "setScatterSuggestions":
+      return { ...state, scatterSuggestions: action.suggestions, scatterSuggestionsKey: action.key };
     case "purgeFile": {
       const fid = action.logFileId as string;
       return {
@@ -386,6 +536,8 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
               channels: t.channels.filter((c) => (c.logFileId as string) !== fid),
             }))
             .filter((t) => t.channels.length > 0),
+          ...(page.scatters ? { scatters: page.scatters.filter((s) => (s.logFileId as string) !== fid) } : {}),
+          ...(page.heatmaps ? { heatmaps: page.heatmaps.filter((h) => (h.logFileId as string) !== fid) } : {}),
         })),
       };
     }
@@ -611,6 +763,10 @@ export function remapConfigToFiles(
           ),
       }))
       .filter((trace) => trace.channels.length > 0),
+    // Non-trace viz panels reference a single log; remap stale ids to a loaded
+    // log (channels are shared across same-vehicle logs).
+    ...(page.scatters ? { scatters: page.scatters.map((s) => loadedFileIds.has(s.logFileId as string) ? s : { ...s, logFileId: logs[0].fileId }) } : {}),
+    ...(page.heatmaps ? { heatmaps: page.heatmaps.map((h) => loadedFileIds.has(h.logFileId as string) ? h : { ...h, logFileId: logs[0].fileId }) } : {}),
   }));
 
   return {
