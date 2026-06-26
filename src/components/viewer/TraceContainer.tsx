@@ -24,6 +24,14 @@ const STYLE_OPTIONS: { label: string; dash: number[] | undefined }[] = [
   { label: "Dotted", dash: [2, 4] },
 ];
 
+// Race line defaults to dashed when unset, so "Solid" is an explicit [] (empty)
+// to distinguish it from "use default".
+const RACE_STYLE_OPTIONS: { label: string; dash: number[] }[] = [
+  { label: "Solid", dash: [] },
+  { label: "Dashed", dash: [7, 5] },
+  { label: "Dotted", dash: [2, 4] },
+];
+
 interface Props {
   trace: TraceConfig;
   logs: LoadedLog[];
@@ -73,6 +81,9 @@ interface Props {
   timeslipZones?: EvaluatedZone[];
   expandedTimeslipIds?: string[];
   onToggleTimeslipExpand?: (id: string) => void;
+  // Race-start marker line style + setter (global; persisted in config).
+  raceLine?: { color?: string; width?: number; dash?: number[] };
+  onSetRaceLineStyle?: (style: { color?: string; width?: number; dash?: number[] }) => void;
   maxYAxes?: number;
 }
 
@@ -123,12 +134,16 @@ export function TraceContainer({
   timeslipZones,
   expandedTimeslipIds,
   onToggleTimeslipExpand,
+  raceLine,
+  onSetRaceLineStyle,
   maxYAxes,
 }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const resizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  // Race-start marker line right-click menu.
+  const [raceMenu, setRaceMenu] = useState<{ x: number; y: number } | null>(null);
   // Live color preview while hovering a swatch in the context menu.
   const [colorPreview, setColorPreview] = useState<{ key: string; color: string } | null>(null);
   // Clear any preview whenever the menu opens, moves, or closes.
@@ -206,10 +221,10 @@ export function TraceContainer({
     document.addEventListener("mouseup", handleUp);
   }, [legendPos]);
 
-  // Close context menu on click outside or escape
+  // Close context menus on click outside or escape
   useEffect(() => {
-    if (!contextMenu) return;
-    const close = () => setContextMenu(null);
+    if (!contextMenu && !raceMenu) return;
+    const close = () => { setContextMenu(null); setRaceMenu(null); };
     const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
     window.addEventListener("click", close);
     window.addEventListener("keydown", handleKey);
@@ -217,7 +232,7 @@ export function TraceContainer({
       window.removeEventListener("click", close);
       window.removeEventListener("keydown", handleKey);
     };
-  }, [contextMenu]);
+  }, [contextMenu, raceMenu]);
 
   // Group channels by log file
   const channelsByLog = new Map<Id<"files">, ChannelOnTrace[]>();
@@ -424,6 +439,8 @@ export function TraceContainer({
             onChannelContextMenu={(logFileId, channelName, x, y) =>
               setContextMenu({ x, y, logFileId: logFileId as Id<"files">, channelName })
             }
+            raceLine={raceLine}
+            onRaceLineContextMenu={(x, y) => setRaceMenu({ x, y })}
             previewColorKey={colorPreview?.key ?? null}
             previewColor={colorPreview?.color ?? null}
             highlightKey={hoveredChannel}
@@ -739,6 +756,92 @@ export function TraceContainer({
             >
               Remove channel
             </button>
+          </div>
+        );
+      })()}
+
+      {/* Race-start marker line styling menu (right-click the race line) */}
+      {raceMenu && (() => {
+        const cur = raceLine ?? {};
+        const curW = cur.width ?? 1.5;
+        const curDash = cur.dash;
+        const set = (u: { color?: string; width?: number; dash?: number[] }) =>
+          onSetRaceLineStyle?.({ color: cur.color, width: cur.width, dash: cur.dash, ...u });
+        const seg = "flex-1 h-6 rounded border flex items-center justify-center cursor-pointer";
+        return (
+          <div
+            className="fixed z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[270px]"
+            style={{ left: raceMenu.x, top: raceMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 pt-0.5 pb-1 text-[11px] text-muted-foreground">Race line</div>
+            <div className="px-3 py-1 flex flex-nowrap items-center gap-1">
+              {CHART_COLORS.map((c) => (
+                <button
+                  key={c}
+                  title={c}
+                  onClick={() => set({ color: c })}
+                  className="w-4 h-4 rounded-full border border-white/20 cursor-pointer hover:scale-110 transition-transform shrink-0"
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+              <label
+                title="Custom color…"
+                className="w-4 h-4 rounded-full border border-white/40 cursor-pointer hover:scale-110 transition-transform shrink-0 relative overflow-hidden block"
+                style={{ background: "conic-gradient(from 90deg, #ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)" }}
+              >
+                <input
+                  type="color"
+                  defaultValue={cur.color ?? "#ffffff"}
+                  onChange={(e) => set({ color: (e.target as HTMLInputElement).value })}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </label>
+              <button
+                title="Reset to default color"
+                onClick={() => set({ color: undefined })}
+                className="w-4 h-4 rounded-full border border-white/30 cursor-pointer text-[9px] leading-none flex items-center justify-center text-muted-foreground hover:text-foreground shrink-0"
+              >
+                ↺
+              </button>
+            </div>
+            <div className="px-3 py-1">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Width</div>
+              <div className="flex gap-1">
+                {WIDTH_OPTIONS.map((w) => (
+                  <button
+                    key={w}
+                    title={`${w}px`}
+                    onClick={() => set({ width: w })}
+                    className={`${seg} ${Math.abs(curW - w) < 0.01 ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
+                  >
+                    <div className="w-5 rounded-full bg-foreground/80" style={{ height: w }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="px-3 py-1">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Style</div>
+              <div className="flex gap-1">
+                {RACE_STYLE_OPTIONS.map((s) => {
+                  // undefined dash renders as the dashed default, so treat it as such here.
+                  const effDash = curDash ?? [7, 5];
+                  const active = JSON.stringify(effDash) === JSON.stringify(s.dash);
+                  return (
+                    <button
+                      key={s.label}
+                      title={s.label}
+                      onClick={() => set({ dash: s.dash })}
+                      className={`${seg} ${active ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
+                    >
+                      <svg width="30" height="6" viewBox="0 0 30 6" className="text-foreground/80">
+                        <line x1="1" y1="3" x2="29" y2="3" stroke="currentColor" strokeWidth="1.5" strokeDasharray={s.dash.length ? s.dash.join(",") : undefined} />
+                      </svg>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         );
       })()}

@@ -61,6 +61,8 @@ interface Props {
   timeslipZones: EvaluatedZone[];
   expandedTimeslipIds: string[];
   onToggleTimeslipExpand: (id: string) => void;
+  raceLine?: { color?: string; width?: number; dash?: number[] };
+  onSetRaceLineStyle?: (style: { color?: string; width?: number; dash?: number[] }) => void;
   scatterSuggestions?: ScatterSuggestion[];
   onAddScatter: (scatter: Omit<ScatterConfig, "id">) => void;
   onRemoveScatter: (scatterId: string) => void;
@@ -115,6 +117,8 @@ export function TracePanel({
   timeslipZones,
   expandedTimeslipIds,
   onToggleTimeslipExpand,
+  raceLine,
+  onSetRaceLineStyle,
   scatterSuggestions,
   onAddScatter,
   onRemoveScatter,
@@ -505,6 +509,8 @@ export function TracePanel({
                 timeslipZones={NO_TIMESLIP_ZONES}
                 expandedTimeslipIds={expandedTimeslipIds}
                 onToggleTimeslipExpand={onToggleTimeslipExpand}
+                raceLine={raceLine}
+                onSetRaceLineStyle={onSetRaceLineStyle}
                 maxYAxes={maxYAxes}
               />
             ))}

@@ -118,6 +118,9 @@ interface Props {
   onMoveZoneLabel?: (zoneId: string, fraction: number) => void;
   // Right-click a line: opens that channel's context menu (nearest series hit-test).
   onChannelContextMenu?: (logFileId: string, channelName: string, clientX: number, clientY: number) => void;
+  // Race-start marker line style + right-click handler.
+  raceLine?: { color?: string; width?: number; dash?: number[] };
+  onRaceLineContextMenu?: (clientX: number, clientY: number) => void;
   // Live color preview (e.g. hovering a swatch): transiently strokes the matching
   // series without committing. key = "logFileId:channelName".
   previewColorKey?: string | null;
@@ -203,6 +206,8 @@ export function TraceChart({
   onToggleZoneExpand,
   onMoveZoneLabel,
   onChannelContextMenu,
+  raceLine,
+  onRaceLineContextMenu,
   previewColorKey,
   previewColor,
   highlightKey,
@@ -227,6 +232,8 @@ export function TraceChart({
   onCursorRef.current = onCursorTime;
   const onChannelContextMenuRef = useRef(onChannelContextMenu);
   onChannelContextMenuRef.current = onChannelContextMenu;
+  const onRaceLineContextMenuRef = useRef(onRaceLineContextMenu);
+  onRaceLineContextMenuRef.current = onRaceLineContextMenu;
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   // Wheel-zoom refs — kept fresh every render so the native wheel handler never
@@ -286,6 +293,9 @@ export function TraceChart({
   const rangesKey = Array.from(sharedYRanges.entries())
     .map(([k, [min, max]]) => `${k}:${min}:${max}`)
     .join("|");
+
+  // Race-line style serialized so the chart rebuilds when it changes.
+  const raceLineKey = `${raceLine?.color ?? ""}:${raceLine?.width ?? ""}:${(raceLine?.dash ?? []).join(",")}`;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -535,9 +545,10 @@ export function TraceChart({
                 const x0 = u.valToPos(markerTime, "x", true);
                 if (x0 < u.bbox.left || x0 > u.bbox.left + u.bbox.width) continue;
                 ctx.save();
-                ctx.strokeStyle = "rgba(239, 68, 68, 0.6)";
-                ctx.lineWidth = 1.5;
-                ctx.setLineDash([4, 3]);
+                ctx.strokeStyle = raceLine?.color ?? "rgba(255, 255, 255, 0.75)";
+                ctx.lineWidth = (raceLine?.width ?? 1.5) * devicePixelRatio;
+                // undefined = default dashed; [] = explicit solid; else the dash pattern.
+                ctx.setLineDash((raceLine?.dash ?? [7, 5]).map((d) => d * devicePixelRatio));
                 ctx.beginPath();
                 ctx.moveTo(x0, u.bbox.top);
                 ctx.lineTo(x0, u.bbox.top + u.bbox.height);
@@ -1124,11 +1135,23 @@ export function TraceChart({
     // Hit-test: at the cursor x, find the series whose value is nearest (in
     // pixels) to the cursor y, map its series key back to {logFileId, channel}.
     const onContextMenuChart = (e: MouseEvent) => {
-      if (!onChannelContextMenuRef.current) return;
-      e.preventDefault();
+      if (!onChannelContextMenuRef.current && !onRaceLineContextMenuRef.current) return;
       const rect = over.getBoundingClientRect();
       const cssX = e.clientX - rect.left;
       const cssY = e.clientY - rect.top;
+      // Race-start marker line takes priority when the cursor is near it (x).
+      if (onRaceLineContextMenuRef.current && raceStartTimes.length > 0) {
+        for (const rs of raceStartTimes) {
+          const mx = plot.valToPos(rs.time + rs.offset, "x", false); // CSS px
+          if (Math.abs(cssX - mx) <= 6) {
+            e.preventDefault();
+            onRaceLineContextMenuRef.current(e.clientX, e.clientY);
+            return;
+          }
+        }
+      }
+      if (!onChannelContextMenuRef.current) return;
+      e.preventDefault();
       const xVal = plot.posToVal(cssX, "x");
       let idx = Math.round((xVal - gridTs[0]) / step);
       idx = Math.max(0, Math.min(gridTs.length - 1, idx));
@@ -1178,6 +1201,7 @@ export function TraceChart({
     globalRange[0],
     globalRange[1],
     rangesKey,
+    raceLineKey,
     showAxes,
     showAxisLabels,
     unitSystem,

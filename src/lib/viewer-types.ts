@@ -164,6 +164,10 @@ export interface ViewerConfig {
   // AI scatter suggestions cached for the current set of loaded channels.
   scatterSuggestions?: ScatterSuggestion[];
   scatterSuggestionsKey?: string;
+  // Race-start marker line style (defaults: red, width 1.5, dash [4,3]).
+  raceLineColor?: string;
+  raceLineWidth?: number;
+  raceLineDash?: number[];
 }
 
 export type ViewerAction =
@@ -208,6 +212,7 @@ export type ViewerAction =
   | { type: "updateHeatmap"; heatmapId: string; updates: Partial<Omit<HeatmapConfig, "id">> }
   | { type: "setScatterSuggestions"; suggestions: ScatterSuggestion[]; key: string }
   | { type: "setSelection"; selection: [number, number] | null }
+  | { type: "setRaceLineStyle"; color?: string; width?: number; dash?: number[] }
   | { type: "purgeFile"; logFileId: Id<"files"> };
 
 let traceCounter = 0;
@@ -536,6 +541,8 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
           return rest;
         }),
       };
+    case "setRaceLineStyle":
+      return { ...state, raceLineColor: action.color, raceLineWidth: action.width, raceLineDash: action.dash };
     case "purgeFile": {
       const fid = action.logFileId as string;
       return {

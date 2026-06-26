@@ -440,6 +440,8 @@ function LogViewerReady({
           timeslipZones={timeslipZones}
           expandedTimeslipIds={config.expandedTimeslipIds ?? []}
           onToggleTimeslipExpand={(id) => dispatch({ type: "toggleTimeslipExpand", id })}
+          raceLine={{ color: config.raceLineColor, width: config.raceLineWidth, dash: config.raceLineDash }}
+          onSetRaceLineStyle={(s) => dispatch({ type: "setRaceLineStyle", color: s.color, width: s.width, dash: s.dash })}
           scatterSuggestions={config.scatterSuggestions ?? []}
           onAddScatter={(scatter) => dispatch({ type: "addScatter", scatter })}
           onRemoveScatter={(scatterId) => dispatch({ type: "removeScatter", scatterId })}
