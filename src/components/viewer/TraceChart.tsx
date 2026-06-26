@@ -114,6 +114,8 @@ interface Props {
   evaluatedZones?: EvaluatedZone[];
   expandedZoneIds?: Set<string>;
   onToggleZoneExpand?: (zoneId: string) => void;
+  // Persist a dragged zone-label vertical position (0..1 fraction of chart height).
+  onMoveZoneLabel?: (zoneId: string, fraction: number) => void;
   highlightKey?: string | null;
   maxYAxes?: number;
 }
@@ -193,6 +195,7 @@ export function TraceChart({
   evaluatedZones,
   expandedZoneIds,
   onToggleZoneExpand,
+  onMoveZoneLabel,
   highlightKey,
   maxYAxes,
 }: Props) {
@@ -237,6 +240,29 @@ export function TraceChart({
   expandedZoneIdsRef.current = expandedZoneIds;
   const onToggleZoneExpandRef = useRef(onToggleZoneExpand);
   onToggleZoneExpandRef.current = onToggleZoneExpand;
+  const onMoveZoneLabelRef = useRef(onMoveZoneLabel);
+  onMoveZoneLabelRef.current = onMoveZoneLabel;
+  // Live-drag override of each zone's label-row Y, keyed by zone id (chart-height
+  // fraction). Seeded from config every render — but NOT while a drag is active,
+  // so the dragged value survives interleaved re-renders until mouseup persists it.
+  const liveLabelFracRef = useRef<Record<string, number>>({});
+  const isZoneDraggingRef = useRef(false);
+  if (!isZoneDraggingRef.current) {
+    const seeded: Record<string, number> = {};
+    for (const z of evaluatedZones ?? []) {
+      if (z.config.labelYFraction != null) seeded[z.config.id] = z.config.labelYFraction;
+    }
+    liveLabelFracRef.current = seeded;
+  }
+  // Drawn label-row hit boxes (device px, over-element origin), filled each draw.
+  const zoneRowsRef = useRef<
+    {
+      id: string;
+      frac: number;
+      cbLeft: number; cbRight: number; cbTop: number; cbBottom: number;
+      pillLeft: number; pillRight: number; pillTop: number; pillBottom: number;
+    }[]
+  >([]);
 
   // Build a stable key for dependencies
   const groupsKey = logGroups
@@ -691,6 +717,7 @@ export function TraceChart({
         draw: [
           (u: uPlot) => {
             const zones = evaluatedZonesRef.current;
+            zoneRowsRef.current = []; // reflect only the current frame
             if (!zones || zones.length === 0) return;
             const ctx = u.ctx;
             const dpr = devicePixelRatio;
@@ -701,6 +728,7 @@ export function TraceChart({
             const STRIP_TOP_OFFSET = 4 * dpr;
             const CHECKBOX_SIZE = 10 * dpr;
             const CHECKBOX_GAP = 4 * dpr;
+            const PAD = 5 * dpr;
 
             const enabledZones = zones.filter((z) => z.config.enabled && z.regions.length > 0);
 
@@ -712,25 +740,41 @@ export function TraceChart({
               const g = parseInt(hex.slice(3, 5), 16);
               const b = parseInt(hex.slice(5, 7), 16);
 
-              const stripY = u.bbox.top + STRIP_TOP_OFFSET + zi * (STRIP_H + STRIP_GAP);
+              // Vertical position: a persisted/live-dragged fraction overrides the
+              // default stacked layout (undefined override => stacked).
+              const override = liveLabelFracRef.current[zone.config.id];
+              const stripY =
+                override != null
+                  ? u.bbox.top + override * u.bbox.height
+                  : u.bbox.top + STRIP_TOP_OFFSET + zi * (STRIP_H + STRIP_GAP);
+              const stripFrac =
+                override != null ? override : (stripY - u.bbox.top) / (u.bbox.height || 1);
 
-              // Draw regions
+              // Draw regions (each region may carry its own color — timeslip segments)
               for (const region of zone.regions) {
                 const x0 = Math.max(u.bbox.left, u.valToPos(region.start, "x", true));
                 const x1 = Math.min(u.bbox.left + u.bbox.width, u.valToPos(region.end, "x", true));
                 if (x1 <= x0) continue;
 
+                let rr = r, gg = g, bb = b;
+                const rc = region.color;
+                if (rc && rc.length >= 7 && rc[0] === "#") {
+                  rr = parseInt(rc.slice(1, 3), 16);
+                  gg = parseInt(rc.slice(3, 5), 16);
+                  bb = parseInt(rc.slice(5, 7), 16);
+                }
+
                 // Expanded: full-height semi-transparent band
                 if (isExpanded) {
                   ctx.save();
-                  ctx.fillStyle = `rgba(${r},${g},${b},0.12)`;
+                  ctx.fillStyle = `rgba(${rr},${gg},${bb},0.12)`;
                   ctx.fillRect(x0, u.bbox.top, x1 - x0, u.bbox.height);
                   ctx.restore();
                 }
 
                 // Always draw the strip
                 ctx.save();
-                ctx.fillStyle = `rgba(${r},${g},${b},0.7)`;
+                ctx.fillStyle = `rgba(${rr},${gg},${bb},0.7)`;
                 ctx.fillRect(x0, stripY, x1 - x0, STRIP_H);
                 ctx.restore();
               }
@@ -768,6 +812,20 @@ export function TraceChart({
               ctx.textBaseline = "middle";
               ctx.fillText(labelText, labelX + 3 * dpr, stripY + pillH / 2);
               ctx.restore();
+
+              // Stash hit boxes: checkbox (toggle) + label pill (drag handle).
+              zoneRowsRef.current.push({
+                id: zone.config.id,
+                frac: stripFrac,
+                cbLeft: cbX - 2 * dpr,
+                cbRight: cbX + CHECKBOX_SIZE + 2 * dpr,
+                cbTop: cbY - 2 * dpr,
+                cbBottom: cbY + CHECKBOX_SIZE + 2 * dpr,
+                pillLeft: labelX,
+                pillRight: labelX + pillW,
+                pillTop: stripY - PAD,
+                pillBottom: stripY + STRIP_H + PAD,
+              });
             }
           },
         ],
@@ -845,39 +903,33 @@ export function TraceChart({
     // consumed, so a finished edge drag isn't misread as a click that clears
     // the selection.
     let edgeResizing = false;
+    // Active zone-label drag (set by onZoneDown below); declared here so the
+    // click handler can ignore a release that finishes a drag.
+    let zoneDrag: { id: string; startClientY: number; startFrac: number; moved: boolean } | null = null;
     const onMouseDown = (e: MouseEvent) => { downX = e.clientX; downY = e.clientY; };
     const onMouseUp = (e: MouseEvent) => {
+      // A zone-label drag (still pending its document mouseup) must not be read
+      // as a click/checkbox toggle.
+      if (zoneDrag) return;
       if (edgeResizing) { edgeResizing = false; return; } // just resized, not a click
       const dx = Math.abs(e.clientX - downX);
       const dy = Math.abs(e.clientY - downY);
       if (dx < 5 && dy < 5) {
-        // Check if click is on a zone checkbox
-        const zones = evaluatedZonesRef.current;
-        if (zones && onToggleZoneExpandRef.current) {
+        // Check if click is on a zone checkbox — hit-test the drawn boxes so the
+        // checkbox stays aligned with a label that's been dragged off the stack.
+        if (onToggleZoneExpandRef.current) {
           const dpr = devicePixelRatio;
-          const STRIP_H = 6 * dpr;
-          const STRIP_GAP = 2 * dpr;
-          const STRIP_TOP_OFFSET = 4 * dpr;
-          const CHECKBOX_SIZE = 10 * dpr;
-          const CHECKBOX_GAP = 4 * dpr;
-
           const rect = over.getBoundingClientRect();
           const clickX = (e.clientX - rect.left) * dpr;
           const clickY = (e.clientY - rect.top) * dpr;
-
-          const enabledZones = zones.filter((z) => z.config.enabled && z.regions.length > 0);
-          for (let zi = 0; zi < enabledZones.length; zi++) {
-            const stripY = STRIP_TOP_OFFSET + zi * (STRIP_H + STRIP_GAP);
-            const cbX = CHECKBOX_GAP;
-            const cbY = stripY + (STRIP_H - CHECKBOX_SIZE) / 2;
-
+          for (const row of zoneRowsRef.current) {
             if (
-              clickX >= cbX - 2 * dpr &&
-              clickX <= cbX + CHECKBOX_SIZE + 2 * dpr &&
-              clickY >= cbY - 2 * dpr &&
-              clickY <= cbY + CHECKBOX_SIZE + 2 * dpr
+              clickX >= row.cbLeft &&
+              clickX <= row.cbRight &&
+              clickY >= row.cbTop &&
+              clickY <= row.cbBottom
             ) {
-              onToggleZoneExpandRef.current(enabledZones[zi].config.id);
+              onToggleZoneExpandRef.current(row.id);
               return; // Don't process as a regular click
             }
           }
@@ -960,6 +1012,80 @@ export function TraceChart({
     document.addEventListener("mousemove", edgeMove);
     document.addEventListener("mouseup", edgeUp);
 
+    // --- Drag a highlight-zone label vertically (persisted as a height fraction) ---
+    const toCanvas = (e: MouseEvent) => {
+      const rect = over.getBoundingClientRect();
+      const dpr = devicePixelRatio;
+      return { x: (e.clientX - rect.left) * dpr, y: (e.clientY - rect.top) * dpr };
+    };
+    // Draggable rows = the label pill (not the checkbox), and not timeslip strips
+    // (those have no per-label persistence path).
+    const dragRowAt = (cx: number, cy: number) =>
+      zoneRowsRef.current.find(
+        (rrow) =>
+          !rrow.id.startsWith("timeslip:") &&
+          cx >= rrow.pillLeft &&
+          cx <= rrow.pillRight &&
+          cy >= rrow.pillTop &&
+          cy <= rrow.pillBottom,
+      ) || null;
+
+    // Capture-phase mousedown on root runs BEFORE uPlot's drag-select on `over`
+    // (same approach as edge-resize), so grabbing a label takes over the gesture.
+    const onZoneDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      const { x, y } = toCanvas(e);
+      const row = dragRowAt(x, y);
+      if (!row) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      zoneDrag = { id: row.id, startClientY: e.clientY, startFrac: row.frac, moved: false };
+      isZoneDraggingRef.current = true;
+      over.style.cursor = "grabbing";
+    };
+
+    const onZoneMove = (e: MouseEvent) => {
+      if (!zoneDrag) return;
+      const u = chartRef.current;
+      if (!u) return;
+      if (Math.abs(e.clientY - zoneDrag.startClientY) < 3) return;
+      zoneDrag.moved = true;
+      const dpr = devicePixelRatio;
+      const STRIP_H = 6 * dpr;
+      const h = u.bbox.height || 1;
+      const deltaY = (e.clientY - zoneDrag.startClientY) * dpr;
+      const maxFrac = 1 - STRIP_H / h;
+      const newFrac = Math.max(0, Math.min(maxFrac, zoneDrag.startFrac + deltaY / h));
+      liveLabelFracRef.current = { ...liveLabelFracRef.current, [zoneDrag.id]: newFrac };
+      u.redraw(); // live, no React render
+    };
+
+    const onZoneUp = () => {
+      if (!zoneDrag) return;
+      const finished = zoneDrag;
+      zoneDrag = null;
+      isZoneDraggingRef.current = false;
+      over.style.cursor = "";
+      if (finished.moved) {
+        const frac = liveLabelFracRef.current[finished.id];
+        if (frac != null) onMoveZoneLabelRef.current?.(finished.id, frac); // persist
+      }
+    };
+
+    const onZoneCursor = (e: MouseEvent) => {
+      if (zoneDrag) { over.style.cursor = "grabbing"; return; }
+      if (edgeDrag) return; // edge-resize owns the cursor
+      const rect = over.getBoundingClientRect();
+      if (edgeHitAt(e.clientX - rect.left)) return; // near a selection edge -> leave edge cursor
+      const { x, y } = toCanvas(e);
+      if (dragRowAt(x, y)) over.style.cursor = "grab";
+    };
+
+    root.addEventListener("mousedown", onZoneDown, true);
+    over.addEventListener("mousemove", onZoneCursor);
+    document.addEventListener("mousemove", onZoneMove);
+    document.addEventListener("mouseup", onZoneUp);
+
     // --- Cursor-centered mouse-wheel zoom on the x (time) axis ---
     const onWheel = (e: WheelEvent) => {
       if (wheelEnabledRef.current === false) return;
@@ -989,6 +1115,10 @@ export function TraceChart({
       over.removeEventListener("mousemove", edgeCursor);
       document.removeEventListener("mousemove", edgeMove);
       document.removeEventListener("mouseup", edgeUp);
+      root.removeEventListener("mousedown", onZoneDown, true);
+      over.removeEventListener("mousemove", onZoneCursor);
+      document.removeEventListener("mousemove", onZoneMove);
+      document.removeEventListener("mouseup", onZoneUp);
       over.removeEventListener("wheel", onWheel);
       plot.destroy();
       chartRef.current = null;

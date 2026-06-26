@@ -4,8 +4,10 @@ import { api } from "../../convex/_generated/api";
 import type { Id, Doc } from "../../convex/_generated/dataModel";
 import { useNav } from "./Layout";
 import { useLoadedLogs } from "@/hooks/useLoadedLogs";
+import { useTimeslips } from "@/hooks/useTimeslips";
 import { useViewerSync } from "@/hooks/useViewerSync";
 import { computeAlignment } from "@/lib/alignment";
+import { buildTimeslipZones } from "@/lib/timeslip-zones";
 import {
   defaultViewerConfig,
   migrateConfig,
@@ -239,6 +241,15 @@ function LogViewerReady({
     return computeAlignment(logs, config.alignByRaceTime);
   }, [logs, config.alignByRaceTime]);
 
+  // Timeslip overlay strips: fetch per-file timeslips and build synthetic zones
+  // anchored at each log's detected race-start (+ alignment offset).
+  const timeslipsByFile = useTimeslips(fileIds);
+  const showTimeslip = config.showTimeslip !== false; // default shown
+  const timeslipZones = useMemo(
+    () => buildTimeslipZones(logs, timeslipsByFile, alignment.offsets, showTimeslip),
+    [logs, timeslipsByFile, alignment.offsets, showTimeslip],
+  );
+
   const handleBack = useCallback(() => {
     goToFiles(vehicleId, eventId);
   }, [goToFiles, vehicleId, eventId]);
@@ -300,6 +311,7 @@ function LogViewerReady({
         wheelZoomEnabled={config.wheelZoomEnabled ?? true}
         wheelZoomFactor={config.wheelZoomFactor ?? 1.25}
         avgOnSelection={config.avgOnSelection !== false}
+        showTimeslip={showTimeslip}
         onToggleAlignment={() => dispatch({ type: "toggleAlignment" })}
         onToggleAxes={() => dispatch({ type: "toggleAxes" })}
         onToggleAxisLabels={() => dispatch({ type: "toggleAxisLabels" })}
@@ -307,6 +319,7 @@ function LogViewerReady({
         onToggleWheelZoom={() => dispatch({ type: "setWheelZoomEnabled", enabled: !(config.wheelZoomEnabled ?? true) })}
         onSetWheelZoomFactor={(f) => dispatch({ type: "setWheelZoomFactor", factor: f })}
         onToggleAvgOnSelection={() => dispatch({ type: "toggleAvgOnSelection" })}
+        onToggleTimeslip={() => dispatch({ type: "toggleTimeslip" })}
         onAddTrace={() => handleAddTrace()}
         onBack={handleBack}
       />
@@ -413,6 +426,9 @@ function LogViewerReady({
           avgOnSelection={config.avgOnSelection !== false}
           persistedSelection={config.pages.find((p) => p.id === config.activePageId)?.selection ?? null}
           onPersistSelection={(sel) => dispatch({ type: "setSelection", selection: sel })}
+          timeslipZones={timeslipZones}
+          expandedTimeslipIds={config.expandedTimeslipIds ?? []}
+          onToggleTimeslipExpand={(id) => dispatch({ type: "toggleTimeslipExpand", id })}
         />
       </div>
     </div>

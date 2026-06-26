@@ -15,7 +15,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { PlusIcon, XIcon, ChevronDownIcon, ChevronRightIcon, PencilIcon, SparklesIcon } from "lucide-react";
+import { PlusIcon, XIcon, ChevronDownIcon, ChevronRightIcon, PencilIcon, SparklesIcon, RotateCcwIcon } from "lucide-react";
 import { GROUP_COLORS, type GroupNode } from "@/lib/channel-groups";
 import { useChannelGroups } from "@/hooks/useChannelGroups";
 
@@ -1052,6 +1052,15 @@ export function TraceSettingsPanel({
                     </span>
                     {evaluated?.error && (
                       <span className="text-xs text-destructive" title={evaluated.error}>err</span>
+                    )}
+                    {zone.labelYFraction != null && (
+                      <button
+                        onClick={() => onUpdateZone?.(zone.id, { labelYFraction: undefined })}
+                        title="Reset dragged label position"
+                        className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 cursor-pointer"
+                      >
+                        <RotateCcwIcon className="size-3" />
+                      </button>
                     )}
                     <button
                       onClick={() => setEditingZoneId(zone.id)}

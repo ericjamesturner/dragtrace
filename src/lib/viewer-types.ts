@@ -459,7 +459,8 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         ),
       };
     case "toggleTimeslip":
-      return { ...state, showTimeslip: !state.showTimeslip };
+      // Default (undefined) = shown, so the first toggle hides it.
+      return { ...state, showTimeslip: state.showTimeslip === false ? true : false };
     case "toggleTimeslipExpand": {
       const ids = state.expandedTimeslipIds ?? [];
       const has = ids.includes(action.id);

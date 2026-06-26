@@ -6,7 +6,10 @@ import { evaluateZoneExpression, scanTrueRegions } from "@/lib/zone-evaluator";
 
 export interface EvaluatedZone {
   config: HighlightZoneConfig;
-  regions: { start: number; end: number }[];
+  // Each region may carry its own fill color (used by timeslip overlay
+  // segments); expression zones leave it undefined and fall back to the
+  // zone-level color.
+  regions: { start: number; end: number; color?: string }[];
   error: string | null;
 }
 
@@ -21,7 +24,7 @@ export function useEvaluatedZones(
     if (!zones || zones.length === 0) return [];
 
     // Cache evaluated expressions to avoid duplicates
-    const cache = new Map<string, { regions: { start: number; end: number }[]; error: string | null }>();
+    const cache = new Map<string, { regions: { start: number; end: number; color?: string }[]; error: string | null }>();
 
     return zones.map((zone) => {
       if (!zone.enabled) {

@@ -6,7 +6,7 @@ import { TraceChart } from "./TraceChart";
 import { TraceSettingsPanel } from "./TraceSettingsPanel";
 import { findValueAtTime, formatValue, computeAvgInRange } from "@/lib/cursor-utils";
 import { convertForDisplay, getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
-import { useEvaluatedZones } from "@/hooks/useEvaluatedZones";
+import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, GripHorizontalIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 
@@ -62,6 +62,10 @@ interface Props {
   onUpdateZone?: (zoneId: string, updates: Partial<Omit<HighlightZoneConfig, "id">>) => void;
   onRemoveZone?: (zoneId: string) => void;
   onToggleZone?: (zoneId: string) => void;
+  // Timeslip overlay: synthetic zones (one per file timeslip) + persisted expand state.
+  timeslipZones?: EvaluatedZone[];
+  expandedTimeslipIds?: string[];
+  onToggleTimeslipExpand?: (id: string) => void;
   maxYAxes?: number;
 }
 
@@ -109,6 +113,9 @@ export function TraceContainer({
   onUpdateZone,
   onRemoveZone,
   onToggleZone,
+  timeslipZones,
+  expandedTimeslipIds,
+  onToggleTimeslipExpand,
   maxYAxes,
 }: Props) {
   const [dragOver, setDragOver] = useState(false);
@@ -132,14 +139,30 @@ export function TraceContainer({
     unitOverrides,
   );
 
+  // Timeslip strips render through the same plugin as expression zones; prepend
+  // them so they sit at the top of the stack on every trace.
+  const allZones = useMemo(
+    () => [...(timeslipZones ?? []), ...evaluatedZones],
+    [timeslipZones, evaluatedZones],
+  );
+  const mergedExpanded = useMemo(
+    () => new Set<string>([...expandedZoneIds, ...(expandedTimeslipIds ?? [])]),
+    [expandedZoneIds, expandedTimeslipIds],
+  );
+
   const handleToggleZoneExpand = useCallback((zoneId: string) => {
+    // Timeslip expand persists via config; expression zones use local state.
+    if (zoneId.startsWith("timeslip:")) {
+      onToggleTimeslipExpand?.(zoneId);
+      return;
+    }
     setExpandedZoneIds((prev) => {
       const next = new Set(prev);
       if (next.has(zoneId)) next.delete(zoneId);
       else next.add(zoneId);
       return next;
     });
-  }, []);
+  }, [onToggleTimeslipExpand]);
 
   const handleLegendMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -381,9 +404,10 @@ export function TraceContainer({
             onResetZoom={onResetZoom}
             wheelZoomEnabled={wheelZoomEnabled}
             wheelZoomFactor={wheelZoomFactor}
-            evaluatedZones={evaluatedZones}
-            expandedZoneIds={expandedZoneIds}
+            evaluatedZones={allZones}
+            expandedZoneIds={mergedExpanded}
             onToggleZoneExpand={handleToggleZoneExpand}
+            onMoveZoneLabel={(zoneId, frac) => onUpdateZone?.(zoneId, { labelYFraction: frac })}
             highlightKey={hoveredChannel}
             maxYAxes={maxYAxes}
           />

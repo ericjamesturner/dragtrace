@@ -1,7 +1,7 @@
 import type { LoadedLog } from "@/lib/viewer-types";
 import type { UnitSystem } from "@/lib/units";
 import { Button } from "@/components/ui/button";
-import { ChevronLeftIcon, PlusIcon, AlignCenterHorizontalIcon, RulerIcon, TagIcon, ThermometerIcon, ZoomInIcon, SigmaIcon } from "lucide-react";
+import { ChevronLeftIcon, PlusIcon, AlignCenterHorizontalIcon, RulerIcon, TagIcon, ThermometerIcon, ZoomInIcon, SigmaIcon, FlagIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 
 interface Props {
@@ -13,6 +13,7 @@ interface Props {
   wheelZoomEnabled: boolean;
   wheelZoomFactor: number;
   avgOnSelection: boolean;
+  showTimeslip: boolean;
   onToggleAlignment: () => void;
   onToggleAxes: () => void;
   onToggleAxisLabels: () => void;
@@ -20,11 +21,12 @@ interface Props {
   onToggleWheelZoom: () => void;
   onSetWheelZoomFactor: (factor: number) => void;
   onToggleAvgOnSelection: () => void;
+  onToggleTimeslip: () => void;
   onAddTrace: () => void;
   onBack: () => void;
 }
 
-export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels, unitSystem, wheelZoomEnabled, wheelZoomFactor, avgOnSelection, onToggleAlignment, onToggleAxes, onToggleAxisLabels, onToggleUnitSystem, onToggleWheelZoom, onSetWheelZoomFactor, onToggleAvgOnSelection, onAddTrace, onBack }: Props) {
+export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels, unitSystem, wheelZoomEnabled, wheelZoomFactor, avgOnSelection, showTimeslip, onToggleAlignment, onToggleAxes, onToggleAxisLabels, onToggleUnitSystem, onToggleWheelZoom, onSetWheelZoomFactor, onToggleAvgOnSelection, onToggleTimeslip, onAddTrace, onBack }: Props) {
   const hasRaceData = logs.some((l) => l.raceStartTime !== null);
 
   return (
@@ -112,6 +114,16 @@ export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels,
           >
             <SigmaIcon className="size-4 mr-1" />
             Avg
+          </Button>
+        </Tip>
+        <Tip content="Show timeslip distance markers as a colored strip on every trace">
+          <Button
+            variant={showTimeslip ? "default" : "outline"}
+            size="sm"
+            onClick={onToggleTimeslip}
+          >
+            <FlagIcon className="size-4 mr-1" />
+            Timeslip
           </Button>
         </Tip>
         <Tip content="Add a new trace">

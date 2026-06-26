@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { LoadedLog, TraceConfig, ChannelOnTrace, PageConfig, HighlightZoneConfig } from "@/lib/viewer-types";
+import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import type { UnitSystem, UnitOverrides } from "@/lib/units";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { TraceContainer } from "./TraceContainer";
@@ -49,6 +50,9 @@ interface Props {
   avgOnSelection: boolean;
   persistedSelection?: [number, number] | null;
   onPersistSelection?: (sel: [number, number] | null) => void;
+  timeslipZones: EvaluatedZone[];
+  expandedTimeslipIds: string[];
+  onToggleTimeslipExpand: (id: string) => void;
 }
 
 export function TracePanel({
@@ -93,6 +97,9 @@ export function TracePanel({
   avgOnSelection,
   persistedSelection,
   onPersistSelection,
+  timeslipZones,
+  expandedTimeslipIds,
+  onToggleTimeslipExpand,
 }: Props) {
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
   const [selection, setSelection] = useState<[number, number] | null>(persistedSelection ?? null);
@@ -441,6 +448,9 @@ export function TracePanel({
                 onUpdateZone={(zoneId, updates) => onUpdateZone(trace.id, zoneId, updates)}
                 onRemoveZone={(zoneId) => onRemoveZone(trace.id, zoneId)}
                 onToggleZone={(zoneId) => onToggleZone(trace.id, zoneId)}
+                timeslipZones={timeslipZones}
+                expandedTimeslipIds={expandedTimeslipIds}
+                onToggleTimeslipExpand={onToggleTimeslipExpand}
                 maxYAxes={maxYAxes}
               />
             ))}
