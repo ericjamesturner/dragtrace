@@ -4,6 +4,7 @@ import "uplot/dist/uPlot.min.css";
 import { lttbDownsample } from "@/lib/downsample";
 import { formatDuration } from "@/lib/cursor-utils";
 import type { LoadedLog } from "@/lib/viewer-types";
+import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import type { Id } from "../../../convex/_generated/dataModel";
 
 const OVERVIEW_HEIGHT = 48;
@@ -18,6 +19,7 @@ interface Props {
   zoomRange: [number, number] | null;
   selection: [number, number] | null;
   cursorTime: number | null;
+  timeslipZones?: EvaluatedZone[];
   onZoom: (min: number, max: number) => void;
   onResetZoom: () => void;
 }
@@ -32,6 +34,7 @@ export function OverviewBar({
   zoomRange,
   selection,
   cursorTime,
+  timeslipZones,
   onZoom,
   onResetZoom,
 }: Props) {
@@ -322,6 +325,22 @@ export function OverviewBar({
               style={{ left: `${previewLeft + previewWidth}%`, right: 0 }}
             />
           </>
+        )}
+        {/* Timeslip segments (60'/330'/660'/1320') as a strip along the bottom */}
+        {(timeslipZones ?? []).map((z) =>
+          z.regions.map((r, i) => (
+            <div
+              key={`${z.config.id}:${i}`}
+              className="absolute bottom-0 pointer-events-none"
+              style={{
+                left: `${((r.start - fullMin) / fullSpan) * 100}%`,
+                width: `${((r.end - r.start) / fullSpan) * 100}%`,
+                height: 7,
+                backgroundColor: r.color ?? z.config.color,
+              }}
+              title={z.config.label}
+            />
+          ))
         )}
       </div>
     </div>

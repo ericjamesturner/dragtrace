@@ -12,6 +12,10 @@ import { OverviewBar } from "./OverviewBar";
 import { PlusIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 
+// Timeslip strips now render on the bottom OverviewBar, not on each trace.
+// Stable reference so TraceContainer's zone memo doesn't bust every render.
+const NO_TIMESLIP_ZONES: EvaluatedZone[] = [];
+
 interface Props {
   traces: TraceConfig[];
   pinnedFromOtherIds: Set<string>;
@@ -498,7 +502,7 @@ export function TracePanel({
                 onUpdateZone={(zoneId, updates) => onUpdateZone(trace.id, zoneId, updates)}
                 onRemoveZone={(zoneId) => onRemoveZone(trace.id, zoneId)}
                 onToggleZone={(zoneId) => onToggleZone(trace.id, zoneId)}
-                timeslipZones={timeslipZones}
+                timeslipZones={NO_TIMESLIP_ZONES}
                 expandedTimeslipIds={expandedTimeslipIds}
                 onToggleTimeslipExpand={onToggleTimeslipExpand}
                 maxYAxes={maxYAxes}
@@ -560,7 +564,7 @@ export function TracePanel({
         )}
       </div>
 
-      {/* Overview minimap */}
+      {/* Overview minimap (timeslip strip lives here now) */}
       <OverviewBar
         logs={logs}
         offsets={offsets}
@@ -569,6 +573,7 @@ export function TracePanel({
         zoomRange={zoomRange}
         selection={displaySelection}
         cursorTime={cursorTime}
+        timeslipZones={timeslipZones}
         onZoom={handleZoom}
         onResetZoom={handleResetZoom}
       />
