@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { LoadedLog, ScatterConfig } from "@/lib/viewer-types";
+import type { LoadedLog, ScatterConfig, ScatterSuggestion } from "@/lib/viewer-types";
 import type { ChannelDef } from "@/lib/log-types";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { SparklesIcon } from "lucide-react";
 
 interface Props {
   open: boolean;
@@ -20,6 +21,7 @@ interface Props {
   existing?: ScatterConfig;
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
+  aiSuggestions?: ScatterSuggestion[];
   onSubmit: (config: Omit<ScatterConfig, "id">) => void;
 }
 
@@ -113,6 +115,7 @@ export function ScatterConfigDialog({
   existing,
   unitSystem,
   unitOverrides,
+  aiSuggestions,
   onSubmit,
 }: Props) {
   const [logFileId, setLogFileId] = useState<Id<"files">>(
@@ -139,6 +142,13 @@ export function ScatterConfigDialog({
   const log = logs.find((l) => l.fileId === logFileId) ?? logs[0];
   const channelDefs = log?.parsed.channelDefs ?? [];
   const presets = useMemo(() => buildScatterPresets(channelDefs), [channelDefs]);
+
+  // AI suggestions whose X/Y channels both exist in the selected log.
+  const aiPresets = useMemo(() => {
+    if (!aiSuggestions || aiSuggestions.length === 0) return [];
+    const names = new Set(channelDefs.map((d) => d.name));
+    return aiSuggestions.filter((s) => names.has(s.xChannel) && names.has(s.yChannel));
+  }, [aiSuggestions, channelDefs]);
 
   const canSubmit = !!xChannel && !!yChannel && !!logFileId;
 
@@ -179,6 +189,30 @@ export function ScatterConfigDialog({
                     }`}
                   >
                     {l.fileName}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {aiPresets.length > 0 && !existing && (
+            <div className="grid gap-1.5">
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <SparklesIcon className="size-3 text-primary" /> AI Suggestions
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {aiPresets.map((s, i) => (
+                  <button
+                    key={`${s.label}-${i}`}
+                    title={s.description}
+                    onClick={() => {
+                      setXChannel(s.xChannel);
+                      setYChannel(s.yChannel);
+                      setColorChannel(s.colorChannel ?? "");
+                    }}
+                    className="px-2.5 py-1.5 text-xs rounded-lg border border-primary/40 text-primary hover:bg-primary/10 cursor-pointer transition-colors"
+                  >
+                    {s.label}
                   </button>
                 ))}
               </div>

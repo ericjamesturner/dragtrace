@@ -6,6 +6,7 @@ import { useNav } from "./Layout";
 import { useLoadedLogs } from "@/hooks/useLoadedLogs";
 import { useTimeslips } from "@/hooks/useTimeslips";
 import { useViewerSync } from "@/hooks/useViewerSync";
+import { useScatterSuggestions } from "@/hooks/useScatterSuggestions";
 import { computeAlignment } from "@/lib/alignment";
 import { buildTimeslipZones } from "@/lib/timeslip-zones";
 import {
@@ -158,6 +159,16 @@ function LogViewerReady({
   // Compute effective traces
   const effectiveTraces = useMemo(() => getEffectiveTraces(config), [config]);
   const pinnedFromOtherIds = useMemo(() => getPinnedFromOtherIds(config), [config]);
+
+  // Background-fetch AI scatter suggestions for the current channel set and
+  // persist them into the config (rides the existing debounced Convex save).
+  useScatterSuggestions(
+    logs,
+    config,
+    config.unitSystem ?? "imperial",
+    config.unitOverrides,
+    (suggestions, key) => dispatch({ type: "setScatterSuggestions", suggestions, key }),
+  );
 
   // Active trace tracking
   const [activeTraceId, setActiveTraceId] = useState<string | null>(null);
@@ -429,6 +440,7 @@ function LogViewerReady({
           timeslipZones={timeslipZones}
           expandedTimeslipIds={config.expandedTimeslipIds ?? []}
           onToggleTimeslipExpand={(id) => dispatch({ type: "toggleTimeslipExpand", id })}
+          scatterSuggestions={config.scatterSuggestions ?? []}
           onAddScatter={(scatter) => dispatch({ type: "addScatter", scatter })}
           onRemoveScatter={(scatterId) => dispatch({ type: "removeScatter", scatterId })}
           onUpdateScatter={(scatterId, updates) => dispatch({ type: "updateScatter", scatterId, updates })}

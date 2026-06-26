@@ -15,6 +15,7 @@ import type * as events from "../events.js";
 import type * as files from "../files.js";
 import type * as highlightZones from "../highlightZones.js";
 import type * as http from "../http.js";
+import type * as scatterSuggestions from "../scatterSuggestions.js";
 import type * as timeslips from "../timeslips.js";
 import type * as vehicleChannelOverrides from "../vehicleChannelOverrides.js";
 import type * as vehicles from "../vehicles.js";
@@ -34,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   files: typeof files;
   highlightZones: typeof highlightZones;
   http: typeof http;
+  scatterSuggestions: typeof scatterSuggestions;
   timeslips: typeof timeslips;
   vehicleChannelOverrides: typeof vehicleChannelOverrides;
   vehicles: typeof vehicles;

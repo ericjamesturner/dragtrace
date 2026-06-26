@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { LoadedLog, TraceConfig, ChannelOnTrace, PageConfig, HighlightZoneConfig, ScatterConfig, HeatmapConfig } from "@/lib/viewer-types";
+import type { LoadedLog, TraceConfig, ChannelOnTrace, PageConfig, HighlightZoneConfig, ScatterConfig, HeatmapConfig, ScatterSuggestion } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import type { UnitSystem, UnitOverrides } from "@/lib/units";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -57,6 +57,7 @@ interface Props {
   timeslipZones: EvaluatedZone[];
   expandedTimeslipIds: string[];
   onToggleTimeslipExpand: (id: string) => void;
+  scatterSuggestions?: ScatterSuggestion[];
   onAddScatter: (scatter: Omit<ScatterConfig, "id">) => void;
   onRemoveScatter: (scatterId: string) => void;
   onUpdateScatter: (scatterId: string, updates: Partial<Omit<ScatterConfig, "id">>) => void;
@@ -110,6 +111,7 @@ export function TracePanel({
   timeslipZones,
   expandedTimeslipIds,
   onToggleTimeslipExpand,
+  scatterSuggestions,
   onAddScatter,
   onRemoveScatter,
   onUpdateScatter,
@@ -579,6 +581,7 @@ export function TracePanel({
           existing={scatterDialog.mode === "edit" ? scatterDialog.scatter : undefined}
           unitSystem={unitSystem}
           unitOverrides={unitOverrides}
+          aiSuggestions={scatterSuggestions ?? []}
           onSubmit={(cfg) => {
             if (scatterDialog.mode === "edit") {
               onUpdateScatter(scatterDialog.scatter.id, cfg);
