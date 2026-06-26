@@ -165,7 +165,7 @@ export function Layout() {
         {/* Desktop sidebar */}
         <aside className="hidden w-64 shrink-0 border-r bg-muted/30 md:flex md:flex-col">
           <div className="flex items-center justify-between border-b px-4 py-3">
-            <h1 className="text-sm font-semibold tracking-tight">Datalog Viewer</h1>
+            <h1 className="text-sm font-semibold tracking-tight">DragTrace</h1>
             <div className="flex items-center gap-1">
               <Tip content="Channel Manager">
                 <Button
@@ -202,13 +202,13 @@ export function Layout() {
               <SheetContent side="left" className="w-64 p-0">
                 <div className="border-b px-4 py-3">
                   <h1 className="text-sm font-semibold tracking-tight">
-                    Datalog Viewer
+                    DragTrace
                   </h1>
                 </div>
                 {sidebarContent}
               </SheetContent>
             </Sheet>
-            <h1 className="text-sm font-semibold tracking-tight">Datalog Viewer</h1>
+            <h1 className="text-sm font-semibold tracking-tight">DragTrace</h1>
             <div className="ml-auto">
               <Tip content="Sign out">
                 <Button

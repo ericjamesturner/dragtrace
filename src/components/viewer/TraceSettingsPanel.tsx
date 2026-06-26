@@ -2,10 +2,12 @@ import { useState, useMemo } from "react";
 import type { TraceConfig, LoadedLog, ChannelOnTrace, HighlightZoneConfig } from "@/lib/viewer-types";
 import { resolveChannelStyle } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
+import { useAction } from "convex/react";
+import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { UnitSystem, UnitOverrides } from "@/lib/units";
 import { validateZoneExpression } from "@/lib/zone-evaluator";
-import { generateHighlightZone, ZONE_COLORS, type ChannelSample } from "@/lib/ai-highlight-zone";
+import { buildHighlightZoneInput, ZONE_COLORS, type ChannelSample } from "@/lib/ai-highlight-zone";
 import {
   Sheet,
   SheetContent,
@@ -455,8 +457,8 @@ function ZoneBuilder({
   const [color, setColor] = useState(editingZone?.color ?? ZONE_COLORS[0]);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // AI generation
-  const hasApiKey = !!(import.meta.env.VITE_ANTHROPIC_API_KEY);
+  // AI generation (Anthropic call runs server-side in the highlightZones action)
+  const generateZone = useAction(api.highlightZones.generate);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -521,12 +523,14 @@ function ZoneBuilder({
           }
         }
       }
-      const result = await generateHighlightZone(
-        aiPrompt,
-        channelNames,
-        unitSystem,
-        unitOverrides,
-        samples,
+      const result = await generateZone(
+        buildHighlightZoneInput(
+          aiPrompt,
+          channelNames,
+          unitSystem,
+          unitOverrides,
+          samples,
+        ),
       );
       setRawExpression(result.expression);
       setLabel(result.label);
@@ -669,8 +673,7 @@ function ZoneBuilder({
       </div>
 
       {/* AI generation */}
-      {hasApiKey && (
-        <div className="border-t border-border pt-3 mt-3 space-y-2">
+      <div className="border-t border-border pt-3 mt-3 space-y-2">
           <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
             <SparklesIcon className="size-3.5" />
             AI Zone Generator
@@ -694,7 +697,6 @@ function ZoneBuilder({
           </div>
           {aiError && <div className="text-xs text-destructive">{aiError}</div>}
         </div>
-      )}
     </div>
   );
 }

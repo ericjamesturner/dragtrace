@@ -20,7 +20,7 @@ export function SignIn() {
     <div className="flex min-h-screen items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-6">
         <h1 className="text-center text-3xl font-bold tracking-tight">
-          Log Viewer
+          DragTrace
         </h1>
         <Card>
           <CardHeader>

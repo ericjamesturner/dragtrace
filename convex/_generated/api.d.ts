@@ -13,6 +13,7 @@ import type * as channelCategories from "../channelCategories.js";
 import type * as channelMappings from "../channelMappings.js";
 import type * as events from "../events.js";
 import type * as files from "../files.js";
+import type * as highlightZones from "../highlightZones.js";
 import type * as http from "../http.js";
 import type * as timeslips from "../timeslips.js";
 import type * as vehicleChannelOverrides from "../vehicleChannelOverrides.js";
@@ -31,6 +32,7 @@ declare const fullApi: ApiFromModules<{
   channelMappings: typeof channelMappings;
   events: typeof events;
   files: typeof files;
+  highlightZones: typeof highlightZones;
   http: typeof http;
   timeslips: typeof timeslips;
   vehicleChannelOverrides: typeof vehicleChannelOverrides;
