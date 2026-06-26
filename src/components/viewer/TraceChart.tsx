@@ -116,6 +116,12 @@ interface Props {
   onToggleZoneExpand?: (zoneId: string) => void;
   // Persist a dragged zone-label vertical position (0..1 fraction of chart height).
   onMoveZoneLabel?: (zoneId: string, fraction: number) => void;
+  // Right-click a line: opens that channel's context menu (nearest series hit-test).
+  onChannelContextMenu?: (logFileId: string, channelName: string, clientX: number, clientY: number) => void;
+  // Live color preview (e.g. hovering a swatch): transiently strokes the matching
+  // series without committing. key = "logFileId:channelName".
+  previewColorKey?: string | null;
+  previewColor?: string | null;
   highlightKey?: string | null;
   maxYAxes?: number;
 }
@@ -196,6 +202,9 @@ export function TraceChart({
   expandedZoneIds,
   onToggleZoneExpand,
   onMoveZoneLabel,
+  onChannelContextMenu,
+  previewColorKey,
+  previewColor,
   highlightKey,
   maxYAxes,
 }: Props) {
@@ -216,6 +225,8 @@ export function TraceChart({
   onDragPreviewRef.current = onDragPreview;
   const onCursorRef = useRef(onCursorTime);
   onCursorRef.current = onCursorTime;
+  const onChannelContextMenuRef = useRef(onChannelContextMenu);
+  onChannelContextMenuRef.current = onChannelContextMenu;
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   // Wheel-zoom refs — kept fresh every render so the native wheel handler never
@@ -908,6 +919,7 @@ export function TraceChart({
     let zoneDrag: { id: string; startClientY: number; startFrac: number; moved: boolean } | null = null;
     const onMouseDown = (e: MouseEvent) => { downX = e.clientX; downY = e.clientY; };
     const onMouseUp = (e: MouseEvent) => {
+      if (e.button !== 0) return; // right/middle clicks are not selection clicks
       // A zone-label drag (still pending its document mouseup) must not be read
       // as a click/checkbox toggle.
       if (zoneDrag) return;
@@ -1108,9 +1120,41 @@ export function TraceChart({
     };
     over.addEventListener("wheel", onWheel, { passive: false });
 
+    // --- Right-click a line -> open that channel's context menu ---
+    // Hit-test: at the cursor x, find the series whose value is nearest (in
+    // pixels) to the cursor y, map its series key back to {logFileId, channel}.
+    const onContextMenuChart = (e: MouseEvent) => {
+      if (!onChannelContextMenuRef.current) return;
+      e.preventDefault();
+      const rect = over.getBoundingClientRect();
+      const cssX = e.clientX - rect.left;
+      const cssY = e.clientY - rect.top;
+      const xVal = plot.posToVal(cssX, "x");
+      let idx = Math.round((xVal - gridTs[0]) / step);
+      idx = Math.max(0, Math.min(gridTs.length - 1, idx));
+      let bestI = -1;
+      let bestDist = Infinity;
+      for (let i = 0; i < seriesMeta.length; i++) {
+        const v = seriesData[i][idx];
+        if (v == null || v !== v) continue;
+        const scaleKey = plot.series[i + 1]?.scale;
+        if (!scaleKey) continue;
+        const yPix = plot.valToPos(v, scaleKey, false);
+        const d = Math.abs(yPix - cssY);
+        if (d < bestDist) { bestDist = d; bestI = i; }
+      }
+      if (bestI < 0) return;
+      const key = seriesMeta[bestI].key; // "logFileId:channelName"
+      const sep = key.indexOf(":");
+      if (sep < 0) return;
+      onChannelContextMenuRef.current(key.slice(0, sep), key.slice(sep + 1), e.clientX, e.clientY);
+    };
+    over.addEventListener("contextmenu", onContextMenuChart);
+
     return () => {
       over.removeEventListener("mousedown", onMouseDown);
       over.removeEventListener("mouseup", onMouseUp);
+      over.removeEventListener("contextmenu", onContextMenuChart);
       root.removeEventListener("mousedown", edgeDown, true);
       over.removeEventListener("mousemove", edgeCursor);
       document.removeEventListener("mousemove", edgeMove);
@@ -1147,6 +1191,29 @@ export function TraceChart({
   useEffect(() => {
     chartRef.current?.redraw();
   }, [selection]);
+
+  // Live color preview: transiently stroke one series with a preview color
+  // (e.g. while hovering a swatch) and restore on clear. Committing the color
+  // triggers a full rebuild, so this only covers the pre-commit hover.
+  useEffect(() => {
+    const u = chartRef.current;
+    if (!u) return;
+    const keys = seriesKeysRef.current;
+    if (previewColorKey && previewColor) {
+      const i = keys.indexOf(previewColorKey);
+      if (i >= 0 && u.series[i + 1] && !seriesColorByRef.current[i]) {
+        u.series[i + 1].stroke = () => previewColor;
+        u.redraw();
+      }
+    } else {
+      const colors = seriesColorsRef.current;
+      for (let i = 0; i < keys.length; i++) {
+        if (seriesColorByRef.current[i]) continue;
+        if (u.series[i + 1]) u.series[i + 1].stroke = () => colors[i];
+      }
+      u.redraw();
+    }
+  }, [previewColorKey, previewColor]);
 
   // Highlight effect: dim non-hovered series, restore on leave
   useEffect(() => {

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import type { LoadedLog, ChannelOnTrace, TraceConfig, HighlightZoneConfig } from "@/lib/viewer-types";
-import { resolveChannelStyle } from "@/lib/viewer-types";
+import { resolveChannelStyle, CHART_COLORS } from "@/lib/viewer-types";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { TraceChart } from "./TraceChart";
 import { TraceSettingsPanel } from "./TraceSettingsPanel";
@@ -16,6 +16,13 @@ interface ContextMenuState {
   logFileId: Id<"files">;
   channelName: string;
 }
+
+const WIDTH_OPTIONS = [1, 1.5, 2.5, 4];
+const STYLE_OPTIONS: { label: string; dash: number[] | undefined }[] = [
+  { label: "Solid", dash: undefined },
+  { label: "Dashed", dash: [7, 5] },
+  { label: "Dotted", dash: [2, 4] },
+];
 
 interface Props {
   trace: TraceConfig;
@@ -122,6 +129,12 @@ export function TraceContainer({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const resizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  // Live color preview while hovering a swatch in the context menu.
+  const [colorPreview, setColorPreview] = useState<{ key: string; color: string } | null>(null);
+  // Clear any preview whenever the menu opens, moves, or closes.
+  useEffect(() => {
+    setColorPreview(null);
+  }, [contextMenu]);
   const [expandedZoneIds, setExpandedZoneIds] = useState<Set<string>>(new Set());
   const [legendPos, setLegendPos] = useState<{ x: number; y: number }>({ x: 8, y: 8 });
   const [legendMinimized, setLegendMinimized] = useState(false);
@@ -408,6 +421,11 @@ export function TraceContainer({
             expandedZoneIds={mergedExpanded}
             onToggleZoneExpand={handleToggleZoneExpand}
             onMoveZoneLabel={(zoneId, frac) => onUpdateZone?.(zoneId, { labelYFraction: frac })}
+            onChannelContextMenu={(logFileId, channelName, x, y) =>
+              setContextMenu({ x, y, logFileId: logFileId as Id<"files">, channelName })
+            }
+            previewColorKey={colorPreview?.key ?? null}
+            previewColor={colorPreview?.color ?? null}
             highlightKey={hoveredChannel}
             maxYAxes={maxYAxes}
           />
@@ -603,24 +621,111 @@ export function TraceContainer({
         onMouseDown={handleResizeMouseDown}
       />
 
-      {/* Context menu */}
-      {contextMenu && (
-        <div
-          className="fixed z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[160px]"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            className="w-full text-left px-3 py-1.5 text-sm hover:bg-muted cursor-pointer text-destructive flex items-center gap-2"
-            onClick={() => {
-              onRemoveChannel(contextMenu.logFileId, contextMenu.channelName);
-              setContextMenu(null);
-            }}
+      {/* Context menu (channel row right-click OR chart line right-click) */}
+      {contextMenu && (() => {
+        const cmKey = `${contextMenu.logFileId}:${contextMenu.channelName}`;
+        const cmHidden = hiddenChannels.has(cmKey);
+        const cmCh = trace.channels.find(
+          (c) => (c.logFileId as string) === (contextMenu.logFileId as string) && c.channelName === contextMenu.channelName
+        );
+        const curWidth = cmCh?.width ?? 1.5;
+        const curDash = cmCh?.dash;
+        const item = "w-full text-left px-3 py-1.5 text-sm hover:bg-muted cursor-pointer flex items-center gap-2";
+        const seg = "flex-1 h-6 rounded border flex items-center justify-center cursor-pointer";
+        return (
+          <div
+            className="fixed z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[190px]"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
           >
-            Remove channel
-          </button>
-        </div>
-      )}
+            <div className="px-3 pt-0.5 pb-1 text-[11px] text-muted-foreground truncate max-w-[210px]">
+              {contextMenu.channelName}
+            </div>
+            {/* Quick color swatches — hover to preview live on the line, click to set */}
+            <div className="px-3 py-1 flex flex-wrap gap-1.5 max-w-[210px]">
+              {CHART_COLORS.map((c) => (
+                <button
+                  key={c}
+                  title={c}
+                  onMouseEnter={() => setColorPreview({ key: cmKey, color: c })}
+                  onMouseLeave={() => setColorPreview(null)}
+                  onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c); setColorPreview(null); }}
+                  className="w-4 h-4 rounded-full border border-white/20 cursor-pointer hover:scale-110 transition-transform"
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+              <button
+                title="Reset to default color"
+                onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, undefined); setColorPreview(null); }}
+                className="w-4 h-4 rounded-full border border-white/30 cursor-pointer text-[9px] leading-none flex items-center justify-center text-muted-foreground hover:text-foreground"
+              >
+                ↺
+              </button>
+            </div>
+            {/* Line width */}
+            <div className="px-3 py-1">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Width</div>
+              <div className="flex gap-1">
+                {WIDTH_OPTIONS.map((w) => (
+                  <button
+                    key={w}
+                    title={`${w}px`}
+                    onClick={() => onSetChannelWidth(contextMenu.logFileId, contextMenu.channelName, w)}
+                    className={`${seg} ${Math.abs(curWidth - w) < 0.01 ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
+                  >
+                    <div className="w-5 rounded-full bg-foreground/80" style={{ height: w }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Line style */}
+            <div className="px-3 py-1">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Style</div>
+              <div className="flex gap-1">
+                {STYLE_OPTIONS.map((s) => {
+                  const active = JSON.stringify(curDash ?? null) === JSON.stringify(s.dash ?? null);
+                  return (
+                    <button
+                      key={s.label}
+                      title={s.label}
+                      onClick={() => onSetChannelDash(contextMenu.logFileId, contextMenu.channelName, s.dash)}
+                      className={`${seg} ${active ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
+                    >
+                      <svg width="30" height="6" viewBox="0 0 30 6" className="text-foreground/80">
+                        <line x1="1" y1="3" x2="29" y2="3" stroke="currentColor" strokeWidth="1.5" strokeDasharray={s.dash ? s.dash.join(",") : undefined} />
+                      </svg>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="border-t border-border my-1" />
+            <button className={item} onClick={() => { setSettingsOpen(true); setContextMenu(null); }}>
+              Edit channel…
+            </button>
+            <button
+              className={item}
+              onClick={() => {
+                setHiddenChannels((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(cmKey)) next.delete(cmKey); else next.add(cmKey);
+                  return next;
+                });
+                setContextMenu(null);
+              }}
+            >
+              {cmHidden ? "Show on chart" : "Hide on chart"}
+            </button>
+            <div className="border-t border-border my-1" />
+            <button
+              className={`${item} text-destructive`}
+              onClick={() => { onRemoveChannel(contextMenu.logFileId, contextMenu.channelName); setContextMenu(null); }}
+            >
+              Remove channel
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Settings panel */}
       <TraceSettingsPanel
