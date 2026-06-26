@@ -37,6 +37,46 @@ export function findValueAtTime(
   return v0 + frac * (v1 - v0);
 }
 
+/**
+ * Average a channel's samples over a [tMin, tMax] display-time range.
+ * Mirrors findValueAtTime's offset convention (channel timestamps are raw;
+ * the selection is in aligned/display time, so we subtract `offset`).
+ * Returns null if the channel/session is missing or no samples fall in range.
+ */
+export function computeAvgInRange(
+  log: LoadedLog,
+  channelName: string,
+  range: [number, number],
+  offset: number,
+): number | null {
+  const session = log.parsed.sessions[log.activeSessionIndex];
+  if (!session) return null;
+  const data = session.channels.get(channelName);
+  if (!data) return null;
+  const ts = session.timestamps;
+  if (ts.length === 0) return null;
+  const lo = Math.min(range[0], range[1]) - offset;
+  const hi = Math.max(range[0], range[1]) - offset;
+  if (hi < ts[0] || lo > ts[ts.length - 1]) return null;
+
+  // Binary search: first index where ts[i] >= lo
+  let s = 0, e = ts.length - 1;
+  while (s < e) {
+    const m = (s + e) >> 1;
+    if (ts[m] < lo) s = m + 1;
+    else e = m;
+  }
+
+  let sum = 0, count = 0;
+  for (let i = s; i < ts.length && ts[i] <= hi; i++) {
+    const v = data[i];
+    if (v !== v) continue; // skip NaN
+    sum += v;
+    count++;
+  }
+  return count === 0 ? null : sum / count;
+}
+
 export function formatValue(v: number): string {
   const abs = Math.abs(v);
   if (abs >= 100) return v.toFixed(0);

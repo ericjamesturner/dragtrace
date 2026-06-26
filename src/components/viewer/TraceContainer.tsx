@@ -4,7 +4,7 @@ import { resolveChannelStyle } from "@/lib/viewer-types";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { TraceChart } from "./TraceChart";
 import { TraceSettingsPanel } from "./TraceSettingsPanel";
-import { findValueAtTime, formatValue } from "@/lib/cursor-utils";
+import { findValueAtTime, formatValue, computeAvgInRange } from "@/lib/cursor-utils";
 import { convertForDisplay, getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { useEvaluatedZones } from "@/hooks/useEvaluatedZones";
 import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, GripHorizontalIcon } from "lucide-react";
@@ -32,6 +32,11 @@ interface Props {
   onClearSelection: () => void;
   onDragPreview: (sel: [number, number] | null) => void;
   onCursorTime: (time: number | null) => void;
+  onZoom?: (min: number, max: number) => void;
+  onResetZoom?: () => void;
+  wheelZoomEnabled?: boolean;
+  wheelZoomFactor?: number;
+  avgOnSelection?: boolean;
   onRemoveTrace: () => void;
   onRemoveChannel: (logFileId: Id<"files">, channelName: string) => void;
   onAddChannel: (channel: ChannelOnTrace) => void;
@@ -73,6 +78,11 @@ export function TraceContainer({
   onClearSelection,
   onDragPreview,
   onCursorTime,
+  onZoom,
+  onResetZoom,
+  wheelZoomEnabled,
+  wheelZoomFactor,
+  avgOnSelection = true,
   onRemoveTrace,
   onRemoveChannel,
   onAddChannel,
@@ -293,6 +303,10 @@ export function TraceContainer({
   // Chart area width
   const chartWidth = Math.max(100, width - 8);
 
+  // A RANGE selection (not a click/point) drives the AVG readout, when enabled.
+  const avgRange: [number, number] | null =
+    avgOnSelection && selection && selection[0] !== selection[1] ? selection : null;
+
   return (
     <div
       className={`border rounded-lg mb-2 ${dragOver ? "border-primary bg-primary/5" : isPinnedFromOther ? "border-primary/30 border-dashed" : isActive ? "border-primary/50" : "border-border"}`}
@@ -361,6 +375,10 @@ export function TraceContainer({
             onClearSelection={onClearSelection}
             onDragPreview={onDragPreview}
             onCursorTime={onCursorTime}
+            onZoom={onZoom}
+            onResetZoom={onResetZoom}
+            wheelZoomEnabled={wheelZoomEnabled}
+            wheelZoomFactor={wheelZoomFactor}
             evaluatedZones={evaluatedZones}
             expandedZoneIds={expandedZoneIds}
             onToggleZoneExpand={handleToggleZoneExpand}
@@ -457,11 +475,22 @@ export function TraceContainer({
                           );
                           let valueStr: string | null = null;
                           let unitLabel = "";
-                          if (cursorTime !== null && log && !isHidden && !isChHidden) {
+                          let isAvg = false;
+                          const def = log?.parsed.channelDefs.find(d => d.name === ch.channelName);
+                          if (avgRange && log && !isHidden && !isChHidden && !def?.enumValues) {
+                            const offset = offsets.get(log.fileId) ?? 0;
+                            const avg = computeAvgInRange(log, ch.channelName, avgRange, offset);
+                            if (avg !== null) {
+                              const mu = def?.metricUnit ?? "";
+                              const converted = mu ? convertForDisplay(avg, mu, unitSystem, unitOverrides) : avg;
+                              valueStr = formatValue(converted);
+                              unitLabel = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
+                              isAvg = true;
+                            }
+                          } else if (cursorTime !== null && log && !isHidden && !isChHidden) {
                             const offset = offsets.get(log.fileId) ?? 0;
                             const val = findValueAtTime(log, ch.channelName, cursorTime, offset);
                             if (val !== null) {
-                              const def = log.parsed.channelDefs.find(d => d.name === ch.channelName);
                               const mu = def?.metricUnit ?? "";
                               const converted = mu ? convertForDisplay(val, mu, unitSystem, unitOverrides) : val;
                               valueStr = formatValue(converted);
@@ -518,7 +547,12 @@ export function TraceContainer({
                               <span className="text-white/70 truncate max-w-[140px]">
                                 {ch.channelName}
                               </span>
-                              <span className="font-mono font-medium text-white ml-auto pl-2 w-16 text-right tabular-nums">
+                              {isAvg && (
+                                <span className="text-[9px] font-semibold text-amber-400 ml-auto self-center shrink-0">
+                                  AVG
+                                </span>
+                              )}
+                              <span className={`font-mono font-medium text-white ${isAvg ? "pl-1" : "ml-auto pl-2"} w-16 text-right tabular-nums`}>
                                 {valueStr ?? "---"}
                               </span>
                               <span className="text-white/50 text-[10px] w-8">

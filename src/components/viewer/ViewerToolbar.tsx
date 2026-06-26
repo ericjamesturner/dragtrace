@@ -1,7 +1,7 @@
 import type { LoadedLog } from "@/lib/viewer-types";
 import type { UnitSystem } from "@/lib/units";
 import { Button } from "@/components/ui/button";
-import { ChevronLeftIcon, PlusIcon, AlignCenterHorizontalIcon, RulerIcon, TagIcon, ThermometerIcon } from "lucide-react";
+import { ChevronLeftIcon, PlusIcon, AlignCenterHorizontalIcon, RulerIcon, TagIcon, ThermometerIcon, ZoomInIcon, SigmaIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 
 interface Props {
@@ -10,15 +10,21 @@ interface Props {
   showAxes: boolean;
   showAxisLabels: boolean;
   unitSystem: UnitSystem;
+  wheelZoomEnabled: boolean;
+  wheelZoomFactor: number;
+  avgOnSelection: boolean;
   onToggleAlignment: () => void;
   onToggleAxes: () => void;
   onToggleAxisLabels: () => void;
   onToggleUnitSystem: () => void;
+  onToggleWheelZoom: () => void;
+  onSetWheelZoomFactor: (factor: number) => void;
+  onToggleAvgOnSelection: () => void;
   onAddTrace: () => void;
   onBack: () => void;
 }
 
-export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels, unitSystem, onToggleAlignment, onToggleAxes, onToggleAxisLabels, onToggleUnitSystem, onAddTrace, onBack }: Props) {
+export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels, unitSystem, wheelZoomEnabled, wheelZoomFactor, avgOnSelection, onToggleAlignment, onToggleAxes, onToggleAxisLabels, onToggleUnitSystem, onToggleWheelZoom, onSetWheelZoomFactor, onToggleAvgOnSelection, onAddTrace, onBack }: Props) {
   const hasRaceData = logs.some((l) => l.raceStartTime !== null);
 
   return (
@@ -73,6 +79,39 @@ export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels,
           >
             <ThermometerIcon className="size-4 mr-1" />
             {unitSystem === "imperial" ? "Imperial" : "Metric"}
+          </Button>
+        </Tip>
+        <Tip content="Cursor-centered mouse-wheel zoom">
+          <Button
+            variant={wheelZoomEnabled ? "default" : "outline"}
+            size="sm"
+            onClick={onToggleWheelZoom}
+          >
+            <ZoomInIcon className="size-4 mr-1" />
+            Wheel
+          </Button>
+        </Tip>
+        {wheelZoomEnabled && (
+          <Tip content="Wheel zoom sensitivity">
+            <select
+              value={String(wheelZoomFactor)}
+              onChange={(e) => onSetWheelZoomFactor(Number(e.target.value))}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm cursor-pointer"
+            >
+              <option value="1.1">Low</option>
+              <option value="1.25">Med</option>
+              <option value="1.5">High</option>
+            </select>
+          </Tip>
+        )}
+        <Tip content="Show average over a drag-selected range in the channel readout">
+          <Button
+            variant={avgOnSelection ? "default" : "outline"}
+            size="sm"
+            onClick={onToggleAvgOnSelection}
+          >
+            <SigmaIcon className="size-4 mr-1" />
+            Avg
           </Button>
         </Tip>
         <Tip content="Add a new trace">

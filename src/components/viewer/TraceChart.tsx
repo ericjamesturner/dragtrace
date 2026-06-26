@@ -25,6 +25,29 @@ function scaleGroupKey(name: string): string | null {
   return null;
 }
 
+/**
+ * Clamp a candidate wheel-zoom [min,max] to the full data range.
+ * Returns null when the candidate covers (or exceeds) the full extent —
+ * meaning "reset to full range". Shifts (rather than squashes) when one side
+ * overshoots, preserving the requested span. Ported from halog clampRange.
+ */
+function clampWheelRange(
+  min: number,
+  max: number,
+  full: [number, number],
+): [number, number] | null {
+  const [fullMin, fullMax] = full;
+  const span = max - min;
+  if (span < 0.01) return null; // too tight — caller keeps current
+  if (min <= fullMin && max >= fullMax) return null; // covers all -> reset
+  if (min < fullMin) { min = fullMin; max = fullMin + span; }
+  if (max > fullMax) { max = fullMax; min = fullMax - span; }
+  min = Math.max(fullMin, min);
+  max = Math.min(fullMax, max);
+  if (min <= fullMin && max >= fullMax) return null;
+  return [min, max];
+}
+
 /** Convert a hex color + opacity (0-1) to an rgba() string. */
 function hexToRgba(hex: string, opacity: number): string {
   if (opacity >= 1) return hex;
@@ -58,6 +81,10 @@ interface Props {
   onClearSelection?: () => void;
   onDragPreview?: (sel: [number, number] | null) => void;
   onCursorTime?: (time: number | null) => void;
+  onZoom?: (min: number, max: number) => void;
+  onResetZoom?: () => void;
+  wheelZoomEnabled?: boolean;
+  wheelZoomFactor?: number;
   evaluatedZones?: EvaluatedZone[];
   expandedZoneIds?: Set<string>;
   onToggleZoneExpand?: (zoneId: string) => void;
@@ -133,6 +160,10 @@ export function TraceChart({
   onClearSelection,
   onDragPreview,
   onCursorTime,
+  onZoom,
+  onResetZoom,
+  wheelZoomEnabled,
+  wheelZoomFactor,
   evaluatedZones,
   expandedZoneIds,
   onToggleZoneExpand,
@@ -155,6 +186,22 @@ export function TraceChart({
   onCursorRef.current = onCursorTime;
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
+  // Wheel-zoom refs — kept fresh every render so the native wheel handler never
+  // goes stale during the chart rebuild that follows each zoom commit.
+  const onZoomRef = useRef(onZoom);
+  onZoomRef.current = onZoom;
+  const onResetZoomRef = useRef(onResetZoom);
+  onResetZoomRef.current = onResetZoom;
+  const wheelEnabledRef = useRef(wheelZoomEnabled);
+  wheelEnabledRef.current = wheelZoomEnabled;
+  const wheelFactorRef = useRef(wheelZoomFactor);
+  wheelFactorRef.current = wheelZoomFactor;
+  const globalRangeRef = useRef(globalRange);
+  globalRangeRef.current = globalRange;
+  // Read AND optimistically written by the wheel handler so rapid wheel events
+  // accumulate before the parent state round-trips and rebuilds the chart.
+  const currentRangeRef = useRef<[number, number]>(zoomRange ?? globalRange);
+  currentRangeRef.current = zoomRange ?? globalRange;
   const evaluatedZonesRef = useRef(evaluatedZones);
   evaluatedZonesRef.current = evaluatedZones;
   const expandedZoneIdsRef = useRef(expandedZoneIds);
@@ -633,8 +680,13 @@ export function TraceChart({
     const over = plot.over; // uPlot's interaction overlay element
     let downX = 0;
     let downY = 0;
+    // True from the moment an edge-resize grab starts until its release is
+    // consumed, so a finished edge drag isn't misread as a click that clears
+    // the selection.
+    let edgeResizing = false;
     const onMouseDown = (e: MouseEvent) => { downX = e.clientX; downY = e.clientY; };
     const onMouseUp = (e: MouseEvent) => {
+      if (edgeResizing) { edgeResizing = false; return; } // just resized, not a click
       const dx = Math.abs(e.clientX - downX);
       const dy = Math.abs(e.clientY - downY);
       if (dx < 5 && dy < 5) {
@@ -684,9 +736,99 @@ export function TraceChart({
     over.addEventListener("mousedown", onMouseDown);
     over.addEventListener("mouseup", onMouseUp);
 
+    // --- Selection edge resize (grab a range-selection edge and drag it) ---
+    const EDGE_PX = 7;
+    const root = plot.root; // uPlot top-level container (ancestor of `over`)
+    let edgeDrag: { anchor: number } | null = null;
+
+    // 'left' | 'right' | null for x (CSS px relative to `over`) near a sel edge
+    const edgeHitAt = (x: number): "left" | "right" | null => {
+      const sel = selectionRef.current;
+      if (!sel || sel[0] === sel[1]) return null; // only RANGE selections
+      const xl = plot.valToPos(sel[0], "x", false); // CSS px
+      const xr = plot.valToPos(sel[1], "x", false);
+      if (Math.abs(x - xl) <= EDGE_PX) return "left";
+      if (Math.abs(x - xr) <= EDGE_PX) return "right";
+      return null;
+    };
+
+    // Capture-phase mousedown on root runs BEFORE uPlot's drag-select on `over`,
+    // so grabbing an edge takes over the gesture instead of starting a selection.
+    const edgeDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      const sel = selectionRef.current;
+      if (!sel || sel[0] === sel[1]) return;
+      const rect = over.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      if (x < 0 || x > rect.width || y < 0 || y > rect.height) return;
+      const edge = edgeHitAt(x);
+      if (!edge) return;
+      e.stopImmediatePropagation(); // block uPlot drag-select AND `over` onMouseDown
+      e.preventDefault();
+      edgeResizing = true;
+      edgeDrag = { anchor: edge === "left" ? sel[1] : sel[0] };
+      over.style.cursor = "ew-resize";
+    };
+
+    const edgeMove = (e: MouseEvent) => {
+      if (!edgeDrag) return;
+      const rect = over.getBoundingClientRect();
+      const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+      const t = plot.posToVal(x, "x");
+      const a = edgeDrag.anchor;
+      onSelectionRef.current?.(Math.min(a, t), Math.max(a, t)); // commit each move (live)
+    };
+
+    const edgeUp = () => {
+      if (!edgeDrag) return;
+      edgeDrag = null;
+      over.style.cursor = "";
+      edgeResizing = false; // backup clear (e.g. released outside `over`)
+    };
+
+    // Hover feedback: ew-resize when over an edge (or mid-drag)
+    const edgeCursor = (e: MouseEvent) => {
+      if (edgeDrag) { over.style.cursor = "ew-resize"; return; }
+      const rect = over.getBoundingClientRect();
+      over.style.cursor = edgeHitAt(e.clientX - rect.left) ? "ew-resize" : "";
+    };
+
+    root.addEventListener("mousedown", edgeDown, true);
+    over.addEventListener("mousemove", edgeCursor);
+    document.addEventListener("mousemove", edgeMove);
+    document.addEventListener("mouseup", edgeUp);
+
+    // --- Cursor-centered mouse-wheel zoom on the x (time) axis ---
+    const onWheel = (e: WheelEvent) => {
+      if (wheelEnabledRef.current === false) return;
+      e.preventDefault(); // stop page scroll
+      const factorOut = wheelFactorRef.current ?? 1.25;
+      const factor = e.deltaY > 0 ? factorOut : 1 / factorOut; // out : in
+      const rect = over.getBoundingClientRect();
+      const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const [curMin, curMax] = currentRangeRef.current;
+      const center = curMin + frac * (curMax - curMin); // cursor data-x
+      const halfSpan = ((curMax - curMin) * factor) / 2;
+      const next = clampWheelRange(center - halfSpan, center + halfSpan, globalRangeRef.current);
+      if (next === null) {
+        currentRangeRef.current = globalRangeRef.current;
+        onResetZoomRef.current?.();
+      } else {
+        currentRangeRef.current = next; // optimistic; accumulates across events
+        onZoomRef.current?.(next[0], next[1]);
+      }
+    };
+    over.addEventListener("wheel", onWheel, { passive: false });
+
     return () => {
       over.removeEventListener("mousedown", onMouseDown);
       over.removeEventListener("mouseup", onMouseUp);
+      root.removeEventListener("mousedown", edgeDown, true);
+      over.removeEventListener("mousemove", edgeCursor);
+      document.removeEventListener("mousemove", edgeMove);
+      document.removeEventListener("mouseup", edgeUp);
+      over.removeEventListener("wheel", onWheel);
       plot.destroy();
       chartRef.current = null;
     };

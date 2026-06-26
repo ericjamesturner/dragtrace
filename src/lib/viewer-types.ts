@@ -139,6 +139,8 @@ export interface PageConfig {
   traces: TraceConfig[];
   scatters?: ScatterConfig[];
   heatmaps?: HeatmapConfig[];
+  // Persisted drag-select range for this page (survives reload). Undefined = none.
+  selection?: [number, number];
 }
 
 export interface ViewerConfig {
@@ -205,6 +207,7 @@ export type ViewerAction =
   | { type: "removeHeatmap"; heatmapId: string }
   | { type: "updateHeatmap"; heatmapId: string; updates: Partial<Omit<HeatmapConfig, "id">> }
   | { type: "setScatterSuggestions"; suggestions: ScatterSuggestion[]; key: string }
+  | { type: "setSelection"; selection: [number, number] | null }
   | { type: "purgeFile"; logFileId: Id<"files"> };
 
 let traceCounter = 0;
@@ -522,6 +525,16 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
       };
     case "setScatterSuggestions":
       return { ...state, scatterSuggestions: action.suggestions, scatterSuggestionsKey: action.key };
+    case "setSelection":
+      return {
+        ...state,
+        pages: state.pages.map((p) => {
+          if (p.id !== state.activePageId) return p;
+          if (action.selection) return { ...p, selection: action.selection };
+          const { selection: _drop, ...rest } = p;
+          return rest;
+        }),
+      };
     case "purgeFile": {
       const fid = action.logFileId as string;
       return {

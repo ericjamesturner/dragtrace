@@ -43,6 +43,11 @@ interface Props {
   onToggleZone: (traceId: string, zoneId: string) => void;
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
+  wheelZoomEnabled?: boolean;
+  wheelZoomFactor?: number;
+  avgOnSelection: boolean;
+  persistedSelection?: [number, number] | null;
+  onPersistSelection?: (sel: [number, number] | null) => void;
 }
 
 export function TracePanel({
@@ -81,9 +86,14 @@ export function TracePanel({
   onToggleZone,
   unitSystem,
   unitOverrides,
+  wheelZoomEnabled,
+  wheelZoomFactor,
+  avgOnSelection,
+  persistedSelection,
+  onPersistSelection,
 }: Props) {
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
-  const [selection, setSelection] = useState<[number, number] | null>(null);
+  const [selection, setSelection] = useState<[number, number] | null>(persistedSelection ?? null);
   const [dragPreview, setDragPreview] = useState<[number, number] | null>(null);
   const [cursorTime, setCursorTime] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -132,6 +142,35 @@ export function TracePanel({
 
   // Display the live drag preview or committed selection (whichever is active)
   const displaySelection = dragPreview ?? selection;
+
+  // --- Persist the settled drag-selection per page (Convex-backed) ---
+  const onPersistSelectionRef = useRef(onPersistSelection);
+  onPersistSelectionRef.current = onPersistSelection;
+  const lastSentRef = useRef<[number, number] | null>(persistedSelection ?? null);
+
+  // Restore this page's selection when the active page changes.
+  useEffect(() => {
+    setSelection(persistedSelection ?? null);
+    lastSentRef.current = persistedSelection ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePageId]);
+
+  // Debounce-persist the settled selection (covers edge-drag, native drag,
+  // click). Live edge-drag moves only persist their settled value, not every
+  // mousemove, so we don't thrash the reducer config / Convex save.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      const cur = selection;
+      const last = lastSentRef.current;
+      const same =
+        (cur === null && last === null) ||
+        (cur !== null && last !== null && cur[0] === last[0] && cur[1] === last[1]);
+      if (same) return;
+      lastSentRef.current = cur;
+      onPersistSelectionRef.current?.(cur);
+    }, 400);
+    return () => clearTimeout(id);
+  }, [selection]);
 
   // Keyboard: Escape clears selection then zoom, Up zooms in / to selection, Down zooms out
   const zoomRangeRef = useRef(zoomRange);
@@ -354,6 +393,11 @@ export function TracePanel({
                 onClearSelection={handleClearSelection}
                 onDragPreview={handleDragPreview}
                 onCursorTime={handleCursorTime}
+                onZoom={handleZoom}
+                onResetZoom={handleResetZoom}
+                wheelZoomEnabled={wheelZoomEnabled}
+                wheelZoomFactor={wheelZoomFactor}
+                avgOnSelection={avgOnSelection}
                 onRemoveTrace={() => onRemoveTrace(trace.id)}
                 onRemoveChannel={(logFileId, channelName) =>
                   onRemoveChannel(trace.id, logFileId, channelName)

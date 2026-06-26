@@ -297,10 +297,16 @@ function LogViewerReady({
         showAxes={!!config.showAxes}
         showAxisLabels={!!config.showAxisLabels}
         unitSystem={config.unitSystem ?? "imperial"}
+        wheelZoomEnabled={config.wheelZoomEnabled ?? true}
+        wheelZoomFactor={config.wheelZoomFactor ?? 1.25}
+        avgOnSelection={config.avgOnSelection !== false}
         onToggleAlignment={() => dispatch({ type: "toggleAlignment" })}
         onToggleAxes={() => dispatch({ type: "toggleAxes" })}
         onToggleAxisLabels={() => dispatch({ type: "toggleAxisLabels" })}
         onToggleUnitSystem={() => dispatch({ type: "setUnitSystem", system: (config.unitSystem ?? "imperial") === "imperial" ? "metric" : "imperial" })}
+        onToggleWheelZoom={() => dispatch({ type: "setWheelZoomEnabled", enabled: !(config.wheelZoomEnabled ?? true) })}
+        onSetWheelZoomFactor={(f) => dispatch({ type: "setWheelZoomFactor", factor: f })}
+        onToggleAvgOnSelection={() => dispatch({ type: "toggleAvgOnSelection" })}
         onAddTrace={() => handleAddTrace()}
         onBack={handleBack}
       />
@@ -399,6 +405,11 @@ function LogViewerReady({
           }
           unitSystem={config.unitSystem ?? "imperial"}
           unitOverrides={config.unitOverrides}
+          wheelZoomEnabled={config.wheelZoomEnabled ?? true}
+          wheelZoomFactor={config.wheelZoomFactor ?? 1.25}
+          avgOnSelection={config.avgOnSelection !== false}
+          persistedSelection={config.pages.find((p) => p.id === config.activePageId)?.selection ?? null}
+          onPersistSelection={(sel) => dispatch({ type: "setSelection", selection: sel })}
         />
       </div>
     </div>
