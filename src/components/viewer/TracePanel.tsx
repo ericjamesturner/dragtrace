@@ -1,9 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { LoadedLog, TraceConfig, ChannelOnTrace, PageConfig, HighlightZoneConfig } from "@/lib/viewer-types";
+import type { LoadedLog, TraceConfig, ChannelOnTrace, PageConfig, HighlightZoneConfig, ScatterConfig } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import type { UnitSystem, UnitOverrides } from "@/lib/units";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { TraceContainer } from "./TraceContainer";
+import { ScatterContainer } from "./ScatterContainer";
+import { ScatterConfigDialog } from "./ScatterConfigDialog";
 import { OverviewBar } from "./OverviewBar";
 import { PlusIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
@@ -53,6 +55,9 @@ interface Props {
   timeslipZones: EvaluatedZone[];
   expandedTimeslipIds: string[];
   onToggleTimeslipExpand: (id: string) => void;
+  onAddScatter: (scatter: Omit<ScatterConfig, "id">) => void;
+  onRemoveScatter: (scatterId: string) => void;
+  onUpdateScatter: (scatterId: string, updates: Partial<Omit<ScatterConfig, "id">>) => void;
 }
 
 export function TracePanel({
@@ -100,6 +105,9 @@ export function TracePanel({
   timeslipZones,
   expandedTimeslipIds,
   onToggleTimeslipExpand,
+  onAddScatter,
+  onRemoveScatter,
+  onUpdateScatter,
 }: Props) {
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
   const [selection, setSelection] = useState<[number, number] | null>(persistedSelection ?? null);
@@ -112,6 +120,14 @@ export function TracePanel({
 
   // Tab rename state
   const [tabRename, setTabRename] = useState<{ id: string; value: string } | null>(null);
+
+  // Scatter config dialog state (new or editing an existing scatter)
+  const [scatterDialog, setScatterDialog] = useState<
+    { mode: "new" } | { mode: "edit"; scatter: ScatterConfig } | null
+  >(null);
+
+  // Scatters live on the active page (page-local, like halog).
+  const scatters = pages.find((p) => p.id === activePageId)?.scatters ?? [];
 
   // Measure container width
   useEffect(() => {
@@ -303,7 +319,7 @@ export function TracePanel({
         {pages.map((page) => {
           const isActive = page.id === activePageId;
           const isRenaming = tabRename?.id === page.id;
-          const traceCount = page.traces.length;
+          const traceCount = page.traces.length + (page.scatters?.length ?? 0);
           return (
             <div
               key={page.id}
@@ -358,6 +374,15 @@ export function TracePanel({
             <PlusIcon className="size-3.5" />
           </button>
         </Tip>
+        <div className="flex-1" />
+        <Tip content="Add an XY scatter plot to this page">
+          <button
+            onClick={() => setScatterDialog({ mode: "new" })}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+          >
+            <PlusIcon className="size-3" /> Scatter
+          </button>
+        </Tip>
       </div>
 
       {/* Scrollable trace area */}
@@ -365,7 +390,7 @@ export function TracePanel({
         className="flex-1 overflow-y-auto overflow-x-hidden p-3 flex flex-col"
         onMouseLeave={() => setCursorTime(null)}
       >
-        {traces.length === 0 ? (
+        {traces.length === 0 && scatters.length === 0 ? (
           <div
             className="flex items-center justify-center h-full text-sm text-muted-foreground"
             onDragEnter={handleBlankDragEnter}
@@ -380,7 +405,7 @@ export function TracePanel({
                 </div>
               </div>
             ) : (
-              "Click \u201C+ Trace\u201D to add a trace, then drag channels from the sidebar"
+              "Click \u201C+ Trace\u201D to add a trace, or \u201C+ Scatter\u201D for an XY plot, then drag channels from the sidebar"
             )}
           </div>
         ) : (
@@ -454,6 +479,24 @@ export function TracePanel({
                 maxYAxes={maxYAxes}
               />
             ))}
+            {/* XY scatter panels (page-local) */}
+            {scatters.map((sc) => (
+              <ScatterContainer
+                key={sc.id}
+                scatter={sc}
+                logs={logs}
+                width={containerWidth - 24}
+                offsets={offsets}
+                zoomRange={zoomRange}
+                selection={selection}
+                cursorTime={cursorTime}
+                unitSystem={unitSystem}
+                unitOverrides={unitOverrides}
+                onUpdate={(u) => onUpdateScatter(sc.id, u)}
+                onRemove={() => onRemoveScatter(sc.id)}
+                onConfigure={() => setScatterDialog({ mode: "edit", scatter: sc })}
+              />
+            ))}
             {/* Blank space drop zone */}
             <div
               className="flex-1 min-h-[100px]"
@@ -486,6 +529,24 @@ export function TracePanel({
         onZoom={handleZoom}
         onResetZoom={handleResetZoom}
       />
+
+      {scatterDialog && (
+        <ScatterConfigDialog
+          open
+          onOpenChange={(o) => { if (!o) setScatterDialog(null); }}
+          logs={logs}
+          existing={scatterDialog.mode === "edit" ? scatterDialog.scatter : undefined}
+          unitSystem={unitSystem}
+          unitOverrides={unitOverrides}
+          onSubmit={(cfg) => {
+            if (scatterDialog.mode === "edit") {
+              onUpdateScatter(scatterDialog.scatter.id, cfg);
+            } else {
+              onAddScatter(cfg);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

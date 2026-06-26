@@ -429,6 +429,9 @@ function LogViewerReady({
           timeslipZones={timeslipZones}
           expandedTimeslipIds={config.expandedTimeslipIds ?? []}
           onToggleTimeslipExpand={(id) => dispatch({ type: "toggleTimeslipExpand", id })}
+          onAddScatter={(scatter) => dispatch({ type: "addScatter", scatter })}
+          onRemoveScatter={(scatterId) => dispatch({ type: "removeScatter", scatterId })}
+          onUpdateScatter={(scatterId, updates) => dispatch({ type: "updateScatter", scatterId, updates })}
         />
       </div>
     </div>

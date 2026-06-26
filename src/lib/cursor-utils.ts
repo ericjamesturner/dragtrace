@@ -77,6 +77,25 @@ export function computeAvgInRange(
   return count === 0 ? null : sum / count;
 }
 
+/**
+ * Binary-search the nearest sample index for a time `t` expressed in the
+ * channel's *local* timestamp space (i.e. aligned time minus the log offset).
+ * Returns the index of the closest timestamp. Used for scatter highlight sync.
+ */
+export function findIndexAtTime(ts: Float64Array, t: number): number {
+  if (ts.length === 0) return 0;
+  if (t <= ts[0]) return 0;
+  if (t >= ts[ts.length - 1]) return ts.length - 1;
+  let lo = 0;
+  let hi = ts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (ts[mid] < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo > 0 && Math.abs(ts[lo - 1] - t) < Math.abs(ts[lo] - t) ? lo - 1 : lo;
+}
+
 export function formatValue(v: number): string {
   const abs = Math.abs(v);
   if (abs >= 100) return v.toFixed(0);
