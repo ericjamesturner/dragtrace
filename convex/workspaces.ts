@@ -20,7 +20,7 @@ export const save = mutation({
   args: {
     id: v.optional(v.id("workspaces")),
     vehicleId: v.id("vehicles"),
-    name: v.string(),
+    name: v.optional(v.string()),
     config: v.string(),
   },
   handler: async (ctx, args) => {
@@ -31,7 +31,7 @@ export const save = mutation({
       const existing = await ctx.db.get(args.id);
       if (!existing || existing.userId !== userId) throw new Error("Not found");
       await ctx.db.patch(args.id, {
-        name: args.name,
+        ...(args.name !== undefined ? { name: args.name } : {}),
         config: args.config,
         updatedAt: Date.now(),
       });
@@ -41,9 +41,34 @@ export const save = mutation({
     return await ctx.db.insert("workspaces", {
       userId,
       vehicleId: args.vehicleId,
-      name: args.name,
+      name: args.name ?? "Default",
       config: args.config,
       updatedAt: Date.now(),
     });
+  },
+});
+
+export const rename = mutation({
+  args: {
+    id: v.id("workspaces"),
+    name: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getEffectiveUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
+    const existing = await ctx.db.get(args.id);
+    if (!existing || existing.userId !== userId) throw new Error("Not found");
+    await ctx.db.patch(args.id, { name: args.name, updatedAt: Date.now() });
+  },
+});
+
+export const remove = mutation({
+  args: { id: v.id("workspaces") },
+  handler: async (ctx, args) => {
+    const userId = await getEffectiveUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
+    const existing = await ctx.db.get(args.id);
+    if (!existing || existing.userId !== userId) throw new Error("Not found");
+    await ctx.db.delete(args.id);
   },
 });

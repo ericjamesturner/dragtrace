@@ -24,9 +24,10 @@ interface Props {
   onToggleTimeslip: () => void;
   onAddTrace: () => void;
   onBack: () => void;
+  workspaceMenu?: React.ReactNode;
 }
 
-export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels, unitSystem, wheelZoomEnabled, wheelZoomFactor, avgOnSelection, showTimeslip, onToggleAlignment, onToggleAxes, onToggleAxisLabels, onToggleUnitSystem, onToggleWheelZoom, onSetWheelZoomFactor, onToggleAvgOnSelection, onToggleTimeslip, onAddTrace, onBack }: Props) {
+export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels, unitSystem, wheelZoomEnabled, wheelZoomFactor, avgOnSelection, showTimeslip, onToggleAlignment, onToggleAxes, onToggleAxisLabels, onToggleUnitSystem, onToggleWheelZoom, onSetWheelZoomFactor, onToggleAvgOnSelection, onToggleTimeslip, onAddTrace, onBack, workspaceMenu }: Props) {
   const hasRaceData = logs.some((l) => l.raceStartTime !== null);
 
   return (
@@ -35,6 +36,8 @@ export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels,
         <ChevronLeftIcon className="size-4 mr-1" />
         Back
       </Button>
+
+      {workspaceMenu}
 
       <div className="flex-1" />
 
