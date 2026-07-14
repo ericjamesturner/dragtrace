@@ -142,6 +142,11 @@ export function TraceContainer({
 }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Channel to auto-expand when the settings panel opens via right-click
+  const [settingsFocus, setSettingsFocus] = useState<{
+    logFileId: Id<"files">;
+    channelName: string;
+  } | null>(null);
   const resizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   // Race-start marker line right-click menu.
@@ -393,7 +398,10 @@ export function TraceContainer({
         </Tip>
         <Tip content="Trace settings">
           <button
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => {
+              setSettingsFocus(null);
+              setSettingsOpen(true);
+            }}
             className="text-muted-foreground hover:text-foreground cursor-pointer"
           >
             <SlidersHorizontalIcon className="size-4" />
@@ -690,6 +698,23 @@ export function TraceContainer({
         const curDash = cmCh?.dash;
         const item = "w-full text-left px-3 py-1.5 text-sm hover:bg-muted cursor-pointer flex items-center gap-2";
         const seg = "flex-1 h-6 rounded border flex items-center justify-center cursor-pointer";
+        // Data extent of the right-clicked channel, for quick axis actions
+        const cmLog = logs.find((l) => l.fileId === contextMenu.logFileId);
+        const cmSession = cmLog?.parsed.sessions[cmLog.activeSessionIndex];
+        const cmData = cmSession?.channels.get(contextMenu.channelName);
+        let cmExtent: { min: number; max: number } | null = null;
+        if (cmData) {
+          let min = Infinity;
+          let max = -Infinity;
+          for (let i = 0; i < cmData.length; i++) {
+            const v = cmData[i];
+            if (v !== v) continue;
+            if (v < min) min = v;
+            if (v > max) max = v;
+          }
+          if (min <= max) cmExtent = { min, max };
+        }
+        const hasManualAxis = cmCh?.axisMin !== undefined || cmCh?.axisMax !== undefined;
         return (
           <div
             className="fixed z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[270px]"
@@ -773,8 +798,67 @@ export function TraceContainer({
                 })}
               </div>
             </div>
+            {/* Opacity */}
+            <div className="px-3 py-1">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Opacity</div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={cmCh?.opacity ?? 1}
+                  onChange={(e) =>
+                    onSetChannelOpacity(contextMenu.logFileId, contextMenu.channelName, parseFloat(e.target.value))
+                  }
+                  className="flex-1 h-1.5 accent-primary cursor-pointer"
+                />
+                <span className="text-xs text-muted-foreground w-8 text-right font-mono">
+                  {Math.round((cmCh?.opacity ?? 1) * 100)}%
+                </span>
+              </div>
+            </div>
             <div className="border-t border-border my-1" />
-            <button className={item} onClick={() => { setSettingsOpen(true); setContextMenu(null); }}>
+            {cmExtent && (
+              <button
+                className={item}
+                onClick={() => {
+                  const pad = (cmExtent.max - cmExtent.min) * 0.05 || 1;
+                  onSetChannelAxisRange(
+                    contextMenu.logFileId,
+                    contextMenu.channelName,
+                    parseFloat(formatValue(cmExtent.min - pad)),
+                    parseFloat(formatValue(cmExtent.max + pad)),
+                  );
+                  setContextMenu(null);
+                }}
+              >
+                Fit axis to data
+                <span className="ml-auto text-[11px] text-muted-foreground font-mono">
+                  {formatValue(cmExtent.min)} – {formatValue(cmExtent.max)}
+                </span>
+              </button>
+            )}
+            {hasManualAxis && (
+              <button
+                className={item}
+                onClick={() => {
+                  onSetChannelAxisRange(contextMenu.logFileId, contextMenu.channelName, undefined, undefined);
+                  setContextMenu(null);
+                }}
+              >
+                Reset axis to auto
+              </button>
+            )}
+            <div className="border-t border-border my-1" />
+            <button
+              className={item}
+              onClick={() => {
+                setSettingsFocus({ logFileId: contextMenu.logFileId, channelName: contextMenu.channelName });
+                setSettingsOpen(true);
+                setContextMenu(null);
+              }}
+            >
               Edit channel…
             </button>
             <button
@@ -891,6 +975,7 @@ export function TraceContainer({
       <TraceSettingsPanel
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
+        focusChannel={settingsFocus}
         trace={trace}
         logs={logs}
         onSetChannelColor={onSetChannelColor}
