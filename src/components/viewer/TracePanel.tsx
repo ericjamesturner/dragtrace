@@ -149,6 +149,11 @@ export function TracePanel({
     { mode: "new" } | { mode: "edit"; heatmap: HeatmapConfig } | null
   >(null);
 
+  // A point selection (click marker) pins the value readouts to its time;
+  // otherwise the live cursor drives them.
+  const effectiveCursorTime =
+    selection && selection[0] === selection[1] ? selection[0] : cursorTime;
+
   // Scatters / heatmaps live on the active page (page-local, like halog).
   const activePage = pages.find((p) => p.id === activePageId);
   const scatters = activePage?.scatters ?? [];
@@ -500,7 +505,7 @@ export function TracePanel({
                 pinned={!!trace.pinned}
                 isPinnedFromOther={pinnedFromOtherIds.has(trace.id)}
                 onTogglePin={() => onToggleTracePin(trace.id)}
-                cursorTime={cursorTime}
+                cursorTime={effectiveCursorTime}
                 unitSystem={unitSystem}
                 unitOverrides={unitOverrides}
                 onAddZone={(zone) => onAddZone(trace.id, zone)}
@@ -525,7 +530,7 @@ export function TracePanel({
                 offsets={offsets}
                 zoomRange={zoomRange}
                 selection={selection}
-                cursorTime={cursorTime}
+                cursorTime={effectiveCursorTime}
                 unitSystem={unitSystem}
                 unitOverrides={unitOverrides}
                 onUpdate={(u) => onUpdateScatter(sc.id, u)}
@@ -543,7 +548,7 @@ export function TracePanel({
                 offsets={offsets}
                 zoomRange={zoomRange}
                 selection={selection}
-                cursorTime={cursorTime}
+                cursorTime={effectiveCursorTime}
                 unitSystem={unitSystem}
                 unitOverrides={unitOverrides}
                 onUpdate={(u) => onUpdateHeatmap(hm.id, u)}
