@@ -27,14 +27,19 @@ export function useChannelGroups(
 
   const dbLoading = categories === undefined || mappings === undefined;
 
+  // Computed (math) channels live in their own group and are never sent to
+  // the AI categorizer — they aren't real ECU channels.
+  const realDefs = useMemo(() => channelDefs.filter((d) => !d.computed), [channelDefs]);
+  const computedDefs = useMemo(() => channelDefs.filter((d) => d.computed), [channelDefs]);
+
   // Detect unmapped channels and trigger AI categorization (bootstraps from zero)
   useEffect(() => {
     if (dbLoading || categorizingRef.current) return;
     if (!mappings || !categories) return;
-    if (channelDefs.length === 0) return;
+    if (realDefs.length === 0) return;
 
     const mappedNames = new Set(mappings.map((m) => m.channelName));
-    const unmapped = channelDefs
+    const unmapped = realDefs
       .map((d) => d.name)
       .filter((name) => !mappedNames.has(name));
 
@@ -44,12 +49,24 @@ export function useChannelGroups(
     categorizeChannels({ channelNames: unmapped, ecuType })
       .catch((err) => console.error("AI categorization failed:", err))
       .finally(() => { categorizingRef.current = false; });
-  }, [dbLoading, mappings, categories, channelDefs, ecuType, categorizeChannels]);
+  }, [dbLoading, mappings, categories, realDefs, ecuType, categorizeChannels]);
 
   const tree = useMemo(() => {
+    const withMathGroup = (roots: GroupNode[]): GroupNode[] => {
+      if (computedDefs.length === 0) return roots;
+      return [
+        ...roots,
+        {
+          tag: "Math",
+          channels: computedDefs.map((def) => ({ def, displayName: def.name })),
+          children: [],
+        },
+      ];
+    };
+
     // Fallback to hardcoded while loading
     if (dbLoading || !categories || categories.length === 0) {
-      return buildTree(channelDefs);
+      return withMathGroup(buildTree(realDefs));
     }
 
     // Build override lookup
@@ -93,7 +110,7 @@ export function useChannelGroups(
     // Collect channels per category with sort order
     const channelsByCat = new Map<string, { ch: GroupChannel; sortOrder: number }[]>();
 
-    for (const def of channelDefs) {
+    for (const def of realDefs) {
       const override = overrideMap.get(def.name);
       if (override?.hidden) continue;
 
@@ -140,10 +157,12 @@ export function useChannelGroups(
       return { tag: cat.name, channels, children: childNodes };
     }
 
-    return dedupeDisplayNames(
-      rootCats.map(buildNode).filter((n): n is GroupNode => n !== null),
+    return withMathGroup(
+      dedupeDisplayNames(
+        rootCats.map(buildNode).filter((n): n is GroupNode => n !== null),
+      ),
     );
-  }, [dbLoading, categories, mappings, overrides, channelDefs]);
+  }, [dbLoading, categories, mappings, overrides, realDefs, computedDefs]);
 
   return { tree, loading: dbLoading };
 }

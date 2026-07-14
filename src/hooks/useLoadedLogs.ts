@@ -3,6 +3,7 @@ import { useQueries } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { detectHaltech, detectRaceStartIndex, parseHaltech } from "@/lib/haltech-parser";
+import { addComputedChannels } from "@/lib/computed-channels";
 import type { ParsedLog } from "@/lib/log-types";
 import { CHART_COLORS, type LoadedLog } from "@/lib/viewer-types";
 
@@ -159,6 +160,7 @@ export function useLoadedLogs(fileIds: Id<"files">[]) {
             if (raceStartTime !== null) {
               raceStartTime = clipSessionBeforeRace(parsed, activeSessionIndex, raceStartTime);
             }
+            addComputedChannels(parsed);
 
             const log: LoadedLog = {
               fileId,

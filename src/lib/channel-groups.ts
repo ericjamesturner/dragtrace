@@ -200,6 +200,7 @@ export const GROUP_COLORS: Record<string, string> = {
   Drivetrain: "#3b82f6", Temperatures: "#f43f5e", Pressures: "#14b8a6",
   "Brakes & Clutch": "#ec4899", "Cam Control": "#8b5cf6", Electrical: "#facc15",
   "Torque Management": "#d946ef", Outputs: "#64748b", "Cuts & Limits": "#fb923c", Other: "#6b7280",
+  Math: "#a3e635",
 };
 
 /** A channel entry in a group, with a short display name for context. */

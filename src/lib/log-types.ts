@@ -7,6 +7,8 @@ export interface ChannelDef {
   index: number;
   metricUnit?: string;
   enumValues?: Record<number, string>;
+  /** Derived math channel (computed client-side, not logged by the ECU). */
+  computed?: boolean;
 }
 
 export interface LogSession {

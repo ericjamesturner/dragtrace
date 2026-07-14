@@ -552,7 +552,8 @@ function ChannelRow({
   const metricUnit = ch.def.metricUnit;
   const displayUnit = metricUnit && unitSystem ? getDisplayUnit(metricUnit, unitSystem, unitOverrides) : "";
   const canCycle = !!(metricUnit && onCycleUnit && (UNIT_OPTIONS[metricUnit]?.length ?? 0) > 1);
-  const tipText = displayUnit ? `${ch.def.name} (${displayUnit})` : ch.def.name;
+  const baseTip = displayUnit ? `${ch.def.name} (${displayUnit})` : ch.def.name;
+  const tipText = ch.def.computed ? `${baseTip} — math channel` : baseTip;
   return (
     <Tip content={tipText} side="right">
       <div
@@ -565,6 +566,9 @@ function ChannelRow({
             : "text-muted-foreground hover:text-foreground hover:bg-muted"
         }`}
       >
+        {ch.def.computed && (
+          <span className="shrink-0 font-serif italic text-xs text-lime-400">ƒ</span>
+        )}
         <span className="flex-1 truncate">{ch.displayName}</span>
         {displayUnit && (
           canCycle ? (
