@@ -38,17 +38,17 @@ export function findValueAtTime(
 }
 
 /**
- * Average a channel's samples over a [tMin, tMax] display-time range.
- * Mirrors findValueAtTime's offset convention (channel timestamps are raw;
- * the selection is in aligned/display time, so we subtract `offset`).
+ * Average/min/max of a channel's samples over a [tMin, tMax] display-time
+ * range. Mirrors findValueAtTime's offset convention (channel timestamps are
+ * raw; the selection is in aligned/display time, so we subtract `offset`).
  * Returns null if the channel/session is missing or no samples fall in range.
  */
-export function computeAvgInRange(
+export function computeRangeStats(
   log: LoadedLog,
   channelName: string,
   range: [number, number],
   offset: number,
-): number | null {
+): { avg: number; min: number; max: number } | null {
   const session = log.parsed.sessions[log.activeSessionIndex];
   if (!session) return null;
   const data = session.channels.get(channelName);
@@ -67,14 +67,16 @@ export function computeAvgInRange(
     else e = m;
   }
 
-  let sum = 0, count = 0;
+  let sum = 0, count = 0, min = Infinity, max = -Infinity;
   for (let i = s; i < ts.length && ts[i] <= hi; i++) {
     const v = data[i];
     if (v !== v) continue; // skip NaN
     sum += v;
     count++;
+    if (v < min) min = v;
+    if (v > max) max = v;
   }
-  return count === 0 ? null : sum / count;
+  return count === 0 ? null : { avg: sum / count, min, max };
 }
 
 /**

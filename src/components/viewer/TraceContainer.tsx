@@ -4,7 +4,7 @@ import { resolveChannelStyle, CHART_COLORS } from "@/lib/viewer-types";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { TraceChart } from "./TraceChart";
 import { TraceSettingsPanel } from "./TraceSettingsPanel";
-import { findValueAtTime, formatValue, computeAvgInRange } from "@/lib/cursor-utils";
+import { findValueAtTime, formatValue, computeRangeStats } from "@/lib/cursor-utils";
 import { convertForDisplay, getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, GripHorizontalIcon } from "lucide-react";
@@ -538,18 +538,32 @@ export function TraceContainer({
                             log?.logIndex ?? 0,
                           );
                           let valueStr: string | null = null;
+                          let minStr: string | null = null;
+                          let maxStr: string | null = null;
+                          let deltaStr: string | null = null;
                           let unitLabel = "";
                           let isAvg = false;
                           const def = log?.parsed.channelDefs.find(d => d.name === ch.channelName);
                           if (avgRange && log && !isHidden && !isChHidden && !def?.enumValues) {
                             const offset = offsets.get(log.fileId) ?? 0;
-                            const avg = computeAvgInRange(log, ch.channelName, avgRange, offset);
-                            if (avg !== null) {
+                            const stats = computeRangeStats(log, ch.channelName, avgRange, offset);
+                            if (stats !== null) {
                               const mu = def?.metricUnit ?? "";
-                              const converted = mu ? convertForDisplay(avg, mu, unitSystem, unitOverrides) : avg;
-                              valueStr = formatValue(converted);
+                              const conv = (v: number) =>
+                                mu ? convertForDisplay(v, mu, unitSystem, unitOverrides) : v;
+                              valueStr = formatValue(conv(stats.avg));
+                              minStr = formatValue(conv(stats.min));
+                              maxStr = formatValue(conv(stats.max));
                               unitLabel = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
                               isAvg = true;
+                              // Start -> end change over the selection, in display units
+                              // (convert endpoints first: some conversions have offsets).
+                              const startV = findValueAtTime(log, ch.channelName, Math.min(avgRange[0], avgRange[1]), offset);
+                              const endV = findValueAtTime(log, ch.channelName, Math.max(avgRange[0], avgRange[1]), offset);
+                              if (startV !== null && endV !== null) {
+                                const d = conv(endV) - conv(startV);
+                                deltaStr = `${d >= 0 ? "+" : ""}${formatValue(d)}`;
+                              }
                             }
                           } else if (cursorTime !== null && log && !isHidden && !isChHidden) {
                             const offset = offsets.get(log.fileId) ?? 0;
@@ -611,14 +625,38 @@ export function TraceContainer({
                               <span className="text-white/70 truncate max-w-[140px]">
                                 {ch.channelName}
                               </span>
-                              {isAvg && (
-                                <span className="text-[9px] font-semibold text-amber-400 ml-auto self-center shrink-0">
-                                  AVG
+                              {isAvg ? (
+                                <>
+                                  <span className="text-[9px] font-semibold text-white/40 ml-auto self-center shrink-0">
+                                    MIN
+                                  </span>
+                                  <span className="font-mono font-medium text-white/70 w-14 text-right tabular-nums">
+                                    {minStr ?? "---"}
+                                  </span>
+                                  <span className="text-[9px] font-semibold text-amber-400 pl-1 self-center shrink-0">
+                                    AVG
+                                  </span>
+                                  <span className="font-mono font-medium text-white w-14 text-right tabular-nums">
+                                    {valueStr ?? "---"}
+                                  </span>
+                                  <span className="text-[9px] font-semibold text-white/40 pl-1 self-center shrink-0">
+                                    MAX
+                                  </span>
+                                  <span className="font-mono font-medium text-white/70 w-14 text-right tabular-nums">
+                                    {maxStr ?? "---"}
+                                  </span>
+                                  <span className="text-[9px] font-semibold text-sky-400 pl-1 self-center shrink-0">
+                                    Δ
+                                  </span>
+                                  <span className="font-mono font-medium text-sky-200/90 w-14 text-right tabular-nums">
+                                    {deltaStr ?? "---"}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="font-mono font-medium text-white ml-auto pl-2 w-16 text-right tabular-nums">
+                                  {valueStr ?? "---"}
                                 </span>
                               )}
-                              <span className={`font-mono font-medium text-white ${isAvg ? "pl-1" : "ml-auto pl-2"} w-16 text-right tabular-nums`}>
-                                {valueStr ?? "---"}
-                              </span>
                               <span className="text-white/50 text-[10px] w-8">
                                 {unitLabel || ""}
                               </span>
