@@ -173,6 +173,34 @@ function LogViewerReady({
   // Active trace tracking
   const [activeTraceId, setActiveTraceId] = useState<string | null>(null);
 
+  // Sidebar width (drag-resizable, persisted per browser)
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const saved = Number(localStorage.getItem("dragtrace:sidebarWidth"));
+    return Number.isFinite(saved) && saved >= 180 && saved <= 600 ? saved : 256;
+  });
+
+  const handleSidebarResize = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startW = sidebarWidth;
+      const onMove = (ev: MouseEvent) => {
+        setSidebarWidth(Math.min(600, Math.max(180, startW + (ev.clientX - startX))));
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        setSidebarWidth((w) => {
+          localStorage.setItem("dragtrace:sidebarWidth", String(w));
+          return w;
+        });
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [sidebarWidth],
+  );
+
   useEffect(() => {
     if (activeTraceId && !effectiveTraces.some((t) => t.id === activeTraceId)) {
       setActiveTraceId(effectiveTraces[effectiveTraces.length - 1]?.id ?? null);
@@ -342,7 +370,7 @@ function LogViewerReady({
       )}
 
       <div className="flex flex-1 min-h-0">
-        <div className="w-64 shrink-0 overflow-hidden">
+        <div className="shrink-0 overflow-hidden" style={{ width: sidebarWidth }}>
           <ViewerSidebar
             logs={logs}
             vehicleId={vehicleId}
@@ -369,6 +397,12 @@ function LogViewerReady({
             onCycleUnit={(metricUnit) => dispatch({ type: "cycleUnit", metricUnit })}
           />
         </div>
+
+        {/* Sidebar width resize handle */}
+        <div
+          className="w-1 shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/40 transition-colors"
+          onMouseDown={handleSidebarResize}
+        />
 
         <TracePanel
           traces={effectiveTraces}

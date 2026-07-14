@@ -569,7 +569,7 @@ function ChannelRow({
         {ch.def.computed && (
           <span className="shrink-0 font-serif italic text-xs text-lime-400">ƒ</span>
         )}
-        <span className="flex-1 truncate">{ch.displayName}</span>
+        <span className="flex-1 truncate">{ch.def.name}</span>
         {displayUnit && (
           canCycle ? (
             <button
