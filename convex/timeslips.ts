@@ -1,5 +1,5 @@
 import { query, mutation, action } from "./_generated/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
 
 const timeslipFields = {
@@ -17,7 +17,7 @@ const timeslipFields = {
 export const listByFile = query({
   args: { fileId: v.id("files") },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) return [];
     return await ctx.db
       .query("timeslips")
@@ -32,7 +32,7 @@ export const create = mutation({
     ...timeslipFields,
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     const file = await ctx.db.get(args.fileId);
     if (!file || file.userId !== userId) throw new Error("Not found");
@@ -59,7 +59,7 @@ export const update = mutation({
     ...timeslipFields,
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     const ts = await ctx.db.get(args.id);
     if (!ts || ts.userId !== userId) throw new Error("Not found");
@@ -80,7 +80,7 @@ export const update = mutation({
 export const remove = mutation({
   args: { id: v.id("timeslips") },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     const ts = await ctx.db.get(args.id);
     if (!ts || ts.userId !== userId) throw new Error("Not found");

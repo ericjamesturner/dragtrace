@@ -1,11 +1,11 @@
 import { query, mutation } from "./_generated/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
 
 export const listByVehicle = query({
   args: { vehicleId: v.id("vehicles") },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) return [];
     const vehicle = await ctx.db.get(args.vehicleId);
     if (!vehicle || vehicle.userId !== userId) return [];
@@ -25,7 +25,7 @@ export const setOverride = mutation({
     hidden: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     const vehicle = await ctx.db.get(args.vehicleId);
     if (!vehicle || vehicle.userId !== userId) throw new Error("Not found");
@@ -61,7 +61,7 @@ export const removeOverride = mutation({
     channelName: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
 
     const existing = await ctx.db

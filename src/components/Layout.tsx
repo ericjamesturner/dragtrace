@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { MenuIcon, LogOutIcon, SettingsIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
+import { AdminMenu } from "./AdminControls";
 
 const LogViewer = lazy(() => import("./LogViewer"));
 
@@ -167,6 +168,7 @@ export function Layout() {
           <div className="flex items-center justify-between border-b px-4 py-3">
             <h1 className="text-sm font-semibold tracking-tight">DragTrace</h1>
             <div className="flex items-center gap-1">
+              <AdminMenu />
               <Tip content="Channel Manager">
                 <Button
                   variant="ghost"
@@ -209,7 +211,8 @@ export function Layout() {
               </SheetContent>
             </Sheet>
             <h1 className="text-sm font-semibold tracking-tight">DragTrace</h1>
-            <div className="ml-auto">
+            <div className="ml-auto flex items-center gap-1">
+              <AdminMenu />
               <Tip content="Sign out">
                 <Button
                   variant="ghost"

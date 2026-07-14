@@ -1,11 +1,11 @@
 import { query, mutation } from "./_generated/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
 
 export const listByVehicle = query({
   args: { vehicleId: v.id("vehicles") },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) return [];
     const events = await ctx.db
       .query("events")
@@ -37,7 +37,7 @@ export const listByVehicle = query({
 export const get = query({
   args: { id: v.id("events") },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) return null;
     const event = await ctx.db.get(args.id);
     if (!event || event.userId !== userId) return null;
@@ -54,7 +54,7 @@ export const create = mutation({
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     // Verify vehicle ownership
     const vehicle = await ctx.db.get(args.vehicleId);
@@ -80,7 +80,7 @@ export const update = mutation({
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     const event = await ctx.db.get(args.id);
     if (!event || event.userId !== userId) throw new Error("Not found");
@@ -96,7 +96,7 @@ export const update = mutation({
 export const remove = mutation({
   args: { id: v.id("events") },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     const event = await ctx.db.get(args.id);
     if (!event || event.userId !== userId) throw new Error("Not found");

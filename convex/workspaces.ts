@@ -1,11 +1,11 @@
 import { query, mutation } from "./_generated/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
 
 export const getForVehicle = query({
   args: { vehicleId: v.id("vehicles") },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) return [];
     return await ctx.db
       .query("workspaces")
@@ -24,7 +24,7 @@ export const save = mutation({
     config: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
 
     if (args.id) {

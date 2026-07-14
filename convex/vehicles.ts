@@ -1,11 +1,11 @@
 import { query, mutation } from "./_generated/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
 
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) return [];
     return await ctx.db
       .query("vehicles")
@@ -17,7 +17,7 @@ export const list = query({
 export const get = query({
   args: { id: v.id("vehicles") },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) return null;
     const vehicle = await ctx.db.get(args.id);
     if (!vehicle || vehicle.userId !== userId) return null;
@@ -31,7 +31,7 @@ export const create = mutation({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     return await ctx.db.insert("vehicles", {
       userId,
@@ -49,7 +49,7 @@ export const update = mutation({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     const vehicle = await ctx.db.get(args.id);
     if (!vehicle || vehicle.userId !== userId) throw new Error("Not found");
@@ -63,7 +63,7 @@ export const update = mutation({
 export const remove = mutation({
   args: { id: v.id("vehicles") },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     const vehicle = await ctx.db.get(args.id);
     if (!vehicle || vehicle.userId !== userId) throw new Error("Not found");
