@@ -416,9 +416,6 @@ function FileRow({
         onClick={onOpenViewer}
         title="Click to open in viewer"
       >
-        <span className="text-xs font-medium uppercase text-muted-foreground mb-2">
-          Preview
-        </span>
         <div className="flex-1 flex items-center">
           <RpmPreview
             file={file}

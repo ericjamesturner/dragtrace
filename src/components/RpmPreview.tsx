@@ -200,9 +200,8 @@ export function RpmPreview({ file, onRaceTiming, alignWindow }: RpmPreviewProps)
       {},
       {
         label: "RPM",
-        stroke: "rgba(59, 130, 246, 0.8)",
+        stroke: "rgba(239, 68, 68, 0.8)",
         width: 1.5,
-        fill: "rgba(59, 130, 246, 0.08)",
         scale: "rpm",
         spanGaps: true,
       },
@@ -239,7 +238,7 @@ export function RpmPreview({ file, onRaceTiming, alignWindow }: RpmPreviewProps)
     if (dsRpm) {
       series.push({
         label: "DS RPM",
-        stroke: "rgba(249, 115, 22, 0.7)",
+        stroke: "rgba(59, 130, 246, 0.7)",
         width: 1,
         scale: "rpm",
         spanGaps: true,
@@ -260,7 +259,7 @@ export function RpmPreview({ file, onRaceTiming, alignWindow }: RpmPreviewProps)
               const h = u.bbox.height;
 
               ctx.save();
-              ctx.strokeStyle = "rgba(239, 68, 68, 0.6)";
+              ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
               ctx.lineWidth = 1;
               ctx.beginPath();
               ctx.moveTo(x0, y0);
@@ -276,7 +275,7 @@ export function RpmPreview({ file, onRaceTiming, alignWindow }: RpmPreviewProps)
     const plot = new uPlot(
       {
         width,
-        height: 120,
+        height: 176,
         cursor: { show: false },
         select: { show: false, left: 0, top: 0, width: 0, height: 0 },
         legend: { show: false },
