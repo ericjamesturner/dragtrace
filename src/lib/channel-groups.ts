@@ -299,6 +299,37 @@ function autoSubgroup(root: GroupNode) {
   }
 }
 
+/**
+ * Where two *different* channels in the same group resolve to the same
+ * display name (e.g. an over-shortened mapping like "Target Lambda Table
+ * Output" -> "Target Lambda"), fall back to the full channel name so they
+ * stay distinguishable. Scoped per group node: identical short names in
+ * different subgroups are fine — the subgroup provides the context.
+ */
+export function dedupeDisplayNames(tree: GroupNode[]): GroupNode[] {
+  const visit = (node: GroupNode) => {
+    const defNamesByLabel = new Map<string, Set<string>>();
+    for (const ch of node.channels) {
+      const key = ch.displayName.toLowerCase();
+      let set = defNamesByLabel.get(key);
+      if (!set) {
+        set = new Set();
+        defNamesByLabel.set(key, set);
+      }
+      set.add(ch.def.name);
+    }
+    for (const ch of node.channels) {
+      const set = defNamesByLabel.get(ch.displayName.toLowerCase());
+      if (set && set.size > 1 && ch.displayName !== ch.def.name) {
+        ch.displayName = ch.def.name;
+      }
+    }
+    node.children.forEach(visit);
+  };
+  tree.forEach(visit);
+  return tree;
+}
+
 export function buildTree(defs: ChannelDef[]): GroupNode[] {
   const rootMap = new Map<string, GroupNode>();
 
@@ -355,5 +386,5 @@ export function buildTree(defs: ChannelDef[]): GroupNode[] {
     }
   }
 
-  return roots;
+  return dedupeDisplayNames(roots);
 }

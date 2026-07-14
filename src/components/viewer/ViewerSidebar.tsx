@@ -1,11 +1,13 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "../../../convex/_generated/api";
 import type { ChannelDef, LogSession } from "@/lib/log-types";
 import type { LoadedLog, TraceConfig, ChannelOnTrace } from "@/lib/viewer-types";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { PlusIcon, XIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { AddLogModal } from "./AddLogModal";
-import { getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
+import { getDisplayUnit, UNIT_OPTIONS, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { GROUP_COLORS, type GroupNode, type GroupChannel } from "@/lib/channel-groups";
 import { useChannelGroups } from "@/hooks/useChannelGroups";
 
@@ -83,6 +85,7 @@ interface Props {
   activeTraceId: string | null;
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
+  onCycleUnit?: (metricUnit: string) => void;
 }
 
 export function ViewerSidebar({
@@ -101,6 +104,7 @@ export function ViewerSidebar({
   activeTraceId,
   unitSystem,
   unitOverrides,
+  onCycleUnit,
 }: Props) {
   const [addLogOpen, setAddLogOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -283,6 +287,7 @@ export function ViewerSidebar({
                   </Tip>
                 )}
               </div>
+              {isLogOpen && <LogNotes fileId={log.fileId} />}
               {isLogOpen && logs.length > 1 && logIndex > 0 && (
                 <div className="px-2 mb-1">
                   <label className="flex items-center gap-1.5 w-full px-2 py-1 rounded text-xs text-muted-foreground hover:bg-muted cursor-pointer">
@@ -315,6 +320,7 @@ export function ViewerSidebar({
                       onDragStart={handleDragStart}
                       onAddChannel={onAddChannel}
                       onAddTraceWithChannel={onAddTraceWithChannel}
+                      onCycleUnit={onCycleUnit}
                     />
                   ))}
                 </div>
@@ -346,6 +352,88 @@ export function ViewerSidebar({
   );
 }
 
+/** Live-saving notes for a log — same notes as the event dashboard card. */
+function LogNotes({ fileId }: { fileId: Id<"files"> }) {
+  const file = useQuery(api.files.get, { id: fileId });
+  const updateNotes = useMutation(api.files.updateNotes);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestRef = useRef<string | null>(null);
+  const focusedRef = useRef(false);
+
+  const flush = useCallback(
+    (value: string) => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      void updateNotes({ id: fileId, notes: value.trim() || undefined }).finally(
+        () => setPending(false),
+      );
+    },
+    [fileId, updateNotes],
+  );
+
+  const handleChange = (v: string) => {
+    setDraft(v);
+    latestRef.current = v;
+    setPending(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => flush(v), 600);
+  };
+
+  // Flush a pending edit if the log/component goes away mid-debounce
+  useEffect(
+    () => () => {
+      if (timerRef.current && latestRef.current !== null) {
+        clearTimeout(timerRef.current);
+        void updateNotes({ id: fileId, notes: latestRef.current.trim() || undefined });
+      }
+    },
+    [fileId, updateNotes],
+  );
+
+  // Once the server catches up (and we're not typing), drop the local draft
+  // so remote edits show live again.
+  const serverNotes = file?.notes ?? "";
+  useEffect(() => {
+    if (!focusedRef.current && draft !== null && !pending && serverNotes === draft.trim()) {
+      setDraft(null);
+    }
+  }, [serverNotes, draft, pending]);
+
+  if (!file) return null;
+  const value = draft ?? serverNotes;
+
+  return (
+    <div className="px-2 mb-1.5">
+      <div className="flex items-center justify-between px-1 pb-0.5">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Run Notes
+        </span>
+        <span className="text-[10px] text-muted-foreground/60">
+          {pending ? "saving…" : ""}
+        </span>
+      </div>
+      <textarea
+        value={value}
+        onChange={(e) => handleChange(e.target.value)}
+        onFocus={() => {
+          focusedRef.current = true;
+        }}
+        onBlur={() => {
+          focusedRef.current = false;
+          if (timerRef.current && latestRef.current !== null) flush(latestRef.current);
+        }}
+        placeholder="Add notes about this run…"
+        rows={value ? Math.min(8, value.split("\n").length + 1) : 2}
+        className="w-full px-2 py-1.5 rounded bg-muted/50 border border-border text-xs leading-relaxed placeholder:text-muted-foreground/60 outline-none focus:border-primary resize-y"
+      />
+    </div>
+  );
+}
+
 /** Recursive group node renderer — supports arbitrary nesting depth. */
 function SidebarGroupNode({
   node,
@@ -362,6 +450,7 @@ function SidebarGroupNode({
   onDragStart,
   onAddChannel,
   onAddTraceWithChannel,
+  onCycleUnit,
 }: {
   node: GroupNode;
   keyPrefix: string;
@@ -377,6 +466,7 @@ function SidebarGroupNode({
   onDragStart: (e: React.DragEvent, logFileId: Id<"files">, channelName: string) => void;
   onAddChannel: (traceId: string, channel: ChannelOnTrace) => void;
   onAddTraceWithChannel: (channel: ChannelOnTrace) => void;
+  onCycleUnit?: (metricUnit: string) => void;
 }) {
   const groupKey = `${keyPrefix}${node.tag}`;
   const isOpen = isSearching || expanded.has(groupKey);
@@ -414,6 +504,7 @@ function SidebarGroupNode({
                   onAddTraceWithChannel({ logFileId, channelName: ch.def.name });
                 }
               }}
+              onCycleUnit={onCycleUnit}
             />
           ))}
           {node.children.map((child) => (
@@ -430,6 +521,7 @@ function SidebarGroupNode({
               onDragStart={onDragStart}
               onAddChannel={onAddChannel}
               onAddTraceWithChannel={onAddTraceWithChannel}
+              onCycleUnit={onCycleUnit}
             />
           ))}
         </div>
@@ -446,6 +538,7 @@ function ChannelRow({
   unitOverrides,
   onDragStart,
   onClick,
+  onCycleUnit,
 }: {
   ch: GroupChannel;
   logFileId: Id<"files">;
@@ -454,8 +547,11 @@ function ChannelRow({
   unitOverrides?: UnitOverrides;
   onDragStart: (e: React.DragEvent, logFileId: Id<"files">, channelName: string) => void;
   onClick: () => void;
+  onCycleUnit?: (metricUnit: string) => void;
 }) {
-  const displayUnit = ch.def.metricUnit && unitSystem ? getDisplayUnit(ch.def.metricUnit, unitSystem, unitOverrides) : "";
+  const metricUnit = ch.def.metricUnit;
+  const displayUnit = metricUnit && unitSystem ? getDisplayUnit(metricUnit, unitSystem, unitOverrides) : "";
+  const canCycle = !!(metricUnit && onCycleUnit && (UNIT_OPTIONS[metricUnit]?.length ?? 0) > 1);
   const tipText = displayUnit ? `${ch.def.name} (${displayUnit})` : ch.def.name;
   return (
     <Tip content={tipText} side="right">
@@ -470,7 +566,22 @@ function ChannelRow({
         }`}
       >
         <span className="flex-1 truncate">{ch.displayName}</span>
-        {displayUnit && <span className="text-xs text-muted-foreground">{displayUnit}</span>}
+        {displayUnit && (
+          canCycle ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onCycleUnit!(metricUnit!);
+              }}
+              title="Click to change units"
+              className="text-xs text-muted-foreground hover:text-foreground border border-transparent hover:border-border rounded px-1 -mr-1 cursor-pointer"
+            >
+              {displayUnit}
+            </button>
+          ) : (
+            <span className="text-xs text-muted-foreground">{displayUnit}</span>
+          )
+        )}
       </div>
     </Tip>
   );

@@ -3,7 +3,7 @@ import { useQuery, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { ChannelDef } from "@/lib/log-types";
-import { buildTree, type GroupNode, type GroupChannel } from "@/lib/channel-groups";
+import { buildTree, dedupeDisplayNames, type GroupNode, type GroupChannel } from "@/lib/channel-groups";
 
 /**
  * Replaces buildTree() with database-driven channel grouping.
@@ -140,9 +140,9 @@ export function useChannelGroups(
       return { tag: cat.name, channels, children: childNodes };
     }
 
-    return rootCats
-      .map(buildNode)
-      .filter((n): n is GroupNode => n !== null);
+    return dedupeDisplayNames(
+      rootCats.map(buildNode).filter((n): n is GroupNode => n !== null),
+    );
   }, [dbLoading, categories, mappings, overrides, channelDefs]);
 
   return { tree, loading: dbLoading };

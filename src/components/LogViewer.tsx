@@ -366,6 +366,7 @@ function LogViewerReady({
             activeTraceId={activeTraceId}
             unitSystem={config.unitSystem ?? "imperial"}
             unitOverrides={config.unitOverrides}
+            onCycleUnit={(metricUnit) => dispatch({ type: "cycleUnit", metricUnit })}
           />
         </div>
 
