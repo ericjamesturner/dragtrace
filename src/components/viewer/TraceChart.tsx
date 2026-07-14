@@ -17,7 +17,7 @@ const Y_AXIS_SIZE = 45;
 // Note: RPM matching is exact on purpose — there are many other channels
 // containing "RPM" (Idle Target RPM, Limiter RPM, TM Engine RPM…) that must NOT
 // be grouped with engine/driveshaft RPM.
-const SCALE_GROUP_LABELS: Record<string, string> = { egt: "EGT", rpm: "RPM" };
+const SCALE_GROUP_LABELS: Record<string, string> = { egt: "EGT", rpm: "RPM", lambda: "Lambda" };
 
 function scaleGroupKey(name: string): string | null {
   const n = name.toLowerCase();
@@ -403,10 +403,17 @@ export function TraceChart({
     }
 
     // Share y-scales: channels in the same scale group (EGTs, engine+driveshaft
-    // RPM) share one axis, as do same-named channels overlaid across logs.
-    // Everything else gets its own scale.
-    const scaleIdOf = (channelName: string) => {
+    // RPM, all lambda/AFR channels) share one axis, as do same-named channels
+    // overlaid across logs. Everything else gets its own scale.
+    const groupIdOf = (channelName: string): string | null => {
       const g = scaleGroupKey(channelName);
+      if (g) return g;
+      if (metricUnitByChannel.get(channelName) === "lambda") return "lambda";
+      return null;
+    };
+
+    const scaleIdOf = (channelName: string) => {
+      const g = groupIdOf(channelName);
       return g ? `g_${g}` : channelName;
     };
 
@@ -427,7 +434,7 @@ export function TraceChart({
         const scaleKey = `y${scaleIdx++}`;
         scaleKeyById.set(scaleId, scaleKey);
         scaleColor.set(scaleKey, meta.color);
-        scaleGroupByKey.set(scaleKey, scaleGroupKey(meta.channelName));
+        scaleGroupByKey.set(scaleKey, groupIdOf(meta.channelName));
         const mu = metricUnitByChannel.get(meta.channelName);
         if (mu) scaleMetricUnit.set(scaleKey, mu);
       }
