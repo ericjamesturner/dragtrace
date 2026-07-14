@@ -16,6 +16,41 @@ function detectRaceStart(parsed: ParsedLog, sessionIndex: number): number | null
   return idx === null ? null : session.timestamps[idx];
 }
 
+// Seconds of data kept before the race start when opening a log.
+const CLIP_PRE_RACE_S = 2;
+
+/**
+ * Drop everything before CLIP_PRE_RACE_S seconds ahead of the race start so
+ * the viewer opens on the pull, and rebase timestamps to the clip point.
+ * Returns the race start time in the new (rebased) timebase.
+ */
+function clipSessionBeforeRace(
+  parsed: ParsedLog,
+  sessionIndex: number,
+  raceStartTime: number,
+): number {
+  const session = parsed.sessions[sessionIndex];
+  const clipStart = raceStartTime - CLIP_PRE_RACE_S;
+  if (!session || clipStart <= session.timestamps[0]) return raceStartTime;
+
+  let lo = 0;
+  while (lo < session.timestamps.length && session.timestamps[lo] < clipStart) lo++;
+  if (lo === 0 || lo >= session.timestamps.length) return raceStartTime;
+
+  const base = session.timestamps[lo];
+  const rowCount = session.timestamps.length - lo;
+  const timestamps = new Float64Array(rowCount);
+  for (let i = 0; i < rowCount; i++) {
+    timestamps[i] = session.timestamps[lo + i] - base;
+  }
+  const channels = new Map<string, Float64Array>();
+  for (const [name, arr] of session.channels) {
+    channels.set(name, arr.subarray(lo));
+  }
+  parsed.sessions[sessionIndex] = { ...session, timestamps, channels, rowCount };
+  return raceStartTime - base;
+}
+
 /**
  * Hook to load multiple log files for the viewer.
  * Uses Convex useQueries for batch file doc loading, then fetches & parses.
@@ -120,7 +155,10 @@ export function useLoadedLogs(fileIds: Id<"files">[]) {
             }
 
             const activeSessionIndex = 0;
-            const raceStartTime = detectRaceStart(parsed, activeSessionIndex);
+            let raceStartTime = detectRaceStart(parsed, activeSessionIndex);
+            if (raceStartTime !== null) {
+              raceStartTime = clipSessionBeforeRace(parsed, activeSessionIndex, raceStartTime);
+            }
 
             const log: LoadedLog = {
               fileId,
