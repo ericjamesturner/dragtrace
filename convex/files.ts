@@ -1,11 +1,11 @@
 import { query, mutation } from "./_generated/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
 
 export const generateUploadUrl = mutation({
   args: {},
   handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     return await ctx.storage.generateUploadUrl();
   },
@@ -21,7 +21,7 @@ export const saveFile = mutation({
     vehicleId: v.id("vehicles"),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     // Verify event ownership
     const event = await ctx.db.get(args.eventId);
@@ -51,7 +51,7 @@ export const saveFile = mutation({
 export const listByEvent = query({
   args: { eventId: v.id("events") },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) return [];
     const files = await ctx.db
       .query("files")
@@ -64,7 +64,7 @@ export const listByEvent = query({
 export const get = query({
   args: { id: v.id("files") },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) return null;
     const file = await ctx.db.get(args.id);
     if (!file || file.userId !== userId) return null;
@@ -82,7 +82,7 @@ export const getUrl = query({
 export const remove = mutation({
   args: { id: v.id("files") },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     const file = await ctx.db.get(args.id);
     if (!file || file.userId !== userId) throw new Error("Not found");
@@ -99,13 +99,27 @@ export const remove = mutation({
   },
 });
 
+export const savePreview = mutation({
+  args: {
+    id: v.id("files"),
+    preview: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getEffectiveUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
+    const file = await ctx.db.get(args.id);
+    if (!file || file.userId !== userId) throw new Error("Not found");
+    await ctx.db.patch(args.id, { preview: args.preview });
+  },
+});
+
 export const rename = mutation({
   args: {
     id: v.id("files"),
     fileName: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     const file = await ctx.db.get(args.id);
     if (!file || file.userId !== userId) throw new Error("Not found");
@@ -116,7 +130,7 @@ export const rename = mutation({
 export const reorder = mutation({
   args: { ids: v.array(v.id("files")) },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     for (let i = 0; i < args.ids.length; i++) {
       const file = await ctx.db.get(args.ids[i]);
@@ -132,7 +146,7 @@ export const updateNotes = mutation({
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     const file = await ctx.db.get(args.id);
     if (!file || file.userId !== userId) throw new Error("Not found");

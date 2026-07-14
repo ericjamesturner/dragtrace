@@ -67,16 +67,24 @@ export function FileList({
 
   const handleRaceTiming = useCallback((fileId: string, info: RaceTimingInfo | null) => {
     const prev = raceTimingsRef.current[fileId];
-    if (prev?.raceStart === info?.raceStart && prev?.logDuration === info?.logDuration) return;
+    if (
+      prev?.raceStart === info?.raceStart &&
+      prev?.raceEnd === info?.raceEnd &&
+      prev?.logDuration === info?.logDuration
+    ) return;
     setRaceTimings(prev => ({ ...prev, [fileId]: info }));
   }, []);
+
+  // Fixed lead-in before the race start, then the longest pass across
+  // files (timer-counting region) plus a short tail.
+  const PRE_RACE_S = 2;
+  const POST_RACE_TAIL_S = 2;
 
   const alignWindow = useMemo(() => {
     const infos = Object.values(raceTimings).filter((v): v is RaceTimingInfo => v !== null);
     if (infos.length === 0) return undefined;
-    const minPreRace = Math.min(...infos.map(i => i.raceStart));
-    const maxPostRace = Math.max(...infos.map(i => i.logDuration - i.raceStart));
-    return { preRace: minPreRace, postRace: maxPostRace };
+    const maxRun = Math.max(...infos.map(i => i.raceEnd - i.raceStart));
+    return { preRace: PRE_RACE_S, postRace: maxRun + POST_RACE_TAIL_S };
   }, [raceTimings]);
 
   return (
@@ -413,7 +421,7 @@ function FileRow({
         </span>
         <div className="flex-1 flex items-center">
           <RpmPreview
-            storageId={file.storageId}
+            file={file}
             onRaceTiming={onRaceTiming}
             alignWindow={alignWindow}
           />

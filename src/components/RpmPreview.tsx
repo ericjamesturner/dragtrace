@@ -1,53 +1,144 @@
-import { useEffect, useRef, useState } from "react";
-import { useQuery } from "convex/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
-import { detectHaltech, parseHaltech } from "@/lib/haltech-parser";
+import type { Doc } from "../../convex/_generated/dataModel";
+import { detectHaltech, detectRaceStartIndex, parseHaltech } from "@/lib/haltech-parser";
 import { lttbDownsample } from "@/lib/downsample";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
-type ChartData = [number[], number[], ...number[][]];
+// Bump when the preview computation changes so stored previews recompute.
+const PREVIEW_VERSION = 1;
 
-interface RaceRegion {
-  startTime: number;
-  endTime: number;
+// Stored window around the race — wider than the rendered window so the
+// dashboard lead-in/tail can be tuned without recomputing stored previews.
+const STORE_PRE_RACE_S = 5;
+const STORE_POST_RACE_S = 8;
+
+export interface RaceTimingInfo {
+  raceStart: number;  // seconds from log start to race start
+  raceEnd: number;    // seconds from log start to where the race timer stops counting
+  logDuration: number; // total log duration in seconds
 }
 
-interface ParsedResult {
-  data: ChartData;
-  hasTps: boolean;
-  hasDsRpm: boolean;
-  raceRegion: RaceRegion | null;
+interface PreviewPayload {
+  version: number;
+  timestamps: number[];
+  rpm: (number | null)[];
+  tps: (number | null)[] | null;
+  dsRpm: (number | null)[] | null;
+  raceStart: number | null;
+  raceEnd: number | null;
+  logDuration: number;
 }
 
 type Status =
   | { kind: "loading" }
-  | { kind: "ready"; parsed: ParsedResult }
+  | { kind: "ready"; payload: PreviewPayload }
   | { kind: "no-data"; message: string };
 
-export interface RaceTimingInfo {
-  raceStart: number;  // seconds from log start to race start
-  logDuration: number; // total log duration in seconds
-}
-
 interface RpmPreviewProps {
-  storageId: Id<"_storage">;
+  file: Doc<"files">;
   onRaceTiming?: (info: RaceTimingInfo | null) => void;
   alignWindow?: { preRace: number; postRace: number };
 }
 
-export function RpmPreview({ storageId, onRaceTiming, alignWindow }: RpmPreviewProps) {
-  const url = useQuery(api.files.getUrl, { storageId });
+function computePreview(text: string): PreviewPayload | string {
+  if (!detectHaltech(text)) return "Not a Haltech log";
+
+  const parsed = parseHaltech(text);
+  if (parsed.sessions.length === 0) return "No sessions";
+
+  const session = parsed.sessions[0];
+  const rpm = session.channels.get("RPM");
+  if (!rpm) return "No RPM data";
+
+  const timestamps = session.timestamps;
+
+  // Find race timer region
+  const raceTimer = session.channels.get("Race Timer") ?? session.channels.get("Race Time");
+  let raceStart: number | null = null;
+  let raceEnd: number | null = null;
+  if (raceTimer) {
+    const start = detectRaceStartIndex(raceTimer);
+    if (start !== null) {
+      // The timer holds its final value after the run, so the region ends
+      // at the last sample where it was still counting up.
+      let end = start;
+      for (let i = start + 1; i < raceTimer.length; i++) {
+        if (raceTimer[i] > raceTimer[i - 1]) end = i;
+      }
+      raceStart = timestamps[start];
+      raceEnd = timestamps[end];
+    }
+  }
+
+  // Store a window around the race at high resolution; without race data,
+  // fall back to the whole log.
+  let lo = 0;
+  let hi = timestamps.length;
+  let points = 400;
+  if (raceStart !== null && raceEnd !== null) {
+    const xMin = raceStart - STORE_PRE_RACE_S;
+    const xMax = raceEnd + STORE_POST_RACE_S;
+    while (lo < hi && timestamps[lo] < xMin) lo++;
+    while (hi > lo && timestamps[hi - 1] > xMax) hi--;
+    // keep one sample beyond each edge so lines reach the plot border
+    if (lo > 0) lo--;
+    if (hi < timestamps.length) hi++;
+    points = 800;
+  }
+
+  const tsSlice = timestamps.subarray(lo, hi);
+  const downValues = (values: Float64Array) =>
+    Array.from(
+      lttbDownsample(tsSlice, values.subarray(lo, hi), points).values,
+      (v) => (Number.isNaN(v) ? null : v),
+    );
+
+  const tps = session.channels.get("Throttle Position");
+  const dsRpm = session.channels.get("Driveshaft RPM");
+
+  return {
+    version: PREVIEW_VERSION,
+    timestamps: Array.from(lttbDownsample(tsSlice, rpm.subarray(lo, hi), points).timestamps),
+    rpm: downValues(rpm),
+    tps: tps ? downValues(tps) : null,
+    dsRpm: dsRpm ? downValues(dsRpm) : null,
+    raceStart,
+    raceEnd,
+    logDuration: timestamps[timestamps.length - 1],
+  };
+}
+
+export function RpmPreview({ file, onRaceTiming, alignWindow }: RpmPreviewProps) {
+  const stored = useMemo<PreviewPayload | null>(() => {
+    if (!file.preview) return null;
+    try {
+      const p = JSON.parse(file.preview) as PreviewPayload;
+      return p.version === PREVIEW_VERSION ? p : null;
+    } catch {
+      return null;
+    }
+  }, [file.preview]);
+
+  // Only fetch the raw log when there is no stored preview to reuse.
+  const url = useQuery(api.files.getUrl, stored ? "skip" : { storageId: file.storageId });
+  const savePreview = useMutation(api.files.savePreview);
   const chartRef = useRef<HTMLDivElement>(null);
   const uplotRef = useRef<uPlot | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "loading" });
   const onRaceTimingRef = useRef(onRaceTiming);
   onRaceTimingRef.current = onRaceTiming;
 
-  // Fetch and parse
   useEffect(() => {
-    if (!url) return;
+    if (!stored) return;
+    setStatus({ kind: "ready", payload: stored });
+  }, [stored]);
+
+  // No stored preview: fetch, parse, compute, persist
+  useEffect(() => {
+    if (stored || !url) return;
 
     let cancelled = false;
 
@@ -55,65 +146,13 @@ export function RpmPreview({ storageId, onRaceTiming, alignWindow }: RpmPreviewP
       .then((res) => res.text())
       .then((text) => {
         if (cancelled) return;
-
-        if (!detectHaltech(text)) {
-          setStatus({ kind: "no-data", message: "Not a Haltech log" });
+        const result = computePreview(text);
+        if (typeof result === "string") {
+          setStatus({ kind: "no-data", message: result });
           return;
         }
-
-        const parsed = parseHaltech(text);
-        if (parsed.sessions.length === 0) {
-          setStatus({ kind: "no-data", message: "No sessions" });
-          return;
-        }
-
-        const session = parsed.sessions[0];
-        const rpm = session.channels.get("RPM");
-        if (!rpm) {
-          setStatus({ kind: "no-data", message: "No RPM data" });
-          return;
-        }
-
-        const rpmDown = lttbDownsample(session.timestamps, rpm, 200);
-
-        // Find race timer region
-        const raceTimer = session.channels.get("Race Timer") ?? session.channels.get("Race Time");
-        let raceRegion: RaceRegion | null = null;
-        if (raceTimer) {
-          let start = -1;
-          let end = -1;
-          for (let i = 0; i < raceTimer.length; i++) {
-            if (raceTimer[i] > 0) {
-              if (start === -1) start = i;
-              end = i;
-            }
-          }
-          if (start !== -1) {
-            raceRegion = {
-              startTime: session.timestamps[start],
-              endTime: session.timestamps[end],
-            };
-          }
-        }
-
-        const logDuration = session.timestamps[session.timestamps.length - 1];
-        onRaceTimingRef.current?.(raceRegion
-          ? { raceStart: raceRegion.startTime, logDuration }
-          : null,
-        );
-
-        const tps = session.channels.get("Throttle Position");
-        const dsRpm = session.channels.get("Driveshaft RPM");
-        const hasTps = !!tps;
-        const hasDsRpm = !!dsRpm;
-        const data: ChartData = [
-          Array.from(rpmDown.timestamps),
-          Array.from(rpmDown.values),
-        ];
-        if (tps) data.push(Array.from(lttbDownsample(session.timestamps, tps, 200).values));
-        if (dsRpm) data.push(Array.from(lttbDownsample(session.timestamps, dsRpm, 200).values));
-
-        setStatus({ kind: "ready", parsed: { data, hasTps, hasDsRpm, raceRegion } });
+        setStatus({ kind: "ready", payload: result });
+        void savePreview({ id: file._id, preview: JSON.stringify(result) });
       })
       .catch(() => {
         if (!cancelled) {
@@ -124,11 +163,21 @@ export function RpmPreview({ storageId, onRaceTiming, alignWindow }: RpmPreviewP
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url]);
+  }, [stored, url, file._id, savePreview]);
+
+  // Report race timing for dashboard alignment
+  useEffect(() => {
+    if (status.kind !== "ready") return;
+    const p = status.payload;
+    onRaceTimingRef.current?.(
+      p.raceStart !== null && p.raceEnd !== null
+        ? { raceStart: p.raceStart, raceEnd: p.raceEnd, logDuration: p.logDuration }
+        : null,
+    );
+  }, [status]);
 
   // Wait for alignment before rendering charts that have race data
-  const alignReady = status.kind === "ready" && status.parsed.raceRegion
+  const alignReady = status.kind === "ready" && status.payload.raceStart !== null
     ? alignWindow !== undefined
     : true;
 
@@ -137,8 +186,15 @@ export function RpmPreview({ storageId, onRaceTiming, alignWindow }: RpmPreviewP
     if (status.kind !== "ready" || !alignReady || !chartRef.current) return;
 
     const el = chartRef.current;
-    const { data, hasTps, hasDsRpm, raceRegion } = status.parsed;
+    const { timestamps, rpm, tps, dsRpm, raceStart } = status.payload;
     const width = el.clientWidth || 600;
+
+    const data = [
+      timestamps,
+      rpm,
+      ...(tps ? [tps] : []),
+      ...(dsRpm ? [dsRpm] : []),
+    ] as unknown as uPlot.AlignedData;
 
     const series: uPlot.Series[] = [
       {},
@@ -148,6 +204,7 @@ export function RpmPreview({ storageId, onRaceTiming, alignWindow }: RpmPreviewP
         width: 1.5,
         fill: "rgba(59, 130, 246, 0.08)",
         scale: "rpm",
+        spanGaps: true,
       },
     ];
 
@@ -160,46 +217,45 @@ export function RpmPreview({ storageId, onRaceTiming, alignWindow }: RpmPreviewP
       rpm: { auto: true },
     };
 
-    if (alignWindow && raceRegion) {
-      const xMin = raceRegion.startTime - alignWindow.preRace;
-      const xMax = raceRegion.startTime + alignWindow.postRace;
+    if (alignWindow && raceStart !== null) {
       scales.x = {
         auto: false,
-        range: [xMin, xMax] as [number, number],
+        range: [raceStart - alignWindow.preRace, raceStart + alignWindow.postRace] as [number, number],
       };
     }
 
-    if (hasTps) {
+    if (tps) {
       series.push({
         label: "TPS",
         stroke: "rgba(34, 197, 94, 0.7)",
         width: 1,
         scale: "tps",
+        spanGaps: true,
       });
       axes.push({ show: false, scale: "tps" });
       scales.tps = { auto: false, range: [0, 100] };
     }
 
-    if (hasDsRpm) {
+    if (dsRpm) {
       series.push({
         label: "DS RPM",
         stroke: "rgba(249, 115, 22, 0.7)",
         width: 1,
         scale: "rpm",
+        spanGaps: true,
       });
       axes.push({ show: false, scale: "rpm" });
     }
 
     const plugins: uPlot.Plugin[] = [];
 
-    if (raceRegion) {
-      const { startTime } = raceRegion;
+    if (raceStart !== null) {
       plugins.push({
         hooks: {
           draw: [
             (u: uPlot) => {
               const ctx = u.ctx;
-              const x0 = u.valToPos(startTime, "x", true);
+              const x0 = u.valToPos(raceStart, "x", true);
               const y0 = u.bbox.top;
               const h = u.bbox.height;
 

@@ -36,6 +36,9 @@ export default defineSchema({
     tags: v.optional(v.array(v.string())),
     order: v.optional(v.number()),
     uploadedAt: v.number(),
+    // Precomputed dashboard preview (JSON blob) — logs never change, so
+    // this is computed once client-side and reused.
+    preview: v.optional(v.string()),
   })
     .index("by_event", ["eventId"])
     .index("by_vehicle", ["vehicleId"])
@@ -84,6 +87,13 @@ export default defineSchema({
     hidden: v.optional(v.boolean()),
     createdAt: v.number(),
   }).index("by_vehicle", ["vehicleId"]),
+
+  // Active admin impersonation sessions: while a row exists, the admin's
+  // queries/mutations operate on the target user's data.
+  impersonations: defineTable({
+    adminUserId: v.id("users"),
+    targetUserId: v.id("users"),
+  }).index("by_admin", ["adminUserId"]),
 
   timeslips: defineTable({
     userId: v.id("users"),
