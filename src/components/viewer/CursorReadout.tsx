@@ -98,7 +98,7 @@ export function CursorReadout({ cursorTime, traces, logs, offsets }: Props) {
     if (log.raceStartTime !== null) {
       const offset = offsets.get(log.fileId) ?? 0;
       const raceTime = cursorTime - (log.raceStartTime + offset);
-      raceTimeStr = `${raceTime >= 0 ? "+" : ""}${raceTime.toFixed(3)}s`;
+      raceTimeStr = `${raceTime.toFixed(3)}s`;
       break;
     }
   }

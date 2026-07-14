@@ -869,6 +869,10 @@ export function TraceChart({
     }
     while (el.firstChild) el.removeChild(el.firstChild);
 
+    // Race-time label pinned to the top of the cursor line (created after
+    // the plot below; updated from the setCursor hook).
+    let raceCursorLabel: HTMLDivElement | null = null;
+
     const plot = new uPlot(
       {
         width,
@@ -903,6 +907,21 @@ export function TraceChart({
                 const time = u.posToVal(left, "x");
                 onCursorRef.current?.(time);
               }
+              // Race time at the cursor, pinned to the top of the cursor line
+              if (raceCursorLabel) {
+                if (left != null && left >= 0) {
+                  const time = u.posToVal(left, "x");
+                  const rs = raceStartTimes[0];
+                  const rt = time - (rs.time + rs.offset);
+                  raceCursorLabel.textContent = `${rt.toFixed(3)}s`;
+                  const w = raceCursorLabel.offsetWidth;
+                  const maxLeft = u.over.clientWidth - w - 2;
+                  raceCursorLabel.style.left = `${Math.min(Math.max(left - w / 2, 2), maxLeft)}px`;
+                  raceCursorLabel.style.display = "block";
+                } else {
+                  raceCursorLabel.style.display = "none";
+                }
+              }
               // Report live drag preview
               if (u.select.width > 10) {
                 const min = u.posToVal(u.select.left, "x");
@@ -918,6 +937,16 @@ export function TraceChart({
     );
 
     chartRef.current = plot;
+
+    if (raceStartTimes.length > 0) {
+      raceCursorLabel = document.createElement("div");
+      raceCursorLabel.style.cssText =
+        "position:absolute;top:2px;display:none;pointer-events:none;z-index:10;" +
+        "padding:1px 6px;font-size:13px;line-height:18px;white-space:nowrap;" +
+        "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;" +
+        "color:#4ade80;background:#18181b;border:1px solid rgba(74,222,128,0.35);border-radius:4px;";
+      plot.over.appendChild(raceCursorLabel);
+    }
 
     // Store series keys, original colors and widths for highlight effect
     seriesKeysRef.current = seriesMeta.map((m) => m.key);
