@@ -97,11 +97,52 @@ export function detectHaltech(content: string): boolean {
   return content.startsWith('%DataLog%');
 }
 
+/**
+ * Find the sample index where the race timer starts counting for the run.
+ *
+ * The timer holds a stale value from a previous run until it is re-armed
+ * (reset to 0), gets triggered by burnouts and staging blips before the
+ * actual pass, and can even jump straight from 0 back to a stale constant.
+ * A real start is a 0 -> positive transition after which the timer keeps
+ * counting up; the run is the last such start in the log. Falls back to
+ * index 0 when the timer is already counting up from the first sample
+ * (log starts mid-run); returns null when it never starts counting.
+ */
+export function detectRaceStartIndex(raceTimer: ArrayLike<number>): number | null {
+  let lastStart: number | null = null;
+  let armed = false;
+  for (let i = 0; i < raceTimer.length; i++) {
+    const v = raceTimer[i];
+    if (v === 0) {
+      armed = true;
+    } else if (v > 0 && armed) {
+      let counting = false;
+      for (let j = i + 1; j < raceTimer.length; j++) {
+        const w = raceTimer[j];
+        if (Number.isNaN(w)) continue;
+        if (w <= 0 || w < v) break;
+        if (w > v) {
+          counting = true;
+          break;
+        }
+      }
+      if (counting) lastStart = i;
+      armed = false;
+    }
+  }
+  if (lastStart !== null) return lastStart;
+  if (raceTimer.length > 1 && raceTimer[0] > 0 && raceTimer[raceTimer.length - 1] > raceTimer[0]) {
+    return 0;
+  }
+  return null;
+}
+
 export function parseHaltech(content: string): ParsedLog {
   const lines = content.split('\n');
   const metadata: Record<string, string> = {};
   const channelDefs: ChannelDef[] = [];
   const sessions: LogSession[] = [];
+  const logNumbers: string[] = [];
 
   let lineIdx = 0;
 
@@ -118,6 +159,7 @@ export function parseHaltech(content: string): ParsedLog {
       if (line.startsWith('Log Source') || line.startsWith('Log Number')) {
         const [key, val] = line.split(' : ');
         metadata[key.trim()] = val?.trim() ?? '';
+        if (line.startsWith('Log Number') && val) logNumbers.push(val.trim());
         lineIdx++;
         continue;
       }
@@ -176,6 +218,20 @@ export function parseHaltech(content: string): ParsedLog {
   const numChannels = channelDefs.length;
   const channelTypesList = channelDefs.map(ch => ch.type);
 
+  // Haltech NSP can split one continuous recording into several "Log :" blocks
+  // (consecutive Log Numbers); blocks whose data continues within MERGE_GAP_MS
+  // of the previous block are merged into a single session.
+  const MERGE_GAP_MS = 1000;
+
+  const blocks: {
+    startTime: Date;
+    absMs: number[];
+    rows: number[][];
+    firstBlock: number;
+    lastBlock: number;
+  }[] = [];
+  let blockCount = 0;
+
   while (lineIdx < lines.length) {
     const line = lines[lineIdx].trim();
 
@@ -184,9 +240,8 @@ export function parseHaltech(content: string): ParsedLog {
       const startTime = parseSessionDateTime(dateStr);
 
       lineIdx++;
-      const rowTimestamps: number[] = [];
-      const rowData: number[][] = [];
-      let baseMs = -1;
+      const absMs: number[] = [];
+      const rows: number[][] = [];
 
       while (lineIdx < lines.length) {
         const dataLine = lines[lineIdx].trim();
@@ -204,10 +259,7 @@ export function parseHaltech(content: string): ParsedLog {
           continue;
         }
 
-        const timeStr = dataLine.substring(0, commaIdx);
-        const ms = timeStrToMs(timeStr);
-        if (baseMs === -1) baseMs = ms;
-        rowTimestamps.push((ms - baseMs) / 1000);
+        absMs.push(timeStrToMs(dataLine.substring(0, commaIdx)));
 
         const values = dataLine.substring(commaIdx + 1).split(',');
         const row: number[] = new Array(numChannels);
@@ -215,40 +267,60 @@ export function parseHaltech(content: string): ParsedLog {
           const raw = parseInt(values[i], 10);
           row[i] = convertRawValue(raw, channelTypesList[i]);
         }
-        rowData.push(row);
+        rows.push(row);
 
         lineIdx++;
       }
 
-      if (rowTimestamps.length === 0) continue;
+      const blockIdx = blockCount++;
+      if (absMs.length === 0) continue;
 
-      const timestamps = new Float64Array(rowTimestamps);
-      const channels = new Map<string, Float64Array>();
-
-      for (let chIdx = 0; chIdx < numChannels; chIdx++) {
-        const arr = new Float64Array(rowTimestamps.length);
-        for (let r = 0; r < rowTimestamps.length; r++) {
-          arr[r] = rowData[r][chIdx];
-        }
-        channels.set(channelDefs[chIdx].name, arr);
+      const prev = blocks[blocks.length - 1];
+      const gap = prev ? absMs[0] - prev.absMs[prev.absMs.length - 1] : Infinity;
+      if (prev && gap >= 0 && gap <= MERGE_GAP_MS) {
+        prev.absMs = prev.absMs.concat(absMs);
+        prev.rows = prev.rows.concat(rows);
+        prev.lastBlock = blockIdx;
+      } else {
+        blocks.push({ startTime, absMs, rows, firstBlock: blockIdx, lastBlock: blockIdx });
       }
-
-      const logNum = metadata['Log Number'] ?? '';
-      const sessionIdx = sessions.length + 1;
-      const label = logNum
-        ? `Log ${parseInt(logNum, 10) + sessions.length}`
-        : `Session ${sessionIdx}`;
-
-      sessions.push({
-        label,
-        startTime,
-        timestamps,
-        channels,
-        rowCount: rowTimestamps.length,
-      });
     } else {
       lineIdx++;
     }
+  }
+
+  for (const block of blocks) {
+    const rowCount = block.absMs.length;
+    const baseMs = block.absMs[0];
+    const timestamps = new Float64Array(rowCount);
+    for (let r = 0; r < rowCount; r++) {
+      timestamps[r] = (block.absMs[r] - baseMs) / 1000;
+    }
+
+    const channels = new Map<string, Float64Array>();
+    for (let chIdx = 0; chIdx < numChannels; chIdx++) {
+      const arr = new Float64Array(rowCount);
+      for (let r = 0; r < rowCount; r++) {
+        arr[r] = block.rows[r][chIdx];
+      }
+      channels.set(channelDefs[chIdx].name, arr);
+    }
+
+    const firstNum = logNumbers[block.firstBlock];
+    const lastNum = logNumbers[block.lastBlock];
+    const label = firstNum
+      ? block.lastBlock > block.firstBlock && lastNum
+        ? `Log ${firstNum}–${lastNum}`
+        : `Log ${firstNum}`
+      : `Session ${sessions.length + 1}`;
+
+    sessions.push({
+      label,
+      startTime: block.startTime,
+      timestamps,
+      channels,
+      rowCount,
+    });
   }
 
   return {

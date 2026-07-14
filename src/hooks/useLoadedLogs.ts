@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useQueries } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { detectHaltech, parseHaltech } from "@/lib/haltech-parser";
+import { detectHaltech, detectRaceStartIndex, parseHaltech } from "@/lib/haltech-parser";
 import type { ParsedLog } from "@/lib/log-types";
 import { CHART_COLORS, type LoadedLog } from "@/lib/viewer-types";
 
@@ -12,10 +12,8 @@ function detectRaceStart(parsed: ParsedLog, sessionIndex: number): number | null
   const raceTimer =
     session.channels.get("Race Timer") ?? session.channels.get("Race Time");
   if (!raceTimer) return null;
-  for (let i = 0; i < raceTimer.length; i++) {
-    if (raceTimer[i] > 0) return session.timestamps[i];
-  }
-  return null;
+  const idx = detectRaceStartIndex(raceTimer);
+  return idx === null ? null : session.timestamps[idx];
 }
 
 /**
