@@ -1339,6 +1339,10 @@ export function TraceChart({
     const overRect = u.over.getBoundingClientRect();
     const wrapRect = wrap.getBoundingClientRect();
     const xRight = u.valToPos(Math.max(selection[0], selection[1]), "x", false); // CSS px in plot
+    if (!Number.isFinite(xRight)) {
+      setCopyBtn(null);
+      return;
+    }
     setCopyBtn({
       left: overRect.left - wrapRect.left + xRight,
       top: overRect.top - wrapRect.top,
