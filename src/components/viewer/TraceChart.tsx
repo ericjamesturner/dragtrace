@@ -946,9 +946,11 @@ export function TraceChart({
     chartRef.current = plot;
 
     if (raceStartTimes.length > 0) {
+      // Bottom of the plot: the top strip is where zone labels stack, and the
+      // label must never cover a label pill someone is trying to grab.
       raceCursorLabel = document.createElement("div");
       raceCursorLabel.style.cssText =
-        "position:absolute;top:2px;display:none;pointer-events:none;z-index:10;" +
+        "position:absolute;bottom:8px;display:none;pointer-events:none;z-index:10;" +
         "padding:1px 6px;font-size:13px;line-height:18px;white-space:nowrap;" +
         "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;" +
         "color:#4ade80;background:#18181b;border:1px solid rgba(74,222,128,0.35);border-radius:4px;";
@@ -1140,12 +1142,20 @@ export function TraceChart({
     };
 
     const onZoneCursor = (e: MouseEvent) => {
-      if (zoneDrag) { over.style.cursor = "grabbing"; return; }
+      if (zoneDrag) {
+        over.style.cursor = "grabbing";
+        if (raceCursorLabel) raceCursorLabel.style.display = "none";
+        return;
+      }
       if (edgeDrag) return; // edge-resize owns the cursor
       const rect = over.getBoundingClientRect();
       if (edgeHitAt(e.clientX - rect.left)) return; // near a selection edge -> leave edge cursor
       const { x, y } = toCanvas(e);
-      if (dragRowAt(x, y)) over.style.cursor = "grab";
+      if (dragRowAt(x, y)) {
+        over.style.cursor = "grab";
+        // Keep the race-time readout out of the way of the grab target
+        if (raceCursorLabel) raceCursorLabel.style.display = "none";
+      }
     };
 
     root.addEventListener("mousedown", onZoneDown, true);
