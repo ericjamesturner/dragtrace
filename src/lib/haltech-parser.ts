@@ -44,6 +44,48 @@ function convertRawValue(raw: number, type: string): number {
   return info ? info.convert(raw) : raw;
 }
 
+// Channels are logged at different rates, so on the merged row grid a slow
+// channel is mostly NaN. Continuously-varying types get linear interpolation
+// across gaps; everything else (states, gears, enums, timers) holds the
+// previous value so discrete transitions stay exact.
+const LINEAR_INTERP_TYPES = new Set([
+  'EngineSpeed', 'Pressure', 'AbsPressure', 'Temperature', 'BatteryVoltage',
+  'AFR', 'Speed', 'Percentage', 'Angle', 'Decibel', 'GearRatio', 'Ratio',
+  'Flow', 'Frequency', 'DrivenDistance', 'MassPerCyl', 'Current',
+  'Acceleration', 'InjFuelVolume',
+]);
+
+/**
+ * Fill NaN gaps in a channel array in place. Interior gaps are linearly
+ * interpolated (by time) or held at the previous value; trailing NaNs hold
+ * the last value; leading NaNs are left as-is.
+ */
+function fillChannelGaps(arr: Float64Array, timestamps: Float64Array, linear: boolean): void {
+  const n = arr.length;
+  let last = -1;
+  for (let i = 0; i < n; i++) {
+    const v = arr[i];
+    if (v !== v) continue;
+    if (last !== -1 && i - last > 1) {
+      const v0 = arr[last];
+      if (linear) {
+        const t0 = timestamps[last];
+        const span = timestamps[i] - t0;
+        for (let j = last + 1; j < i; j++) {
+          arr[j] = span > 0 ? v0 + (v - v0) * ((timestamps[j] - t0) / span) : v0;
+        }
+      } else {
+        for (let j = last + 1; j < i; j++) arr[j] = v0;
+      }
+    }
+    last = i;
+  }
+  if (last !== -1 && last < n - 1) {
+    const v0 = arr[last];
+    for (let j = last + 1; j < n; j++) arr[j] = v0;
+  }
+}
+
 // Enum mappings
 const channelEnums: Record<string, Record<number, string>> = {
   'Engine Limiting Method': {
@@ -303,6 +345,7 @@ export function parseHaltech(content: string): ParsedLog {
       for (let r = 0; r < rowCount; r++) {
         arr[r] = block.rows[r][chIdx];
       }
+      fillChannelGaps(arr, timestamps, LINEAR_INTERP_TYPES.has(channelDefs[chIdx].type));
       channels.set(channelDefs[chIdx].name, arr);
     }
 
