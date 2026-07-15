@@ -715,6 +715,9 @@ export function TraceContainer({
           if (min <= max) cmExtent = { min, max };
         }
         const hasManualAxis = cmCh?.axisMin !== undefined || cmCh?.axisMax !== undefined;
+        const cmMu = cmLog?.parsed.channelDefs.find((d) => d.name === contextMenu.channelName)?.metricUnit ?? "";
+        const cmToDisplay = (v: number) =>
+          cmMu ? convertForDisplay(v, cmMu, unitSystem, unitOverrides) : v;
         return (
           <div
             className="fixed z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[270px]"
@@ -827,15 +830,15 @@ export function TraceContainer({
                   onSetChannelAxisRange(
                     contextMenu.logFileId,
                     contextMenu.channelName,
-                    parseFloat(formatValue(cmExtent.min - pad)),
-                    parseFloat(formatValue(cmExtent.max + pad)),
+                    cmExtent.min - pad,
+                    cmExtent.max + pad,
                   );
                   setContextMenu(null);
                 }}
               >
                 Fit axis to data
                 <span className="ml-auto text-[11px] text-muted-foreground font-mono">
-                  {formatValue(cmExtent.min)} – {formatValue(cmExtent.max)}
+                  {formatValue(cmToDisplay(cmExtent.min))} – {formatValue(cmToDisplay(cmExtent.max))}
                 </span>
               </button>
             )}

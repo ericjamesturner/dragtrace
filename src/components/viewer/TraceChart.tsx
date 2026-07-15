@@ -19,6 +19,13 @@ const Y_AXIS_SIZE = 45;
 // be grouped with engine/driveshaft RPM.
 const SCALE_GROUP_LABELS: Record<string, string> = { egt: "EGT", rpm: "RPM", lambda: "Lambda" };
 
+// Near-flat channels in these unit families (pressures, temperatures,
+// voltage) get a minimum auto-scale span — a fraction of the channel's
+// factory DisplayMaxMin range — so a 4 psi fuel-pressure wiggle doesn't
+// stretch to full chart height. Other families (RPM, TPS…) stay data-fit.
+const SPAN_FLOOR_UNITS = new Set(["kPa", "K", "V"]);
+const SPAN_FLOOR_FRAC = 0.12;
+
 function scaleGroupKey(name: string): string | null {
   const n = name.toLowerCase();
   if (n.includes("exhaust gas temp") || /^egt\b/.test(n)) return "egt";
@@ -391,13 +398,22 @@ export function TraceChart({
       x: { time: false, range: () => xRange },
     };
 
-    // Build metricUnit lookup from logGroups
+    // Build metricUnit + factory display range lookups from logGroups
     const metricUnitByChannel = new Map<string, string>();
+    const displayRangeByChannel = new Map<string, [number, number]>();
     for (const group of logGroups) {
       for (const ch of group.channels) {
         if (!metricUnitByChannel.has(ch.channelName)) {
           const def = group.log.parsed.channelDefs.find(d => d.name === ch.channelName);
           if (def?.metricUnit) metricUnitByChannel.set(ch.channelName, def.metricUnit);
+          if (
+            def &&
+            Number.isFinite(def.displayMin) &&
+            Number.isFinite(def.displayMax) &&
+            def.displayMax > def.displayMin
+          ) {
+            displayRangeByChannel.set(ch.channelName, [def.displayMin, def.displayMax]);
+          }
         }
       }
     }
@@ -460,6 +476,28 @@ export function TraceChart({
         if (shared[1] > autoMax) autoMax = shared[1];
       }
       if (autoMin === Infinity) { autoMin = 0; autoMax = 1; }
+      // Minimum-span floor for calm sensor families (see SPAN_FLOOR_UNITS)
+      if (manualMin === undefined && manualMax === undefined) {
+        const firstMember = (channelsInScale.get(scaleId) ?? [])[0];
+        const mu = firstMember ? metricUnitByChannel.get(firstMember) : undefined;
+        const dispRange = firstMember ? displayRangeByChannel.get(firstMember) : undefined;
+        if (mu && SPAN_FLOOR_UNITS.has(mu) && dispRange) {
+          const floorSpan = (dispRange[1] - dispRange[0]) * SPAN_FLOOR_FRAC;
+          if (autoMax - autoMin < floorSpan) {
+            const mid = (autoMin + autoMax) / 2;
+            autoMin = mid - floorSpan / 2;
+            autoMax = mid + floorSpan / 2;
+            // Shift back inside the factory range rather than clipping the span
+            if (autoMin < dispRange[0]) {
+              autoMax = Math.min(dispRange[1], autoMax + (dispRange[0] - autoMin));
+              autoMin = dispRange[0];
+            } else if (autoMax > dispRange[1]) {
+              autoMin = Math.max(dispRange[0], autoMin - (autoMax - dispRange[1]));
+              autoMax = dispRange[1];
+            }
+          }
+        }
+      }
       const pad = (autoMax - autoMin) * 0.05 || 1;
       const lo = manualMin ?? (autoMin - pad);
       const hi = manualMax ?? (autoMax + pad);

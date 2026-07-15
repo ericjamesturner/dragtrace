@@ -5,7 +5,7 @@ import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import { useAction } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import type { UnitSystem, UnitOverrides } from "@/lib/units";
+import { getDisplayUnit, convertForDisplay, convertFromDisplay, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { validateZoneExpression } from "@/lib/zone-evaluator";
 import { buildHighlightZoneInput, ZONE_COLORS, type ChannelSample } from "@/lib/ai-highlight-zone";
 import {
@@ -136,6 +136,8 @@ function ChannelSettings({
   onSetColorBy,
   onRemove,
   channelIndex,
+  unitSystem,
+  unitOverrides,
 }: {
   ch: ChannelOnTrace;
   log: LoadedLog | undefined;
@@ -150,24 +152,54 @@ function ChannelSettings({
   onSetColorBy: (colorBy?: string, colorByMin?: number, colorByMax?: number) => void;
   onRemove: () => void;
   channelIndex: number;
+  unitSystem: UnitSystem;
+  unitOverrides?: UnitOverrides;
 }) {
   const resolved = resolveChannelStyle(ch, channelIndex, log?.logIndex ?? 0);
   const color = resolved.color;
   const logLabel = logs.length > 1 && log ? log.fileName.replace(/\.[^.]+$/, "") : null;
 
-  const [minInput, setMinInput] = useState(ch.axisMin?.toString() ?? "");
-  const [maxInput, setMaxInput] = useState(ch.axisMax?.toString() ?? "");
+  // Axis min/max are stored in raw metric units but shown and typed in the
+  // user's current display units (PSI vs kPa, AFR vs lambda, …).
+  const metricUnit =
+    log?.parsed.channelDefs.find((d) => d.name === ch.channelName)?.metricUnit ?? "";
+  const toDisplay = (v: number) =>
+    metricUnit ? convertForDisplay(v, metricUnit, unitSystem, unitOverrides) : v;
+  const fromDisplay = (v: number) =>
+    metricUnit ? convertFromDisplay(v, metricUnit, unitSystem, unitOverrides) : v;
+  const axisUnit = metricUnit ? getDisplayUnit(metricUnit, unitSystem, unitOverrides) : "";
 
-  const commitRange = () => {
-    const min = minInput.trim() === "" ? undefined : parseFloat(minInput);
-    const max = maxInput.trim() === "" ? undefined : parseFloat(maxInput);
-    const axisMin = min !== undefined && !isNaN(min) ? min : undefined;
-    const axisMax = max !== undefined && !isNaN(max) ? max : undefined;
-    onSetAxisRange(axisMin, axisMax);
+  const fmtExtent = (v: number) => {
+    const abs = Math.abs(v);
+    if (abs >= 100) return v.toFixed(0);
+    if (abs >= 10) return v.toFixed(1);
+    return v.toFixed(2);
   };
 
-  // The channel's actual data extent, in the same (raw) units the axis
-  // min/max inputs use — a reference for choosing the range.
+  const displayAxis = (v: number | undefined) => (v === undefined ? "" : fmtExtent(toDisplay(v)));
+
+  const [minInput, setMinInput] = useState(() => displayAxis(ch.axisMin));
+  const [maxInput, setMaxInput] = useState(() => displayAxis(ch.axisMax));
+
+  // Re-sync the inputs when the stored range or the display units change
+  useEffect(() => {
+    setMinInput(displayAxis(ch.axisMin));
+    setMaxInput(displayAxis(ch.axisMax));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ch.axisMin, ch.axisMax, metricUnit, unitSystem, unitOverrides]);
+
+  const parseInputRaw = (input: string): number | undefined => {
+    if (input.trim() === "") return undefined;
+    const v = parseFloat(input);
+    return isNaN(v) ? undefined : fromDisplay(v);
+  };
+
+  const commitRange = () => {
+    onSetAxisRange(parseInputRaw(minInput), parseInputRaw(maxInput));
+  };
+
+  // The channel's actual data extent (raw units; converted for display) —
+  // a reference for choosing the axis range.
   const dataExtent = useMemo(() => {
     const session = log?.parsed.sessions[log.activeSessionIndex];
     const data = session?.channels.get(ch.channelName);
@@ -183,29 +215,13 @@ function ChannelSettings({
     return min <= max ? { min, max } : null;
   }, [log, ch.channelName]);
 
-  const fmtExtent = (v: number) => {
-    const abs = Math.abs(v);
-    if (abs >= 100) return v.toFixed(0);
-    if (abs >= 10) return v.toFixed(1);
-    return v.toFixed(2);
-  };
-
-  const axisUnit =
-    log?.parsed.channelDefs.find((d) => d.name === ch.channelName)?.metricUnit ?? "";
-
   const fitToData = () => {
     if (!dataExtent) return;
     const pad = (dataExtent.max - dataExtent.min) * 0.05 || 1;
-    const lo = parseFloat(fmtExtent(dataExtent.min - pad));
-    const hi = parseFloat(fmtExtent(dataExtent.max + pad));
-    setMinInput(String(lo));
-    setMaxInput(String(hi));
-    onSetAxisRange(lo, hi);
+    onSetAxisRange(dataExtent.min - pad, dataExtent.max + pad);
   };
 
   const resetRange = () => {
-    setMinInput("");
-    setMaxInput("");
     onSetAxisRange(undefined, undefined);
   };
 
@@ -476,29 +492,17 @@ function ChannelSettings({
                   <button
                     className="font-mono text-foreground/70 hover:text-foreground underline decoration-dotted cursor-pointer"
                     title="Use as Min"
-                    onClick={() => {
-                      setMinInput(fmtExtent(dataExtent.min));
-                      onSetAxisRange(
-                        parseFloat(fmtExtent(dataExtent.min)),
-                        maxInput.trim() === "" ? undefined : parseFloat(maxInput),
-                      );
-                    }}
+                    onClick={() => onSetAxisRange(dataExtent.min, parseInputRaw(maxInput))}
                   >
-                    {fmtExtent(dataExtent.min)}
+                    {fmtExtent(toDisplay(dataExtent.min))}
                   </button>
                   {" – "}
                   <button
                     className="font-mono text-foreground/70 hover:text-foreground underline decoration-dotted cursor-pointer"
                     title="Use as Max"
-                    onClick={() => {
-                      setMaxInput(fmtExtent(dataExtent.max));
-                      onSetAxisRange(
-                        minInput.trim() === "" ? undefined : parseFloat(minInput),
-                        parseFloat(fmtExtent(dataExtent.max)),
-                      );
-                    }}
+                    onClick={() => onSetAxisRange(parseInputRaw(minInput), dataExtent.max)}
                   >
-                    {fmtExtent(dataExtent.max)}
+                    {fmtExtent(toDisplay(dataExtent.max))}
                   </button>
                 </span>
                 <button
@@ -1113,6 +1117,8 @@ export function TraceSettingsPanel({
                     onSetColorBy={(colorBy, colorByMin, colorByMax) => onSetChannelColorBy(ch.logFileId, ch.channelName, colorBy, colorByMin, colorByMax)}
                     onRemove={() => onRemoveChannel(ch.logFileId, ch.channelName)}
                     channelIndex={perLogIdx.get(key)!}
+                    unitSystem={unitSystem}
+                    unitOverrides={unitOverrides}
                   />
                 );
               });

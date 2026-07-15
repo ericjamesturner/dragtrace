@@ -197,6 +197,23 @@ export function parseHaltech(content: string): ParsedLog {
   while (lineIdx < lines.length) {
     const line = lines[lineIdx].trim();
 
+    // The factory DisplayMaxMin range is logged in raw units; store it
+    // converted so it's directly comparable with channel data.
+    const pushCurrentChannel = () => {
+      if (!currentChannel?.name) return;
+      const enumValues = getChannelEnumValues(currentChannel.name);
+      channelDefs.push({
+        name: currentChannel.name,
+        id: currentChannel.id ?? 0,
+        type: currentType,
+        displayMax: convertRawValue(currentChannel.displayMax ?? 0, currentType),
+        displayMin: convertRawValue(currentChannel.displayMin ?? 0, currentType),
+        index: channelIndex++,
+        metricUnit: channelTypes[currentType]?.unit,
+        ...(enumValues && { enumValues }),
+      });
+    };
+
     if (line.startsWith('Log :') || line.startsWith('Log Source') || line.startsWith('Log Number')) {
       if (line.startsWith('Log Source') || line.startsWith('Log Number')) {
         const [key, val] = line.split(' : ');
@@ -205,36 +222,12 @@ export function parseHaltech(content: string): ParsedLog {
         lineIdx++;
         continue;
       }
-      if (currentChannel?.name) {
-        const enumValues = getChannelEnumValues(currentChannel.name);
-        channelDefs.push({
-          name: currentChannel.name,
-          id: currentChannel.id ?? 0,
-          type: currentType,
-          displayMax: currentChannel.displayMax ?? 0,
-          displayMin: currentChannel.displayMin ?? 0,
-          index: channelIndex++,
-          metricUnit: channelTypes[currentType]?.unit,
-          ...(enumValues && { enumValues }),
-        });
-      }
+      pushCurrentChannel();
       break;
     }
 
     if (line.startsWith('Channel :')) {
-      if (currentChannel?.name) {
-        const enumValues = getChannelEnumValues(currentChannel.name);
-        channelDefs.push({
-          name: currentChannel.name,
-          id: currentChannel.id ?? 0,
-          type: currentType,
-          displayMax: currentChannel.displayMax ?? 0,
-          displayMin: currentChannel.displayMin ?? 0,
-          index: channelIndex++,
-          metricUnit: channelTypes[currentType]?.unit,
-          ...(enumValues && { enumValues }),
-        });
-      }
+      pushCurrentChannel();
       currentChannel = { name: line.substring(10).trim() };
       currentType = '';
     } else if (line.startsWith('ID :')) {
