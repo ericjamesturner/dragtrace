@@ -404,7 +404,7 @@ export function TraceContainer({
   useEffect(() => {
     setColorPreview(null);
   }, [contextMenu]);
-  const [expandedZoneIds, setExpandedZoneIds] = useState<Set<string>>(new Set());
+
   const [legendPos, setLegendPos] = useState<{ x: number; y: number }>(
     trace.legendPos ?? { x: 8, y: 8 },
   );
@@ -452,23 +452,30 @@ export function TraceContainer({
     [timeslipZones, evaluatedZones, evaluatedSharedZones],
   );
   const mergedExpanded = useMemo(
-    () => new Set<string>([...expandedZoneIds, ...(expandedTimeslipIds ?? [])]),
-    [expandedZoneIds, expandedTimeslipIds],
+    () =>
+      new Set<string>([
+        ...(trace.highlightZones ?? []).filter((z) => z.expanded).map((z) => z.id),
+        ...foreignSharedZones.filter((z) => z.expanded).map((z) => z.id),
+        ...(expandedTimeslipIds ?? []),
+      ]),
+    [trace.highlightZones, foreignSharedZones, expandedTimeslipIds],
   );
 
-  const handleToggleZoneExpand = useCallback((zoneId: string) => {
-    // Timeslip expand persists via config; expression zones use local state.
-    if (zoneId.startsWith("timeslip:")) {
-      onToggleTimeslipExpand?.(zoneId);
-      return;
-    }
-    setExpandedZoneIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(zoneId)) next.delete(zoneId);
-      else next.add(zoneId);
-      return next;
-    });
-  }, [onToggleTimeslipExpand]);
+  const handleToggleZoneExpand = useCallback(
+    (zoneId: string) => {
+      if (zoneId.startsWith("timeslip:")) {
+        onToggleTimeslipExpand?.(zoneId);
+        return;
+      }
+      // Persisted on the zone config so it survives refresh and follows the
+      // zone across traces/logs (updateZone resolves by id anywhere).
+      const zone =
+        (trace.highlightZones ?? []).find((z) => z.id === zoneId) ??
+        foreignSharedZones.find((z) => z.id === zoneId);
+      onUpdateZone?.(zoneId, { expanded: !zone?.expanded });
+    },
+    [onToggleTimeslipExpand, onUpdateZone, trace.highlightZones, foreignSharedZones],
+  );
 
   const handleLegendMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();

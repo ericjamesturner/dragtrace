@@ -94,6 +94,8 @@ export interface HighlightZoneConfig {
   aiPrompt?: string;
   // Display this zone on every trace in the viewer, not just its owner.
   showOnAllTraces?: boolean;
+  // On-chart checkbox state: expanded = full-height band (persisted).
+  expanded?: boolean;
 }
 
 export interface TraceConfig {
