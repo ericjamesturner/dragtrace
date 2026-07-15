@@ -889,10 +889,12 @@ export function TraceChart({
                 override != null ? override : (stripY - u.bbox.top) / (u.bbox.height || 1);
 
               // Draw regions (each region may carry its own color — timeslip segments)
+              let firstVisX: number | null = null;
               for (const region of zone.regions) {
                 const x0 = Math.max(u.bbox.left, u.valToPos(region.start, "x", true));
                 const x1 = Math.min(u.bbox.left + u.bbox.width, u.valToPos(region.end, "x", true));
                 if (x1 <= x0) continue;
+                if (firstVisX === null) firstVisX = x0;
 
                 let rr = r, gg = g, bb = b;
                 const rc = region.color;
@@ -917,10 +919,28 @@ export function TraceChart({
                 ctx.restore();
               }
 
-              // Draw checkbox
-              const cbX = u.bbox.left + CHECKBOX_GAP;
-              const cbY = stripY + (STRIP_H - CHECKBOX_SIZE) / 2;
+              // Measure the label first so checkbox + pill can be anchored at
+              // the zone's first visible region and clamped inside the chart.
               ctx.save();
+              ctx.font = `${Math.round(10 * dpr)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+              const rightEdge = u.bbox.left + u.bbox.width;
+              const maxTextW = u.bbox.width - (CHECKBOX_GAP * 3 + CHECKBOX_SIZE + 6 * dpr);
+              let labelText = zone.config.label;
+              if (ctx.measureText(labelText).width > maxTextW) {
+                while (labelText.length > 1 && ctx.measureText(labelText + "…").width > maxTextW) {
+                  labelText = labelText.slice(0, -1);
+                }
+                labelText += "…";
+              }
+              const pillW = ctx.measureText(labelText).width + 6 * dpr;
+              const pillH = STRIP_H;
+
+              const totalW = CHECKBOX_SIZE + CHECKBOX_GAP + pillW;
+              let cbX = (firstVisX ?? u.bbox.left) + CHECKBOX_GAP;
+              if (cbX + totalW > rightEdge) cbX = Math.max(u.bbox.left + CHECKBOX_GAP, rightEdge - totalW);
+              const cbY = stripY + (STRIP_H - CHECKBOX_SIZE) / 2;
+
+              // Draw checkbox
               ctx.strokeStyle = `rgba(${r},${g},${b},0.8)`;
               ctx.lineWidth = 1.5 * dpr;
               ctx.strokeRect(cbX, cbY, CHECKBOX_SIZE, CHECKBOX_SIZE);
@@ -932,16 +952,9 @@ export function TraceChart({
                 ctx.strokeStyle = `rgb(${r},${g},${b})`;
                 ctx.stroke();
               }
-              ctx.restore();
 
               // Draw label pill
               const labelX = cbX + CHECKBOX_SIZE + CHECKBOX_GAP;
-              const labelText = zone.config.label;
-              ctx.save();
-              ctx.font = `${Math.round(10 * dpr)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-              const metrics = ctx.measureText(labelText);
-              const pillW = metrics.width + 6 * dpr;
-              const pillH = STRIP_H;
               ctx.fillStyle = `rgba(${r},${g},${b},0.15)`;
               ctx.beginPath();
               ctx.roundRect(labelX, stripY, pillW, pillH, 2 * dpr);
