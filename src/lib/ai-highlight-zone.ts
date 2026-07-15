@@ -13,6 +13,8 @@ function buildUnitPreferences(unitSystem: UnitSystem, unitOverrides?: UnitOverri
 const ZONE_COLORS = [
   "#22c55e", "#3b82f6", "#ef4444", "#f59e0b",
   "#8b5cf6", "#ec4899", "#06b6d4", "#f97316",
+  "#eab308", "#14b8a6", "#a3e635", "#d946ef",
+  "#f43f5e", "#38bdf8", "#fb923c", "#ffffff",
 ];
 
 export { ZONE_COLORS };

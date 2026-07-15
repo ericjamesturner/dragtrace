@@ -33,8 +33,6 @@ interface Props {
 
 
 
-const OPERATORS = [">", "<", ">=", "<=", "==", "!="] as const;
-
 /** Count channels in a group node including subgroups. */
 function countGroupChannels(node: GroupNode): number {
   return node.channels.length + node.children.reduce((sum, c) => sum + c.channels.length, 0);
@@ -186,7 +184,13 @@ function ZoneBuilder({
   unitSystem,
   unitOverrides,
 }: {
-  onSubmit: (expression: string, label: string, color: string, aiPrompt?: string) => void;
+  onSubmit: (zone: {
+    expression: string;
+    label: string;
+    color: string;
+    aiPrompt?: string;
+    showOnAllTraces?: boolean;
+  }) => void;
   editingZone?: HighlightZoneConfig | null;
   onCancelEdit?: () => void;
   logs: LoadedLog[];
@@ -198,61 +202,28 @@ function ZoneBuilder({
     return [...new Set(names)];
   }, [logs]);
 
-  const [mode, setMode] = useState<"builder" | "raw">(editingZone ? "raw" : "builder");
-  const [channel, setChannel] = useState(editingZone ? "" : "");
-  const [operator, setOperator] = useState<string>(">");
-  const [value, setValue] = useState("");
-  const [useDerivative, setUseDerivative] = useState(false);
-  const [rawExpression, setRawExpression] = useState(editingZone?.expression ?? "");
+  const [aiPrompt, setAiPrompt] = useState(editingZone?.aiPrompt ?? "");
+  const [expression, setExpression] = useState(editingZone?.expression ?? "");
   const [label, setLabel] = useState(editingZone?.label ?? "");
   const [color, setColor] = useState(editingZone?.color ?? ZONE_COLORS[0]);
+  const [showOnAllTraces, setShowOnAllTraces] = useState(editingZone?.showOnAllTraces ?? false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // AI generation (Anthropic call runs server-side in the highlightZones action)
   const generateZone = useAction(api.highlightZones.generate);
-  const [aiPrompt, setAiPrompt] = useState(editingZone?.aiPrompt ?? "");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-
-  const expressionFromBuilder = (): string => {
-    if (!channel || !value.trim()) return "";
-    const ref = useDerivative ? `derivative({${channel}})` : `{${channel}}`;
-    return `${ref} ${operator} ${value.trim()}`;
-  };
-
-  const currentExpression = mode === "raw" ? rawExpression : expressionFromBuilder();
 
   const handleValidate = (expr: string) => {
     if (!expr.trim()) {
       setValidationError(null);
       return;
     }
-    const err = validateZoneExpression(expr, channelNames);
-    setValidationError(err);
+    setValidationError(validateZoneExpression(expr, channelNames));
   };
 
-  const handleSubmit = () => {
-    const expr = currentExpression;
-    if (!expr.trim() || !label.trim()) return;
-    const err = validateZoneExpression(expr, channelNames);
-    if (err) {
-      setValidationError(err);
-      return;
-    }
-    onSubmit(expr, label.trim(), color, aiPrompt.trim() || undefined);
-    // Reset form
-    setChannel("");
-    setOperator(">");
-    setValue("");
-    setUseDerivative(false);
-    setRawExpression("");
-    setLabel("");
-    setColor(ZONE_COLORS[0]);
-    setValidationError(null);
-  };
-
-  const handleAiGenerate = async () => {
-    if (!aiPrompt.trim()) return;
+  const handleGenerate = async () => {
+    if (!aiPrompt.trim() || aiLoading) return;
     setAiLoading(true);
     setAiError(null);
     try {
@@ -275,18 +246,11 @@ function ZoneBuilder({
         }
       }
       const result = await generateZone(
-        buildHighlightZoneInput(
-          aiPrompt,
-          channelNames,
-          unitSystem,
-          unitOverrides,
-          samples,
-        ),
+        buildHighlightZoneInput(aiPrompt, channelNames, unitSystem, unitOverrides, samples),
       );
-      setRawExpression(result.expression);
+      setExpression(result.expression);
       setLabel(result.label);
       setColor(result.color);
-      setMode("raw");
       handleValidate(result.expression);
     } catch (e) {
       setAiError((e as Error).message);
@@ -295,125 +259,136 @@ function ZoneBuilder({
     }
   };
 
+  const canSave = expression.trim() !== "" && label.trim() !== "" && !validationError;
+
+  const handleSubmit = () => {
+    if (!expression.trim() || !label.trim()) return;
+    const err = validateZoneExpression(expression, channelNames);
+    if (err) {
+      setValidationError(err);
+      return;
+    }
+    onSubmit({
+      expression,
+      label: label.trim(),
+      color,
+      aiPrompt: aiPrompt.trim() || undefined,
+      showOnAllTraces,
+    });
+  };
+
   return (
     <div className="space-y-3">
-      {/* Mode toggle */}
-      <div className="flex items-center gap-1">
-        <button
-          onClick={() => setMode("builder")}
-          className={`px-2 py-0.5 text-xs rounded cursor-pointer ${mode === "builder" ? "bg-primary/10 text-primary border border-primary" : "border border-border text-muted-foreground hover:bg-muted"}`}
-        >
-          Builder
-        </button>
-        <button
-          onClick={() => {
-            if (mode === "builder" && currentExpression) {
-              setRawExpression(currentExpression);
-            }
-            setMode("raw");
+      {/* ── LLM-first: describe the zone in plain English ── */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5 text-xs font-medium">
+          <SparklesIcon className="size-3.5 text-primary" />
+          Describe what to highlight
+        </div>
+        <textarea
+          value={aiPrompt}
+          onChange={(e) => setAiPrompt(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleGenerate();
           }}
-          className={`px-2 py-0.5 text-xs rounded cursor-pointer ${mode === "raw" ? "bg-primary/10 text-primary border border-primary" : "border border-border text-muted-foreground hover:bg-muted"}`}
-        >
-          Raw Expression
-        </button>
+          placeholder={'e.g. "bank 1 leaner than target at WOT" or "fuel pressure dropping fast during the run"'}
+          rows={2}
+          className="w-full px-2 py-1.5 rounded bg-muted border border-border text-sm placeholder:text-muted-foreground/70 outline-none focus:border-primary resize-none"
+        />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleGenerate}
+            disabled={aiLoading || !aiPrompt.trim()}
+            className="px-3 py-1 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5"
+          >
+            <SparklesIcon className="size-3.5" />
+            {aiLoading ? "Generating…" : editingZone?.aiPrompt ? "Regenerate" : "Generate"}
+          </button>
+          {aiError && <span className="text-xs text-destructive">{aiError}</span>}
+        </div>
       </div>
 
-      {mode === "builder" ? (
-        <div className="space-y-2">
-          {/* Rate of change toggle */}
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-            <input
-              type="checkbox"
-              checked={useDerivative}
-              onChange={(e) => setUseDerivative(e.target.checked)}
-              className="accent-primary"
-            />
-            Rate of change
-          </label>
-
-          {/* Grouped channel picker */}
-          <ChannelPicker
-            logs={logs}
-            selected={channel}
-            onSelect={setChannel}
-          />
-
-          {/* Operator + value */}
-          <div className="flex items-center gap-2">
-            <select
-              value={operator}
-              onChange={(e) => setOperator(e.target.value)}
-              className="px-2 py-1 rounded bg-muted border border-border text-sm outline-none focus:border-primary w-16"
-            >
-              {OPERATORS.map((op) => (
-                <option key={op} value={op}>{op}</option>
-              ))}
-            </select>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Value"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              className="flex-1 px-2 py-1 rounded bg-muted border border-border text-sm placeholder:text-muted-foreground outline-none focus:border-primary"
-            />
-          </div>
-
-          {currentExpression && (
-            <div className="text-xs text-muted-foreground font-mono bg-muted/50 px-2 py-1 rounded">
-              {currentExpression}
-            </div>
-          )}
+      {/* ── Generated result — every field stays hand-editable ── */}
+      <div className="border-t border-border pt-3 space-y-2">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Zone details
         </div>
-      ) : (
-        <div className="space-y-2">
+        <div>
+          <label className="text-xs text-muted-foreground">Expression</label>
           <textarea
-            value={rawExpression}
+            value={expression}
             onChange={(e) => {
-              setRawExpression(e.target.value);
+              setExpression(e.target.value);
               handleValidate(e.target.value);
             }}
-            placeholder='{TPS} > 50 && {RPM} > 3000'
+            placeholder={'{TPS} > 50 && {RPM} > 3000'}
             rows={2}
-            className="w-full px-2 py-1 rounded bg-muted border border-border text-sm font-mono placeholder:text-muted-foreground outline-none focus:border-primary resize-none"
+            className="w-full px-2 py-1 rounded bg-muted border border-border text-sm font-mono placeholder:text-muted-foreground/60 placeholder:font-sans outline-none focus:border-primary resize-none"
           />
-          {validationError && (
-            <div className="text-xs text-destructive">{validationError}</div>
-          )}
+          {validationError && <div className="text-xs text-destructive mt-0.5">{validationError}</div>}
         </div>
-      )}
-
-      {/* Label + color */}
-      <div className="flex items-center gap-2">
-        <input
-          type="text"
-          placeholder="Label"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          className="flex-1 px-2 py-1 rounded bg-muted border border-border text-sm placeholder:text-muted-foreground outline-none focus:border-primary"
-        />
-      </div>
-      <div className="flex items-center gap-1">
-        {ZONE_COLORS.map((c) => (
-          <button
-            key={c}
-            onClick={() => setColor(c)}
-            className={`w-[18px] h-[18px] rounded-full border-2 cursor-pointer shrink-0 ${color === c ? "border-primary" : "border-transparent"}`}
-            style={{ backgroundColor: c }}
+        <div>
+          <label className="text-xs text-muted-foreground">Label</label>
+          <input
+            type="text"
+            placeholder="Label"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            className="w-full px-2 py-1 rounded bg-muted border border-border text-sm placeholder:text-muted-foreground outline-none focus:border-primary"
           />
-        ))}
+        </div>
+        <div className="flex items-center gap-1 flex-wrap">
+          {ZONE_COLORS.map((c) => (
+            <button
+              key={c}
+              title={c}
+              onClick={() => setColor(c)}
+              className={`w-[18px] h-[18px] rounded-full border-2 cursor-pointer shrink-0 ${color === c ? "border-primary" : "border-transparent"}`}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+          {/* Custom — any color via the native picker; shows the chosen color
+              when it isn't one of the presets */}
+          <label
+            title="Custom color…"
+            className={`relative w-[18px] h-[18px] rounded-full border-2 cursor-pointer shrink-0 overflow-hidden block ${
+              ZONE_COLORS.includes(color) ? "border-border" : "border-primary"
+            }`}
+            style={
+              ZONE_COLORS.includes(color)
+                ? { background: "conic-gradient(from 90deg, #ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)" }
+                : { backgroundColor: color }
+            }
+          >
+            <input
+              type="color"
+              value={color}
+              onChange={(e) => setColor(e.target.value)}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            />
+          </label>
+        </div>
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showOnAllTraces}
+            onChange={(e) => setShowOnAllTraces(e.target.checked)}
+            className="accent-primary"
+          />
+          Show on all traces
+        </label>
       </div>
 
-      {/* Submit */}
+      {/* Actions */}
       <div className="flex items-center gap-2">
         <button
           onClick={handleSubmit}
-          disabled={!currentExpression.trim() || !label.trim() || !!validationError}
+          disabled={!canSave}
           className="px-3 py-1 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         >
-          {editingZone ? "Update Zone" : "Add Zone"}
+          {editingZone ? "Save Changes" : "Add Zone"}
         </button>
-        {editingZone && onCancelEdit && (
+        {onCancelEdit && (
           <button
             onClick={onCancelEdit}
             className="px-3 py-1 text-sm border border-border rounded hover:bg-muted cursor-pointer"
@@ -422,32 +397,6 @@ function ZoneBuilder({
           </button>
         )}
       </div>
-
-      {/* AI generation */}
-      <div className="border-t border-border pt-3 mt-3 space-y-2">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <SparklesIcon className="size-3.5" />
-            AI Zone Generator
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              placeholder="Describe what to highlight..."
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !aiLoading) handleAiGenerate(); }}
-              className="flex-1 px-2 py-1 rounded bg-muted border border-border text-sm placeholder:text-muted-foreground outline-none focus:border-primary"
-            />
-            <button
-              onClick={handleAiGenerate}
-              disabled={aiLoading || !aiPrompt.trim()}
-              className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1"
-            >
-              {aiLoading ? "..." : editingZone?.aiPrompt ? "Regenerate" : "Generate"}
-            </button>
-          </div>
-          {aiError && <div className="text-xs text-destructive">{aiError}</div>}
-        </div>
     </div>
   );
 }
@@ -492,8 +441,8 @@ export function TraceSettingsPanel({
                     <div key={zone.id} className="border border-border rounded-md p-2 mb-2">
                       <ZoneBuilder
                         editingZone={zone}
-                        onSubmit={(expression, label, color, aiPrompt) => {
-                          onUpdateZone?.(zone.id, { expression, label, color, aiPrompt });
+                        onSubmit={(z) => {
+                          onUpdateZone?.(zone.id, z);
                           setEditingZoneId(null);
                         }}
                         onCancelEdit={() => setEditingZoneId(null)}
@@ -508,10 +457,15 @@ export function TraceSettingsPanel({
                 return (
                   <div
                     key={zone.id}
-                    className="flex items-center gap-2 py-1.5 px-1 rounded hover:bg-muted/50 group"
+                    onClick={() => setEditingZoneId(zone.id)}
+                    title="Click to edit"
+                    className="flex items-center gap-2 py-1.5 px-1 rounded hover:bg-muted/50 group cursor-pointer"
                   >
                     <button
-                      onClick={() => onToggleZone?.(zone.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleZone?.(zone.id);
+                      }}
                       className="cursor-pointer"
                     >
                       <span
@@ -522,17 +476,23 @@ export function TraceSettingsPanel({
                         }}
                       />
                     </button>
-                    <span className={`flex-1 text-sm truncate ${zone.enabled ? "" : "opacity-50"}`}>
-                      {zone.label}
-                    </span>
-                    <span className="text-xs text-muted-foreground font-mono truncate max-w-[120px]" title={zone.expression}>
-                      {zone.expression}
-                    </span>
+                    <div className={`flex-1 min-w-0 ${zone.enabled ? "" : "opacity-50"}`}>
+                      <div className="text-sm truncate">{zone.label}</div>
+                      <div
+                        className={`text-xs truncate ${zone.aiPrompt ? "text-muted-foreground italic" : "text-muted-foreground font-mono"}`}
+                        title={zone.aiPrompt ?? zone.expression}
+                      >
+                        {zone.aiPrompt ? `✨ ${zone.aiPrompt}` : zone.expression}
+                      </div>
+                    </div>
                     {evaluated?.error && (
                       <span className="text-xs text-destructive" title={evaluated.error}>err</span>
                     )}
                     <button
-                      onClick={() => onUpdateZone?.(zone.id, { showOnAllTraces: !zone.showOnAllTraces })}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUpdateZone?.(zone.id, { showOnAllTraces: !zone.showOnAllTraces });
+                      }}
                       title={zone.showOnAllTraces ? "Shown on all traces — click to limit to this trace" : "Show on all traces"}
                       className={`cursor-pointer ${zone.showOnAllTraces ? "text-primary" : "text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"}`}
                     >
@@ -540,7 +500,10 @@ export function TraceSettingsPanel({
                     </button>
                     {zone.labelYFraction != null && (
                       <button
-                        onClick={() => onUpdateZone?.(zone.id, { labelYFraction: undefined })}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onUpdateZone?.(zone.id, { labelYFraction: undefined });
+                        }}
                         title="Reset dragged label position"
                         className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 cursor-pointer"
                       >
@@ -548,13 +511,21 @@ export function TraceSettingsPanel({
                       </button>
                     )}
                     <button
-                      onClick={() => setEditingZoneId(zone.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingZoneId(zone.id);
+                      }}
+                      title="Edit zone"
                       className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 cursor-pointer"
                     >
                       <PencilIcon className="size-3" />
                     </button>
                     <button
-                      onClick={() => onRemoveZone?.(zone.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveZone?.(zone.id);
+                      }}
+                      title="Delete zone"
                       className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 cursor-pointer"
                     >
                       <XIcon className="size-3" />
@@ -571,27 +542,19 @@ export function TraceSettingsPanel({
               {showZoneBuilder ? (
                 <div className="border border-border rounded-md p-2 mt-2">
                   <ZoneBuilder
-                    onSubmit={(expression, label, color, aiPrompt) => {
+                    onSubmit={(z) => {
                       onAddZone?.({
                         id: crypto.randomUUID(),
-                        expression,
-                        label,
-                        color,
                         enabled: true,
-                        aiPrompt,
+                        ...z,
                       });
                       setShowZoneBuilder(false);
                     }}
+                    onCancelEdit={() => setShowZoneBuilder(false)}
                     logs={logs}
                     unitSystem={unitSystem}
                     unitOverrides={unitOverrides}
                   />
-                  <button
-                    onClick={() => setShowZoneBuilder(false)}
-                    className="mt-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-                  >
-                    Cancel
-                  </button>
                 </div>
               ) : (
                 <button
