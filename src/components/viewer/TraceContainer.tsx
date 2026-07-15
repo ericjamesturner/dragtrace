@@ -3,9 +3,9 @@ import type { LoadedLog, ChannelOnTrace, TraceConfig, HighlightZoneConfig } from
 import { resolveChannelStyle, CHART_COLORS } from "@/lib/viewer-types";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { TraceChart } from "./TraceChart";
-import { TraceSettingsPanel } from "./TraceSettingsPanel";
+import { TraceSettingsPanel, ChannelPicker } from "./TraceSettingsPanel";
 import { findValueAtTime, formatValue, computeRangeStats } from "@/lib/cursor-utils";
-import { convertForDisplay, getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
+import { convertForDisplay, convertFromDisplay, getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, GripHorizontalIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
@@ -31,6 +31,195 @@ const RACE_STYLE_OPTIONS: { label: string; dash: number[] }[] = [
   { label: "Dashed", dash: [7, 5] },
   { label: "Dotted", dash: [2, 4] },
 ];
+
+/** Inline axis min/max editor for the channel context menu (display units). */
+function AxisInputs({
+  minRaw,
+  maxRaw,
+  minPlaceholder = "Auto",
+  maxPlaceholder = "Auto",
+  toDisplay,
+  fromDisplay,
+  onCommit,
+}: {
+  minRaw?: number;
+  maxRaw?: number;
+  /** Shown when the field is empty (auto) — the resolved current axis value. */
+  minPlaceholder?: string;
+  maxPlaceholder?: string;
+  toDisplay: (v: number) => number;
+  fromDisplay: (v: number) => number;
+  onCommit: (min?: number, max?: number) => void;
+}) {
+  const fmt = (v?: number) => (v === undefined ? "" : formatValue(toDisplay(v)));
+  const [minInput, setMinInput] = useState(() => fmt(minRaw));
+  const [maxInput, setMaxInput] = useState(() => fmt(maxRaw));
+
+  useEffect(() => {
+    setMinInput(fmt(minRaw));
+    setMaxInput(fmt(maxRaw));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minRaw, maxRaw]);
+
+  const commit = () => {
+    const parse = (s: string) => {
+      if (s.trim() === "") return undefined;
+      const v = parseFloat(s);
+      return isNaN(v) ? undefined : fromDisplay(v);
+    };
+    onCommit(parse(minInput), parse(maxInput));
+  };
+
+  const inputCls =
+    "w-full px-2 py-1 rounded bg-muted border border-border text-sm font-mono placeholder:text-muted-foreground/70 outline-none focus:border-primary";
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        type="text"
+        inputMode="decimal"
+        placeholder={minPlaceholder}
+        title={minRaw === undefined ? `Auto — currently ${minPlaceholder}` : undefined}
+        value={minInput}
+        onChange={(e) => setMinInput(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
+        className={inputCls}
+      />
+      <span className="text-muted-foreground text-xs shrink-0">–</span>
+      <input
+        type="text"
+        inputMode="decimal"
+        placeholder={maxPlaceholder}
+        title={maxRaw === undefined ? `Auto — currently ${maxPlaceholder}` : undefined}
+        value={maxInput}
+        onChange={(e) => setMaxInput(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
+        className={inputCls}
+      />
+    </div>
+  );
+}
+
+const COLORBY_STOPS = ["#0000b4", "#0064ff", "#00c8c8", "#00c850", "#b4dc00", "#ffc800", "#ff7800", "#ff0000"];
+const COLORBY_CSS_GRADIENT = `linear-gradient(to right, ${COLORBY_STOPS.join(",")})`;
+
+/** Compact color-by-channel editor for the context menu (raw-unit range). */
+function ColorByEditor({
+  ch,
+  pickerLogs,
+  selfName,
+  onSet,
+}: {
+  ch?: ChannelOnTrace;
+  pickerLogs: LoadedLog[];
+  selfName: string;
+  onSet: (colorBy?: string, min?: number, max?: number) => void;
+}) {
+  const [showPicker, setShowPicker] = useState(false);
+  const [lowInput, setLowInput] = useState(ch?.colorByMin?.toString() ?? "");
+  const [highInput, setHighInput] = useState(ch?.colorByMax?.toString() ?? "");
+
+  useEffect(() => {
+    setLowInput(ch?.colorByMin?.toString() ?? "");
+    setHighInput(ch?.colorByMax?.toString() ?? "");
+  }, [ch?.colorByMin, ch?.colorByMax]);
+
+  const commitRange = () => {
+    const parse = (s: string) => {
+      if (s.trim() === "") return undefined;
+      const v = parseFloat(s);
+      return isNaN(v) ? undefined : v;
+    };
+    onSet(ch?.colorBy, parse(lowInput), parse(highInput));
+  };
+
+  const inputCls =
+    "w-full px-2 py-1 rounded bg-muted border border-border text-sm font-mono placeholder:text-muted-foreground/70 placeholder:font-sans outline-none focus:border-primary";
+
+  if (!ch?.colorBy) {
+    return showPicker ? (
+      <ChannelPicker
+        logs={pickerLogs}
+        selected=""
+        onSelect={(name) => {
+          if (name === selfName) return; // can't color by self
+          onSet(name, ch?.colorByMin, ch?.colorByMax);
+          setShowPicker(false);
+        }}
+      />
+    ) : (
+      <button
+        onClick={() => setShowPicker(true)}
+        className="text-sm text-primary hover:text-primary/80 cursor-pointer"
+      >
+        Color by a channel…
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-primary font-medium truncate" title={ch.colorBy}>
+          {ch.colorBy}
+        </span>
+        <button
+          onClick={() => setShowPicker((v) => !v)}
+          className="ml-auto text-[11px] text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+        >
+          {showPicker ? "Hide" : "Change…"}
+        </button>
+        <button
+          onClick={() => {
+            onSet(undefined, undefined, undefined);
+            setLowInput("");
+            setHighInput("");
+          }}
+          title="Clear color-by"
+          className="text-muted-foreground hover:text-destructive cursor-pointer shrink-0"
+        >
+          <XIcon className="size-3.5" />
+        </button>
+      </div>
+      {showPicker && (
+        <ChannelPicker
+          logs={pickerLogs}
+          selected={ch.colorBy}
+          onSelect={(name) => {
+            if (name === selfName) return;
+            onSet(name, ch.colorByMin, ch.colorByMax);
+            setShowPicker(false);
+          }}
+        />
+      )}
+      <div className="h-3 rounded" style={{ background: COLORBY_CSS_GRADIENT }} />
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder="Low (blue)"
+          value={lowInput}
+          onChange={(e) => setLowInput(e.target.value)}
+          onBlur={commitRange}
+          onKeyDown={(e) => { if (e.key === "Enter") commitRange(); }}
+          className={inputCls}
+        />
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder="High (red)"
+          value={highInput}
+          onChange={(e) => setHighInput(e.target.value)}
+          onBlur={commitRange}
+          onKeyDown={(e) => { if (e.key === "Enter") commitRange(); }}
+          className={inputCls}
+        />
+      </div>
+    </div>
+  );
+}
 
 interface Props {
   trace: TraceConfig;
@@ -79,6 +268,8 @@ interface Props {
   onToggleZone?: (zoneId: string) => void;
   // Timeslip overlay: synthetic zones (one per file timeslip) + persisted expand state.
   timeslipZones?: EvaluatedZone[];
+  /** Cross-chart union range per scale group (e.g. "lambda") from the page. */
+  groupYRanges?: Map<string, [number, number]>;
   expandedTimeslipIds?: string[];
   onToggleTimeslipExpand?: (id: string) => void;
   // Race-start marker line style + setter (global; persisted in config).
@@ -133,6 +324,7 @@ export function TraceContainer({
   onRemoveZone,
   onToggleZone,
   timeslipZones,
+  groupYRanges,
   expandedTimeslipIds,
   onToggleTimeslipExpand,
   raceLine,
@@ -142,11 +334,13 @@ export function TraceContainer({
 }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Channel to auto-expand when the settings panel opens via right-click
-  const [settingsFocus, setSettingsFocus] = useState<{
-    logFileId: Id<"files">;
-    channelName: string;
-  } | null>(null);
+  // Appearance section of the channel context menu (collapsed by default)
+  const [cmAppearanceOpen, setCmAppearanceOpen] = useState(false);
+  // Resolved y-range per channel, reported by the chart after auto-scaling —
+  // this is what "Auto" actually is right now.
+  const [resolvedRanges, setResolvedRanges] = useState<Map<string, [number, number]>>(
+    () => new Map(),
+  );
   const resizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   // Race-start marker line right-click menu.
@@ -396,12 +590,9 @@ export function TraceContainer({
             </svg>
           </button>
         </Tip>
-        <Tip content="Trace settings">
+        <Tip content="Highlight zones">
           <button
-            onClick={() => {
-              setSettingsFocus(null);
-              setSettingsOpen(true);
-            }}
+            onClick={() => setSettingsOpen(true)}
             className="text-muted-foreground hover:text-foreground cursor-pointer"
           >
             <SlidersHorizontalIcon className="size-4" />
@@ -428,6 +619,8 @@ export function TraceContainer({
             zoomRange={zoomRange}
             globalRange={globalRange}
             sharedYRanges={sharedYRanges}
+            groupYRanges={groupYRanges}
+            onResolvedScaleRanges={setResolvedRanges}
             showAxes={showAxes}
             showAxisLabels={showAxisLabels}
             raceStartTimes={raceStartTimes}
@@ -447,7 +640,7 @@ export function TraceContainer({
             onToggleZoneExpand={handleToggleZoneExpand}
             onMoveZoneLabel={(zoneId, frac) => onUpdateZone?.(zoneId, { labelYFraction: frac })}
             onChannelContextMenu={(logFileId, channelName, x, y) =>
-              setContextMenu({ x, y, logFileId: logFileId as Id<"files">, channelName })
+              { setCmAppearanceOpen(false); setContextMenu({ x, y, logFileId: logFileId as Id<"files">, channelName }); }
             }
             raceLine={raceLine}
             onRaceLineContextMenu={(x, y) => setRaceMenu({ x, y })}
@@ -607,6 +800,7 @@ export function TraceContainer({
                               }}
                               onContextMenu={(e) => {
                                 e.preventDefault();
+                                setCmAppearanceOpen(false);
                                 setContextMenu({
                                   x: e.clientX,
                                   y: e.clientY,
@@ -690,7 +884,6 @@ export function TraceContainer({
       {/* Context menu (channel row right-click OR chart line right-click) */}
       {contextMenu && (() => {
         const cmKey = `${contextMenu.logFileId}:${contextMenu.channelName}`;
-        const cmHidden = hiddenChannels.has(cmKey);
         const cmCh = trace.channels.find(
           (c) => (c.logFileId as string) === (contextMenu.logFileId as string) && c.channelName === contextMenu.channelName
         );
@@ -715,9 +908,35 @@ export function TraceContainer({
           if (min <= max) cmExtent = { min, max };
         }
         const hasManualAxis = cmCh?.axisMin !== undefined || cmCh?.axisMax !== undefined;
-        const cmMu = cmLog?.parsed.channelDefs.find((d) => d.name === contextMenu.channelName)?.metricUnit ?? "";
+        const cmDef = cmLog?.parsed.channelDefs.find((d) => d.name === contextMenu.channelName);
+        const cmMu = cmDef?.metricUnit ?? "";
         const cmToDisplay = (v: number) =>
           cmMu ? convertForDisplay(v, cmMu, unitSystem, unitOverrides) : v;
+        const cmDisplayUnit = cmMu ? getDisplayUnit(cmMu, unitSystem, unitOverrides) : "";
+
+        // Channel stats scoped to: range selection > zoom window > whole log
+        const cmOffset = cmLog ? offsets.get(cmLog.fileId) ?? 0 : 0;
+        let statScope: [number, number] = globalRange;
+        let statScopeLabel = "whole log";
+        if (selection && selection[0] !== selection[1]) {
+          statScope = selection;
+          statScopeLabel = "selection";
+        } else if (zoomRange) {
+          statScope = zoomRange;
+          statScopeLabel = "in view";
+        }
+        const cmStats =
+          cmLog && !cmDef?.enumValues
+            ? computeRangeStats(cmLog, contextMenu.channelName, statScope, cmOffset)
+            : null;
+        const cmResolved = resolvedRanges.get(contextMenu.channelName);
+        const cmRace = raceStartTimes[0];
+        const fmtStatTime = (t: number) =>
+          `${(cmRace ? t - (cmRace.time + cmRace.offset) : t).toFixed(2)}s`;
+        const jumpTo = (t: number) => {
+          onSelection?.(t, t);
+          setContextMenu(null);
+        };
         return (
           <div
             className="fixed z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[270px]"
@@ -727,156 +946,206 @@ export function TraceContainer({
             <div className="px-3 pt-0.5 pb-1 text-[11px] text-muted-foreground truncate max-w-[250px]">
               {contextMenu.channelName}
             </div>
-            {/* Quick color swatches — hover to preview live on the line, click to set.
-                Last two: pick ANY color (rainbow), and reset to default. */}
-            <div className="px-3 py-1 flex flex-nowrap items-center gap-1">
-              {CHART_COLORS.map((c) => (
-                <button
-                  key={c}
-                  title={c}
-                  onMouseEnter={() => setColorPreview({ key: cmKey, color: c })}
-                  onMouseLeave={() => setColorPreview(null)}
-                  onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c); setColorPreview(null); }}
-                  className="w-4 h-4 rounded-full border border-white/20 cursor-pointer hover:scale-110 transition-transform shrink-0"
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-              {/* Custom color — opens the native picker; previews live as you drag */}
-              <label
-                key={cmKey}
-                title="Custom color…"
-                className="w-4 h-4 rounded-full border border-white/40 cursor-pointer hover:scale-110 transition-transform shrink-0 relative overflow-hidden block"
-                style={{ background: "conic-gradient(from 90deg, #ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)" }}
-              >
-                <input
-                  type="color"
-                  defaultValue={cmCh?.color ?? "#3b82f6"}
-                  onInput={(e) => setColorPreview({ key: cmKey, color: (e.target as HTMLInputElement).value })}
-                  onChange={(e) => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, (e.target as HTMLInputElement).value); setColorPreview(null); }}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
-              </label>
-              <button
-                title="Reset to default color"
-                onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, undefined); setColorPreview(null); }}
-                className="w-4 h-4 rounded-full border border-white/30 cursor-pointer text-[9px] leading-none flex items-center justify-center text-muted-foreground hover:text-foreground shrink-0"
-              >
-                ↺
-              </button>
-            </div>
-            {/* Line width */}
-            <div className="px-3 py-1">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Width</div>
-              <div className="flex gap-1">
-                {WIDTH_OPTIONS.map((w) => (
+            {/* Channel stats — min/avg/max over selection > view > log; click min/max to jump */}
+            {cmStats && (
+              <div className="px-3 pb-1.5">
+                <div className="flex items-center justify-between text-[9px] uppercase tracking-wide text-muted-foreground mb-0.5">
+                  <span>Stats{cmDisplayUnit ? ` (${cmDisplayUnit})` : ""}</span>
+                  <span className="normal-case tracking-normal">{statScopeLabel}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1 text-center">
                   <button
-                    key={w}
-                    title={`${w}px`}
-                    onClick={() => onSetChannelWidth(contextMenu.logFileId, contextMenu.channelName, w)}
-                    className={`${seg} ${Math.abs(curWidth - w) < 0.01 ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
+                    title="Jump cursor to min"
+                    onClick={() => jumpTo(cmStats.minTime)}
+                    className="rounded border border-border hover:bg-muted px-1 py-0.5 cursor-pointer"
                   >
-                    <div className="w-5 rounded-full bg-foreground/80" style={{ height: w }} />
+                    <div className="text-[9px] text-muted-foreground">MIN</div>
+                    <div className="font-mono text-sm font-medium">{formatValue(cmToDisplay(cmStats.min))}</div>
+                    <div className="text-[10px] text-muted-foreground font-mono">@ {fmtStatTime(cmStats.minTime)}</div>
                   </button>
-                ))}
+                  <div className="rounded border border-transparent px-1 py-0.5">
+                    <div className="text-[9px] text-amber-400">AVG</div>
+                    <div className="font-mono text-sm font-medium">{formatValue(cmToDisplay(cmStats.avg))}</div>
+                    <div className="text-[10px] text-transparent select-none">&nbsp;</div>
+                  </div>
+                  <button
+                    title="Jump cursor to max"
+                    onClick={() => jumpTo(cmStats.maxTime)}
+                    className="rounded border border-border hover:bg-muted px-1 py-0.5 cursor-pointer"
+                  >
+                    <div className="text-[9px] text-muted-foreground">MAX</div>
+                    <div className="font-mono text-sm font-medium">{formatValue(cmToDisplay(cmStats.max))}</div>
+                    <div className="text-[10px] text-muted-foreground font-mono">@ {fmtStatTime(cmStats.maxTime)}</div>
+                  </button>
+                </div>
               </div>
-            </div>
-            {/* Line style */}
+            )}
+            <div className="border-t border-border my-1" />
+            {/* Axis range — shown and edited in display units, stored raw */}
             <div className="px-3 py-1">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Style</div>
-              <div className="flex gap-1">
-                {STYLE_OPTIONS.map((s) => {
-                  const active = JSON.stringify(curDash ?? null) === JSON.stringify(s.dash ?? null);
-                  return (
+              <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+                <span>Axis{cmDisplayUnit ? ` (${cmDisplayUnit})` : ""}</span>
+                <div className="flex items-center gap-2 normal-case tracking-normal">
+                  {cmExtent && (
                     <button
-                      key={s.label}
-                      title={s.label}
-                      onClick={() => onSetChannelDash(contextMenu.logFileId, contextMenu.channelName, s.dash)}
-                      className={`${seg} ${active ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
+                      className="text-[11px] hover:text-foreground cursor-pointer"
+                      title={`Fit to data (${formatValue(cmToDisplay(cmExtent.min))} – ${formatValue(cmToDisplay(cmExtent.max))})`}
+                      onClick={() => {
+                        const pad = (cmExtent.max - cmExtent.min) * 0.05 || 1;
+                        onSetChannelAxisRange(
+                          contextMenu.logFileId,
+                          contextMenu.channelName,
+                          cmExtent.min - pad,
+                          cmExtent.max + pad,
+                        );
+                      }}
                     >
-                      <svg width="30" height="6" viewBox="0 0 30 6" className="text-foreground/80">
-                        <line x1="1" y1="3" x2="29" y2="3" stroke="currentColor" strokeWidth="1.5" strokeDasharray={s.dash ? s.dash.join(",") : undefined} />
-                      </svg>
+                      Fit to data
                     </button>
-                  );
-                })}
+                  )}
+                  {hasManualAxis && (
+                    <button
+                      className="text-[11px] hover:text-foreground cursor-pointer"
+                      title="Reset axis to auto"
+                      onClick={() =>
+                        onSetChannelAxisRange(contextMenu.logFileId, contextMenu.channelName, undefined, undefined)
+                      }
+                    >
+                      Auto
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-            {/* Opacity */}
-            <div className="px-3 py-1">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Opacity</div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={0.1}
-                  max={1}
-                  step={0.05}
-                  value={cmCh?.opacity ?? 1}
-                  onChange={(e) =>
-                    onSetChannelOpacity(contextMenu.logFileId, contextMenu.channelName, parseFloat(e.target.value))
-                  }
-                  className="flex-1 h-1.5 accent-primary cursor-pointer"
-                />
-                <span className="text-xs text-muted-foreground w-8 text-right font-mono">
-                  {Math.round((cmCh?.opacity ?? 1) * 100)}%
-                </span>
-              </div>
+              <AxisInputs
+                key={cmKey}
+                minRaw={cmCh?.axisMin}
+                maxRaw={cmCh?.axisMax}
+                minPlaceholder={cmResolved ? formatValue(cmToDisplay(cmResolved[0])) : "Auto"}
+                maxPlaceholder={cmResolved ? formatValue(cmToDisplay(cmResolved[1])) : "Auto"}
+                toDisplay={cmToDisplay}
+                fromDisplay={(v) => (cmMu ? convertFromDisplay(v, cmMu, unitSystem, unitOverrides) : v)}
+                onCommit={(min, max) =>
+                  onSetChannelAxisRange(contextMenu.logFileId, contextMenu.channelName, min, max)
+                }
+              />
             </div>
             <div className="border-t border-border my-1" />
-            {cmExtent && (
-              <button
-                className={item}
-                onClick={() => {
-                  const pad = (cmExtent.max - cmExtent.min) * 0.05 || 1;
-                  onSetChannelAxisRange(
-                    contextMenu.logFileId,
-                    contextMenu.channelName,
-                    cmExtent.min - pad,
-                    cmExtent.max + pad,
-                  );
-                  setContextMenu(null);
-                }}
-              >
-                Fit axis to data
-                <span className="ml-auto text-[11px] text-muted-foreground font-mono">
-                  {formatValue(cmToDisplay(cmExtent.min))} – {formatValue(cmToDisplay(cmExtent.max))}
-                </span>
-              </button>
-            )}
-            {hasManualAxis && (
-              <button
-                className={item}
-                onClick={() => {
-                  onSetChannelAxisRange(contextMenu.logFileId, contextMenu.channelName, undefined, undefined);
-                  setContextMenu(null);
-                }}
-              >
-                Reset axis to auto
-              </button>
-            )}
-            <div className="border-t border-border my-1" />
-            <button
-              className={item}
-              onClick={() => {
-                setSettingsFocus({ logFileId: contextMenu.logFileId, channelName: contextMenu.channelName });
-                setSettingsOpen(true);
-                setContextMenu(null);
-              }}
-            >
-              Edit channel…
+            {/* Appearance — collapsed by default */}
+            <button className={item} onClick={() => setCmAppearanceOpen((v) => !v)}>
+              <span className="flex-1">Appearance</span>
+              {cmAppearanceOpen ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
             </button>
-            <button
-              className={item}
-              onClick={() => {
-                setHiddenChannels((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(cmKey)) next.delete(cmKey); else next.add(cmKey);
-                  return next;
-                });
-                setContextMenu(null);
-              }}
-            >
-              {cmHidden ? "Show on chart" : "Hide on chart"}
-            </button>
+            {cmAppearanceOpen && (
+              <>
+                {/* Quick color swatches — hover to preview live on the line, click to set.
+                    Last two: pick ANY color (rainbow), and reset to default. */}
+                <div className="px-3 py-1 flex flex-nowrap items-center gap-1">
+                  {CHART_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      title={c}
+                      onMouseEnter={() => setColorPreview({ key: cmKey, color: c })}
+                      onMouseLeave={() => setColorPreview(null)}
+                      onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c); setColorPreview(null); }}
+                      className="w-4 h-4 rounded-full border border-white/20 cursor-pointer hover:scale-110 transition-transform shrink-0"
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                  {/* Custom color — opens the native picker; previews live as you drag */}
+                  <label
+                    key={cmKey}
+                    title="Custom color…"
+                    className="w-4 h-4 rounded-full border border-white/40 cursor-pointer hover:scale-110 transition-transform shrink-0 relative overflow-hidden block"
+                    style={{ background: "conic-gradient(from 90deg, #ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)" }}
+                  >
+                    <input
+                      type="color"
+                      defaultValue={cmCh?.color ?? "#3b82f6"}
+                      onInput={(e) => setColorPreview({ key: cmKey, color: (e.target as HTMLInputElement).value })}
+                      onChange={(e) => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, (e.target as HTMLInputElement).value); setColorPreview(null); }}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                  </label>
+                  <button
+                    title="Reset to default color"
+                    onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, undefined); setColorPreview(null); }}
+                    className="w-4 h-4 rounded-full border border-white/30 cursor-pointer text-[9px] leading-none flex items-center justify-center text-muted-foreground hover:text-foreground shrink-0"
+                  >
+                    ↺
+                  </button>
+                </div>
+                {/* Line width */}
+                <div className="px-3 py-1">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Width</div>
+                  <div className="flex gap-1">
+                    {WIDTH_OPTIONS.map((w) => (
+                      <button
+                        key={w}
+                        title={`${w}px`}
+                        onClick={() => onSetChannelWidth(contextMenu.logFileId, contextMenu.channelName, w)}
+                        className={`${seg} ${Math.abs(curWidth - w) < 0.01 ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
+                      >
+                        <div className="w-5 rounded-full bg-foreground/80" style={{ height: w }} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* Line style */}
+                <div className="px-3 py-1">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Style</div>
+                  <div className="flex gap-1">
+                    {STYLE_OPTIONS.map((s) => {
+                      const active = JSON.stringify(curDash ?? null) === JSON.stringify(s.dash ?? null);
+                      return (
+                        <button
+                          key={s.label}
+                          title={s.label}
+                          onClick={() => onSetChannelDash(contextMenu.logFileId, contextMenu.channelName, s.dash)}
+                          className={`${seg} ${active ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
+                        >
+                          <svg width="30" height="6" viewBox="0 0 30 6" className="text-foreground/80">
+                            <line x1="1" y1="3" x2="29" y2="3" stroke="currentColor" strokeWidth="1.5" strokeDasharray={s.dash ? s.dash.join(",") : undefined} />
+                          </svg>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* Opacity */}
+                <div className="px-3 py-1">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Opacity</div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={1}
+                      step={0.05}
+                      value={cmCh?.opacity ?? 1}
+                      onChange={(e) =>
+                        onSetChannelOpacity(contextMenu.logFileId, contextMenu.channelName, parseFloat(e.target.value))
+                      }
+                      className="flex-1 h-1.5 accent-primary cursor-pointer"
+                    />
+                    <span className="text-xs text-muted-foreground w-8 text-right font-mono">
+                      {Math.round((cmCh?.opacity ?? 1) * 100)}%
+                    </span>
+                  </div>
+                </div>
+                {/* Color by channel */}
+                <div className="px-3 py-1">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Color by channel</div>
+                  <ColorByEditor
+                    key={cmKey}
+                    ch={cmCh}
+                    pickerLogs={cmLog ? [cmLog] : logs}
+                    selfName={contextMenu.channelName}
+                    onSet={(colorBy, lo, hi) =>
+                      onSetChannelColorBy(contextMenu.logFileId, contextMenu.channelName, colorBy, lo, hi)
+                    }
+                  />
+                </div>
+              </>
+            )}
             <div className="border-t border-border my-1" />
             <button
               className={`${item} text-destructive`}
@@ -974,21 +1243,11 @@ export function TraceContainer({
         );
       })()}
 
-      {/* Settings panel */}
+      {/* Highlight zones panel */}
       <TraceSettingsPanel
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        focusChannel={settingsFocus}
-        trace={trace}
         logs={logs}
-        onSetChannelColor={onSetChannelColor}
-        onSetChannelOpacity={onSetChannelOpacity}
-        onSetChannelWidth={onSetChannelWidth}
-        onSetChannelDash={onSetChannelDash}
-        onSetChannelAxisRange={onSetChannelAxisRange}
-        onSetChannelColorBy={onSetChannelColorBy}
-        onRemoveChannel={onRemoveChannel}
-        onAddChannel={onAddChannel}
         highlightZones={trace.highlightZones}
         onAddZone={onAddZone}
         onUpdateZone={onUpdateZone}

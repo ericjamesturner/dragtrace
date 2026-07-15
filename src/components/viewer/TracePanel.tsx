@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import type { LoadedLog, TraceConfig, ChannelOnTrace, PageConfig, HighlightZoneConfig, ScatterConfig, HeatmapConfig, ScatterSuggestion } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import type { UnitSystem, UnitOverrides } from "@/lib/units";
@@ -153,6 +153,34 @@ export function TracePanel({
   // otherwise the live cursor drives them.
   const effectiveCursorTime =
     selection && selection[0] === selection[1] ? selection[0] : cursorTime;
+
+  // Union range of every lambda-family channel on any rendered trace, so
+  // lambda scales match ACROSS charts — two AFR traces on different charts
+  // must never look aligned while reading a point apart.
+  const groupYRanges = useMemo(() => {
+    let min = Infinity;
+    let max = -Infinity;
+    for (const trace of traces) {
+      for (const ch of trace.channels) {
+        const log = logs.find((l) => l.fileId === ch.logFileId);
+        const session = log?.parsed.sessions[log.activeSessionIndex];
+        if (!log || !session) continue;
+        const def = log.parsed.channelDefs.find((d) => d.name === ch.channelName);
+        if (def?.metricUnit !== "lambda") continue;
+        const data = session.channels.get(ch.channelName);
+        if (!data) continue;
+        for (let i = 0; i < data.length; i++) {
+          const v = data[i];
+          if (v !== v) continue;
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      }
+    }
+    const map = new Map<string, [number, number]>();
+    if (min < max) map.set("lambda", [min, max]);
+    return map;
+  }, [traces, logs]);
 
   // Scatters / heatmaps live on the active page (page-local, like halog).
   const activePage = pages.find((p) => p.id === activePageId);
@@ -508,6 +536,7 @@ export function TracePanel({
                 cursorTime={effectiveCursorTime}
                 unitSystem={unitSystem}
                 unitOverrides={unitOverrides}
+                groupYRanges={groupYRanges}
                 onAddZone={(zone) => onAddZone(trace.id, zone)}
                 onUpdateZone={(zoneId, updates) => onUpdateZone(trace.id, zoneId, updates)}
                 onRemoveZone={(zoneId) => onRemoveZone(trace.id, zoneId)}

@@ -105,6 +105,12 @@ interface Props {
   zoomRange: [number, number] | null;
   globalRange: [number, number];
   sharedYRanges: Map<string, [number, number]>;
+  /** Cross-chart union range per scale group (e.g. "lambda"), so grouped
+   *  channels use the same scale on every chart of the page. */
+  groupYRanges?: Map<string, [number, number]>;
+  /** Reports the resolved y-range per channel after auto-scaling, so UI
+   *  (axis editors) can show what "Auto" actually is right now. */
+  onResolvedScaleRanges?: (byChannel: Map<string, [number, number]>) => void;
   showAxes: boolean;
   showAxisLabels: boolean;
   raceStartTimes: { time: number; offset: number }[];
@@ -197,6 +203,8 @@ export function TraceChart({
   zoomRange,
   globalRange,
   sharedYRanges,
+  groupYRanges,
+  onResolvedScaleRanges,
   showAxes,
   showAxisLabels,
   raceStartTimes,
@@ -245,6 +253,8 @@ export function TraceChart({
   onDragPreviewRef.current = onDragPreview;
   const onCursorRef = useRef(onCursorTime);
   onCursorRef.current = onCursorTime;
+  const onResolvedScaleRangesRef = useRef(onResolvedScaleRanges);
+  onResolvedScaleRangesRef.current = onResolvedScaleRanges;
   const onChannelContextMenuRef = useRef(onChannelContextMenu);
   onChannelContextMenuRef.current = onChannelContextMenu;
   const onRaceLineContextMenuRef = useRef(onRaceLineContextMenu);
@@ -308,6 +318,11 @@ export function TraceChart({
   const rangesKey = Array.from(sharedYRanges.entries())
     .map(([k, [min, max]]) => `${k}:${min}:${max}`)
     .join("|");
+  const groupRangesKey = groupYRanges
+    ? Array.from(groupYRanges.entries())
+        .map(([k, [min, max]]) => `${k}:${min}:${max}`)
+        .join("|")
+    : "";
 
   // Race-line style serialized so the chart rebuilds when it changes.
   const raceLineKey = `${raceLine?.color ?? ""}:${raceLine?.width ?? ""}:${(raceLine?.dash ?? []).join(",")}`;
@@ -464,6 +479,7 @@ export function TraceChart({
     }
 
     // Build scales, unioning the data ranges of every channel sharing the scale
+    const scaleRangeByKey = new Map<string, [number, number]>();
     for (const [scaleId, scaleKey] of scaleKeyById) {
       const manualMin = scaleManualMin.get(scaleKey);
       const manualMax = scaleManualMax.get(scaleKey);
@@ -474,6 +490,14 @@ export function TraceChart({
         if (!shared) continue;
         if (shared[0] < autoMin) autoMin = shared[0];
         if (shared[1] > autoMax) autoMax = shared[1];
+      }
+      // Grouped scales (lambda, EGT) also union with the cross-chart range so
+      // e.g. Bank 1 on one chart and Bank 2 on another read on the same scale.
+      const groupId = scaleGroupByKey.get(scaleKey);
+      const crossChart = groupId ? groupYRanges?.get(groupId) : undefined;
+      if (crossChart) {
+        if (crossChart[0] < autoMin) autoMin = crossChart[0];
+        if (crossChart[1] > autoMax) autoMax = crossChart[1];
       }
       if (autoMin === Infinity) { autoMin = 0; autoMax = 1; }
       // Minimum-span floor for calm sensor families (see SPAN_FLOOR_UNITS)
@@ -501,7 +525,20 @@ export function TraceChart({
       const pad = (autoMax - autoMin) * 0.05 || 1;
       const lo = manualMin ?? (autoMin - pad);
       const hi = manualMax ?? (autoMax + pad);
+      scaleRangeByKey.set(scaleKey, [lo, hi]);
       scales[scaleKey] = { range: () => [lo, hi] };
+    }
+
+    // Report the resolved per-channel ranges so axis editors can show what
+    // "Auto" actually resolves to right now.
+    {
+      const byChannel = new Map<string, [number, number]>();
+      for (const meta of seriesMeta) {
+        const key = scaleKeyById.get(scaleIdOf(meta.channelName));
+        const r = key ? scaleRangeByKey.get(key) : undefined;
+        if (r && !byChannel.has(meta.channelName)) byChannel.set(meta.channelName, r);
+      }
+      onResolvedScaleRangesRef.current?.(byChannel);
     }
 
     let leftAxisCount = 0;
@@ -1293,6 +1330,7 @@ export function TraceChart({
     globalRange[0],
     globalRange[1],
     rangesKey,
+    groupRangesKey,
     raceLineKey,
     showAxes,
     showAxisLabels,

@@ -19,10 +19,12 @@ export function FileUpload({
 
   const uploadFiles = useCallback(
     async (fileList: FileList) => {
-      if (fileList.length === 0) return;
+      // Haltech datalogs only — also guards drag-and-drop, which ignores `accept`
+      const files = Array.from(fileList).filter((f) => f.name.toLowerCase().endsWith(".csv"));
+      if (files.length === 0) return;
       setUploading(true);
       try {
-        for (const file of Array.from(fileList)) {
+        for (const file of files) {
           // Step 1: Get upload URL
           const uploadUrl = await generateUploadUrl();
           // Step 2: Upload the file
@@ -78,6 +80,7 @@ export function FileUpload({
         ref={inputRef}
         type="file"
         multiple
+        accept=".csv"
         className="hidden"
         onChange={(e) => {
           if (e.target.files) void uploadFiles(e.target.files);

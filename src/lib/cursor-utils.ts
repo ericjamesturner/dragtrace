@@ -48,7 +48,7 @@ export function computeRangeStats(
   channelName: string,
   range: [number, number],
   offset: number,
-): { avg: number; min: number; max: number } | null {
+): { avg: number; min: number; max: number; minTime: number; maxTime: number } | null {
   const session = log.parsed.sessions[log.activeSessionIndex];
   if (!session) return null;
   const data = session.channels.get(channelName);
@@ -67,16 +67,18 @@ export function computeRangeStats(
     else e = m;
   }
 
-  let sum = 0, count = 0, min = Infinity, max = -Infinity;
+  let sum = 0, count = 0, min = Infinity, max = -Infinity, minIdx = -1, maxIdx = -1;
   for (let i = s; i < ts.length && ts[i] <= hi; i++) {
     const v = data[i];
     if (v !== v) continue; // skip NaN
     sum += v;
     count++;
-    if (v < min) min = v;
-    if (v > max) max = v;
+    if (v < min) { min = v; minIdx = i; }
+    if (v > max) { max = v; maxIdx = i; }
   }
-  return count === 0 ? null : { avg: sum / count, min, max };
+  if (count === 0) return null;
+  // Times are returned in aligned/display time (offset added back)
+  return { avg: sum / count, min, max, minTime: ts[minIdx] + offset, maxTime: ts[maxIdx] + offset };
 }
 
 /**
