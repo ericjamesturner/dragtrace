@@ -90,6 +90,10 @@ export interface HighlightZoneConfig {
   // Vertical position of the zone label/strip row, as a fraction (0..1) of
   // chart height. undefined = default stacked position.
   labelYFraction?: number;
+  // The AI prompt this zone was generated from, kept editable for regeneration.
+  aiPrompt?: string;
+  // Display this zone on every trace in the viewer, not just its owner.
+  showOnAllTraces?: boolean;
 }
 
 export interface TraceConfig {
@@ -98,6 +102,8 @@ export interface TraceConfig {
   height: number;
   pinned?: boolean;
   highlightZones?: HighlightZoneConfig[];
+  // Dragged position of the floating channels legend (px within the chart).
+  legendPos?: { x: number; y: number };
 }
 
 // ── Non-trace viz panel types, persisted inside the same workspace JSON blob ──
@@ -204,6 +210,7 @@ export type ViewerAction =
   | { type: "setWheelZoomEnabled"; enabled: boolean }
   | { type: "setWheelZoomFactor"; factor: number }
   | { type: "toggleAvgOnSelection" }
+  | { type: "setTraceLegendPos"; traceId: string; x: number; y: number }
   | { type: "setChannelColorBy"; traceId: string; logFileId: Id<"files">; channelName: string; colorBy: string | undefined; colorByMin?: number; colorByMax?: number; colorByLowColor?: string; colorByHighColor?: string }
   | { type: "toggleTimeslip" }
   | { type: "toggleTimeslipExpand"; id: string }
@@ -424,14 +431,27 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
           highlightZones: [...(t.highlightZones ?? []), action.zone],
         })),
       };
-    case "updateZone":
+    case "setTraceLegendPos":
       return {
         ...state,
         pages: mapTraceById(state.pages, action.traceId, (t) => ({
           ...t,
-          highlightZones: (t.highlightZones ?? []).map((z) =>
-            z.id === action.zoneId ? { ...z, ...action.updates } : z,
-          ),
+          legendPos: { x: action.x, y: action.y },
+        })),
+      };
+    case "updateZone":
+      // Zones can display on traces other than their owner (showOnAllTraces),
+      // so update by zone id wherever it lives.
+      return {
+        ...state,
+        pages: state.pages.map((p) => ({
+          ...p,
+          traces: p.traces.map((t) => ({
+            ...t,
+            highlightZones: (t.highlightZones ?? []).map((z) =>
+              z.id === action.zoneId ? { ...z, ...action.updates } : z,
+            ),
+          })),
         })),
       };
     case "removeZone":

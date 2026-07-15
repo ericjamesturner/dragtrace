@@ -13,7 +13,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { PlusIcon, XIcon, ChevronDownIcon, ChevronRightIcon, PencilIcon, SparklesIcon, RotateCcwIcon } from "lucide-react";
+import { PlusIcon, XIcon, ChevronDownIcon, ChevronRightIcon, PencilIcon, SparklesIcon, RotateCcwIcon, LayersIcon } from "lucide-react";
 import { GROUP_COLORS, type GroupNode } from "@/lib/channel-groups";
 import { useChannelGroups } from "@/hooks/useChannelGroups";
 
@@ -186,7 +186,7 @@ function ZoneBuilder({
   unitSystem,
   unitOverrides,
 }: {
-  onSubmit: (expression: string, label: string, color: string) => void;
+  onSubmit: (expression: string, label: string, color: string, aiPrompt?: string) => void;
   editingZone?: HighlightZoneConfig | null;
   onCancelEdit?: () => void;
   logs: LoadedLog[];
@@ -198,7 +198,7 @@ function ZoneBuilder({
     return [...new Set(names)];
   }, [logs]);
 
-  const [mode, setMode] = useState<"builder" | "raw">("builder");
+  const [mode, setMode] = useState<"builder" | "raw">(editingZone ? "raw" : "builder");
   const [channel, setChannel] = useState(editingZone ? "" : "");
   const [operator, setOperator] = useState<string>(">");
   const [value, setValue] = useState("");
@@ -210,7 +210,7 @@ function ZoneBuilder({
 
   // AI generation (Anthropic call runs server-side in the highlightZones action)
   const generateZone = useAction(api.highlightZones.generate);
-  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiPrompt, setAiPrompt] = useState(editingZone?.aiPrompt ?? "");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
@@ -239,7 +239,7 @@ function ZoneBuilder({
       setValidationError(err);
       return;
     }
-    onSubmit(expr, label.trim(), color);
+    onSubmit(expr, label.trim(), color, aiPrompt.trim() || undefined);
     // Reset form
     setChannel("");
     setOperator(">");
@@ -443,7 +443,7 @@ function ZoneBuilder({
               disabled={aiLoading || !aiPrompt.trim()}
               className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1"
             >
-              {aiLoading ? "..." : "Generate"}
+              {aiLoading ? "..." : editingZone?.aiPrompt ? "Regenerate" : "Generate"}
             </button>
           </div>
           {aiError && <div className="text-xs text-destructive">{aiError}</div>}
@@ -492,8 +492,8 @@ export function TraceSettingsPanel({
                     <div key={zone.id} className="border border-border rounded-md p-2 mb-2">
                       <ZoneBuilder
                         editingZone={zone}
-                        onSubmit={(expression, label, color) => {
-                          onUpdateZone?.(zone.id, { expression, label, color });
+                        onSubmit={(expression, label, color, aiPrompt) => {
+                          onUpdateZone?.(zone.id, { expression, label, color, aiPrompt });
                           setEditingZoneId(null);
                         }}
                         onCancelEdit={() => setEditingZoneId(null)}
@@ -531,6 +531,13 @@ export function TraceSettingsPanel({
                     {evaluated?.error && (
                       <span className="text-xs text-destructive" title={evaluated.error}>err</span>
                     )}
+                    <button
+                      onClick={() => onUpdateZone?.(zone.id, { showOnAllTraces: !zone.showOnAllTraces })}
+                      title={zone.showOnAllTraces ? "Shown on all traces — click to limit to this trace" : "Show on all traces"}
+                      className={`cursor-pointer ${zone.showOnAllTraces ? "text-primary" : "text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"}`}
+                    >
+                      <LayersIcon className="size-3" />
+                    </button>
                     {zone.labelYFraction != null && (
                       <button
                         onClick={() => onUpdateZone?.(zone.id, { labelYFraction: undefined })}
@@ -564,13 +571,14 @@ export function TraceSettingsPanel({
               {showZoneBuilder ? (
                 <div className="border border-border rounded-md p-2 mt-2">
                   <ZoneBuilder
-                    onSubmit={(expression, label, color) => {
+                    onSubmit={(expression, label, color, aiPrompt) => {
                       onAddZone?.({
                         id: crypto.randomUUID(),
                         expression,
                         label,
                         color,
                         enabled: true,
+                        aiPrompt,
                       });
                       setShowZoneBuilder(false);
                     }}

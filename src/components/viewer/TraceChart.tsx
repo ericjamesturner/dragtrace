@@ -862,46 +862,52 @@ export function TraceChart({
             const expandedIds = expandedZoneIdsRef.current ?? new Set<string>();
 
             const STRIP_H = 6 * dpr;
-            const STRIP_GAP = 2 * dpr;
             const STRIP_TOP_OFFSET = 4 * dpr;
             const CHECKBOX_SIZE = 10 * dpr;
             const CHECKBOX_GAP = 4 * dpr;
             const PAD = 5 * dpr;
+            // Full chip row height (checkbox + backdrop padding)
+            const ROW_PITCH = CHECKBOX_SIZE + 4 * dpr;
 
             const enabledZones = zones.filter((z) => z.config.enabled && z.regions.length > 0);
+            if (enabledZones.length === 0) return;
 
-            for (let zi = 0; zi < enabledZones.length; zi++) {
-              const zone = enabledZones[zi];
-              const isExpanded = expandedIds.has(zone.config.id);
-              const hex = zone.config.color;
-              const r = parseInt(hex.slice(1, 3), 16);
-              const g = parseInt(hex.slice(3, 5), 16);
-              const b = parseInt(hex.slice(5, 7), 16);
-
-              // Vertical position: a persisted/live-dragged fraction overrides the
-              // default stacked layout (undefined override => stacked).
+            // ── Pass 1: row layout. Desired y = dragged fraction or stacked
+            // slot; collisions resolved by pushing rows down a full pitch so
+            // chips can never overprint each other.
+            const rows = enabledZones.map((zone, zi) => {
               const override = liveLabelFracRef.current[zone.config.id];
-              const stripY =
+              const y =
                 override != null
                   ? u.bbox.top + override * u.bbox.height
-                  : u.bbox.top + STRIP_TOP_OFFSET + zi * (STRIP_H + STRIP_GAP);
-              const stripFrac =
-                override != null ? override : (stripY - u.bbox.top) / (u.bbox.height || 1);
+                  : u.bbox.top + STRIP_TOP_OFFSET + zi * ROW_PITCH;
+              return { zone, isExpanded: expandedIds.has(zone.config.id), y };
+            });
+            const byY = [...rows].sort((a, b) => a.y - b.y);
+            let prevY = -Infinity;
+            for (const row of byY) {
+              if (row.y < prevY + ROW_PITCH) row.y = prevY + ROW_PITCH;
+              prevY = row.y;
+            }
 
-              // Draw regions (each region may carry its own color — timeslip segments)
-              let firstVisX: number | null = null;
+            const parseHex = (hex: string): [number, number, number] => [
+              parseInt(hex.slice(1, 3), 16),
+              parseInt(hex.slice(3, 5), 16),
+              parseInt(hex.slice(5, 7), 16),
+            ];
+
+            // ── Pass 2: strips + expanded bands (always behind the chips)
+            for (const { zone, isExpanded, y: stripY } of rows) {
+              const [r, g, b] = parseHex(zone.config.color);
               for (const region of zone.regions) {
                 const x0 = Math.max(u.bbox.left, u.valToPos(region.start, "x", true));
                 const x1 = Math.min(u.bbox.left + u.bbox.width, u.valToPos(region.end, "x", true));
                 if (x1 <= x0) continue;
-                if (firstVisX === null) firstVisX = x0;
 
                 let rr = r, gg = g, bb = b;
                 const rc = region.color;
                 if (rc && rc.length >= 7 && rc[0] === "#") {
-                  rr = parseInt(rc.slice(1, 3), 16);
-                  gg = parseInt(rc.slice(3, 5), 16);
-                  bb = parseInt(rc.slice(5, 7), 16);
+                  [rr, gg, bb] = parseHex(rc);
                 }
 
                 // Expanded: full-height semi-transparent band
@@ -912,18 +918,21 @@ export function TraceChart({
                   ctx.restore();
                 }
 
-                // Always draw the strip
                 ctx.save();
                 ctx.fillStyle = `rgba(${rr},${gg},${bb},0.7)`;
                 ctx.fillRect(x0, stripY, x1 - x0, STRIP_H);
                 ctx.restore();
               }
+            }
 
-              // Measure the label first so checkbox + pill can be anchored at
-              // the zone's first visible region and clamped inside the chart.
+            // ── Pass 3: chips (checkbox + label) at the far left, on top of
+            // every strip so text always stays readable.
+            for (const { zone, isExpanded, y: stripY } of rows) {
+              const [r, g, b] = parseHex(zone.config.color);
+              const stripFrac = (stripY - u.bbox.top) / (u.bbox.height || 1);
+
               ctx.save();
               ctx.font = `${Math.round(10 * dpr)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-              const rightEdge = u.bbox.left + u.bbox.width;
               const maxTextW = u.bbox.width - (CHECKBOX_GAP * 3 + CHECKBOX_SIZE + 6 * dpr);
               let labelText = zone.config.label;
               if (ctx.measureText(labelText).width > maxTextW) {
@@ -934,13 +943,19 @@ export function TraceChart({
               }
               const pillW = ctx.measureText(labelText).width + 6 * dpr;
               const pillH = STRIP_H;
-
               const totalW = CHECKBOX_SIZE + CHECKBOX_GAP + pillW;
-              let cbX = (firstVisX ?? u.bbox.left) + CHECKBOX_GAP;
-              if (cbX + totalW > rightEdge) cbX = Math.max(u.bbox.left + CHECKBOX_GAP, rightEdge - totalW);
+
+              // Chip sits at the far left: checkbox first, label to its right.
+              const cbX = u.bbox.left + CHECKBOX_GAP;
               const cbY = stripY + (STRIP_H - CHECKBOX_SIZE) / 2;
 
-              // Draw checkbox
+              // Opaque backdrop so the chip stays readable over strips/lines
+              ctx.fillStyle = "rgba(10, 10, 12, 0.9)";
+              ctx.beginPath();
+              ctx.roundRect(cbX - 3 * dpr, cbY - 2 * dpr, totalW + 6 * dpr, CHECKBOX_SIZE + 4 * dpr, 3 * dpr);
+              ctx.fill();
+
+              // Checkbox
               ctx.strokeStyle = `rgba(${r},${g},${b},0.8)`;
               ctx.lineWidth = 1.5 * dpr;
               ctx.strokeRect(cbX, cbY, CHECKBOX_SIZE, CHECKBOX_SIZE);
@@ -953,15 +968,17 @@ export function TraceChart({
                 ctx.stroke();
               }
 
-              // Draw label pill
+              // Label pill (vertically centered on the checkbox row)
               const labelX = cbX + CHECKBOX_SIZE + CHECKBOX_GAP;
+              const textCy = cbY + CHECKBOX_SIZE / 2;
               ctx.fillStyle = `rgba(${r},${g},${b},0.15)`;
               ctx.beginPath();
               ctx.roundRect(labelX, stripY, pillW, pillH, 2 * dpr);
               ctx.fill();
               ctx.fillStyle = `rgb(${r},${g},${b})`;
+              ctx.textAlign = "left";
               ctx.textBaseline = "middle";
-              ctx.fillText(labelText, labelX + 3 * dpr, stripY + pillH / 2);
+              ctx.fillText(labelText, labelX + 3 * dpr, textCy);
               ctx.restore();
 
               // Stash hit boxes: checkbox (toggle) + label pill (drag handle).

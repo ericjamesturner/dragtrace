@@ -564,6 +564,9 @@ function LogViewerReady({
           onSetChannelAxisRange={(traceId, logFileId, channelName, axisMin, axisMax) =>
             dispatch({ type: "setChannelAxisRange", traceId, logFileId, channelName, axisMin, axisMax })
           }
+          onSetTraceLegendPos={(traceId, x, y) =>
+            dispatch({ type: "setTraceLegendPos", traceId, x, y })
+          }
           onSetChannelColorBy={(traceId, logFileId, channelName, colorBy, colorByMin, colorByMax, colorByLowColor, colorByHighColor) =>
             dispatch({ type: "setChannelColorBy", traceId, logFileId, channelName, colorBy, colorByMin, colorByMax, colorByLowColor, colorByHighColor })
           }

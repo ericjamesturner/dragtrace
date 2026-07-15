@@ -317,6 +317,10 @@ interface Props {
   timeslipZones?: EvaluatedZone[];
   /** Cross-chart union range per scale group (e.g. "lambda") from the page. */
   groupYRanges?: Map<string, [number, number]>;
+  /** Zones (from any trace) flagged to display on every trace. */
+  sharedZones?: HighlightZoneConfig[];
+  /** Persist the dragged channels-legend position. */
+  onSetLegendPos?: (x: number, y: number) => void;
   expandedTimeslipIds?: string[];
   onToggleTimeslipExpand?: (id: string) => void;
   // Race-start marker line style + setter (global; persisted in config).
@@ -372,6 +376,8 @@ export function TraceContainer({
   onToggleZone,
   timeslipZones,
   groupYRanges,
+  sharedZones,
+  onSetLegendPos,
   expandedTimeslipIds,
   onToggleTimeslipExpand,
   raceLine,
@@ -399,7 +405,14 @@ export function TraceContainer({
     setColorPreview(null);
   }, [contextMenu]);
   const [expandedZoneIds, setExpandedZoneIds] = useState<Set<string>>(new Set());
-  const [legendPos, setLegendPos] = useState<{ x: number; y: number }>({ x: 8, y: 8 });
+  const [legendPos, setLegendPos] = useState<{ x: number; y: number }>(
+    trace.legendPos ?? { x: 8, y: 8 },
+  );
+
+  // Follow externally-loaded positions (workspace switch, other session)
+  useEffect(() => {
+    setLegendPos(trace.legendPos ?? { x: 8, y: 8 });
+  }, [trace.legendPos?.x, trace.legendPos?.y]); // eslint-disable-line react-hooks/exhaustive-deps
   const [legendMinimized, setLegendMinimized] = useState(false);
   const legendDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   const chartAreaRef = useRef<HTMLDivElement>(null);
@@ -415,11 +428,28 @@ export function TraceContainer({
     unitOverrides,
   );
 
+  // Shared zones from other traces (showOnAllTraces), excluding ones this
+  // trace already owns.
+  const foreignSharedZones = useMemo(
+    () =>
+      (sharedZones ?? []).filter(
+        (z) => !(trace.highlightZones ?? []).some((own) => own.id === z.id),
+      ),
+    [sharedZones, trace.highlightZones],
+  );
+  const evaluatedSharedZones = useEvaluatedZones(
+    foreignSharedZones,
+    logs,
+    offsets,
+    unitSystem,
+    unitOverrides,
+  );
+
   // Timeslip strips render through the same plugin as expression zones; prepend
   // them so they sit at the top of the stack on every trace.
   const allZones = useMemo(
-    () => [...(timeslipZones ?? []), ...evaluatedZones],
-    [timeslipZones, evaluatedZones],
+    () => [...(timeslipZones ?? []), ...evaluatedZones, ...evaluatedSharedZones],
+    [timeslipZones, evaluatedZones, evaluatedSharedZones],
   );
   const mergedExpanded = useMemo(
     () => new Set<string>([...expandedZoneIds, ...(expandedTimeslipIds ?? [])]),
@@ -449,25 +479,30 @@ export function TraceContainer({
       originY: legendPos.y,
     };
 
+    let lastX = legendPos.x;
+    let lastY = legendPos.y;
+    let moved = false;
     const handleMove = (ev: MouseEvent) => {
       if (!legendDragRef.current || !chartAreaRef.current) return;
       const bounds = chartAreaRef.current.getBoundingClientRect();
       const dx = ev.clientX - legendDragRef.current.startX;
       const dy = ev.clientY - legendDragRef.current.startY;
-      const newX = Math.max(0, Math.min(bounds.width - 40, legendDragRef.current.originX + dx));
-      const newY = Math.max(0, Math.min(bounds.height - 20, legendDragRef.current.originY + dy));
-      setLegendPos({ x: newX, y: newY });
+      lastX = Math.max(0, Math.min(bounds.width - 40, legendDragRef.current.originX + dx));
+      lastY = Math.max(0, Math.min(bounds.height - 20, legendDragRef.current.originY + dy));
+      moved = true;
+      setLegendPos({ x: lastX, y: lastY });
     };
 
     const handleUp = () => {
       legendDragRef.current = null;
       document.removeEventListener("mousemove", handleMove);
       document.removeEventListener("mouseup", handleUp);
+      if (moved) onSetLegendPos?.(lastX, lastY); // persist to workspace
     };
 
     document.addEventListener("mousemove", handleMove);
     document.addEventListener("mouseup", handleUp);
-  }, [legendPos]);
+  }, [legendPos, onSetLegendPos]);
 
   // Close context menus on click outside or escape
   useEffect(() => {
