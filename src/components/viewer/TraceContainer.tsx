@@ -105,7 +105,7 @@ function AxisInputs({
 const COLORBY_STOPS = ["#0000b4", "#0064ff", "#00c8c8", "#00c850", "#b4dc00", "#ffc800", "#ff7800", "#ff0000"];
 const COLORBY_CSS_GRADIENT = `linear-gradient(to right, ${COLORBY_STOPS.join(",")})`;
 
-/** Compact color-by-channel editor for the context menu (raw-unit range). */
+/** Compact color-by-channel editor for the context menu (display-unit range). */
 function ColorByEditor({
   ch,
   pickerLogs,
@@ -115,7 +115,7 @@ function ColorByEditor({
   ch?: ChannelOnTrace;
   pickerLogs: LoadedLog[];
   selfName: string;
-  onSet: (colorBy?: string, min?: number, max?: number) => void;
+  onSet: (colorBy?: string, min?: number, max?: number, lowColor?: string, highColor?: string) => void;
 }) {
   const [showPicker, setShowPicker] = useState(false);
   const [lowInput, setLowInput] = useState(ch?.colorByMin?.toString() ?? "");
@@ -126,13 +126,25 @@ function ColorByEditor({
     setHighInput(ch?.colorByMax?.toString() ?? "");
   }, [ch?.colorByMin, ch?.colorByMax]);
 
+  const lowColor = ch?.colorByLowColor;
+  const highColor = ch?.colorByHighColor;
+  const gradientCss =
+    lowColor && highColor
+      ? `linear-gradient(to right, ${lowColor}, ${highColor})`
+      : COLORBY_CSS_GRADIENT;
+
+  const parse = (s: string) => {
+    if (s.trim() === "") return undefined;
+    const v = parseFloat(s);
+    return isNaN(v) ? undefined : v;
+  };
+
   const commitRange = () => {
-    const parse = (s: string) => {
-      if (s.trim() === "") return undefined;
-      const v = parseFloat(s);
-      return isNaN(v) ? undefined : v;
-    };
-    onSet(ch?.colorBy, parse(lowInput), parse(highInput));
+    onSet(ch?.colorBy, parse(lowInput), parse(highInput), lowColor, highColor);
+  };
+
+  const setColors = (lo: string | undefined, hi: string | undefined) => {
+    onSet(ch?.colorBy, parse(lowInput), parse(highInput), lo, hi);
   };
 
   const inputCls =
@@ -189,17 +201,40 @@ function ColorByEditor({
           selected={ch.colorBy}
           onSelect={(name) => {
             if (name === selfName) return;
-            onSet(name, ch.colorByMin, ch.colorByMax);
+            onSet(name, ch.colorByMin, ch.colorByMax, lowColor, highColor);
             setShowPicker(false);
           }}
         />
       )}
-      <div className="h-3 rounded" style={{ background: COLORBY_CSS_GRADIENT }} />
       <div className="flex items-center gap-1.5">
+        <div className="h-3 rounded flex-1" style={{ background: gradientCss }} />
+        {(lowColor || highColor) && (
+          <button
+            title="Reset gradient colors"
+            onClick={() => setColors(undefined, undefined)}
+            className="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+          >
+            ↺
+          </button>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5">
+        <label className="relative shrink-0 cursor-pointer" title="Low end color">
+          <span
+            className="block w-4 h-4 rounded-full border border-white/30"
+            style={{ backgroundColor: lowColor ?? COLORBY_STOPS[0] }}
+          />
+          <input
+            type="color"
+            value={lowColor ?? COLORBY_STOPS[0]}
+            onChange={(e) => setColors(e.target.value, highColor ?? COLORBY_STOPS[COLORBY_STOPS.length - 1])}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          />
+        </label>
         <input
           type="text"
           inputMode="decimal"
-          placeholder="Low (blue)"
+          placeholder="Low value"
           value={lowInput}
           onChange={(e) => setLowInput(e.target.value)}
           onBlur={commitRange}
@@ -209,13 +244,25 @@ function ColorByEditor({
         <input
           type="text"
           inputMode="decimal"
-          placeholder="High (red)"
+          placeholder="High value"
           value={highInput}
           onChange={(e) => setHighInput(e.target.value)}
           onBlur={commitRange}
           onKeyDown={(e) => { if (e.key === "Enter") commitRange(); }}
           className={inputCls}
         />
+        <label className="relative shrink-0 cursor-pointer" title="High end color">
+          <span
+            className="block w-4 h-4 rounded-full border border-white/30"
+            style={{ backgroundColor: highColor ?? COLORBY_STOPS[COLORBY_STOPS.length - 1] }}
+          />
+          <input
+            type="color"
+            value={highColor ?? COLORBY_STOPS[COLORBY_STOPS.length - 1]}
+            onChange={(e) => setColors(lowColor ?? COLORBY_STOPS[0], e.target.value)}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          />
+        </label>
       </div>
     </div>
   );
@@ -253,7 +300,7 @@ interface Props {
   onSetChannelWidth: (logFileId: Id<"files">, channelName: string, width: number) => void;
   onSetChannelDash: (logFileId: Id<"files">, channelName: string, dash: number[] | undefined) => void;
   onSetChannelAxisRange: (logFileId: Id<"files">, channelName: string, axisMin?: number, axisMax?: number) => void;
-  onSetChannelColorBy: (logFileId: Id<"files">, channelName: string, colorBy?: string, colorByMin?: number, colorByMax?: number) => void;
+  onSetChannelColorBy: (logFileId: Id<"files">, channelName: string, colorBy?: string, colorByMin?: number, colorByMax?: number, colorByLowColor?: string, colorByHighColor?: string) => void;
   isActive: boolean;
   onSetActive: () => void;
   pinned: boolean;
@@ -1074,6 +1121,19 @@ export function TraceContainer({
                     ↺
                   </button>
                 </div>
+                {/* Color by channel */}
+                <div className="px-3 py-1">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Color by channel</div>
+                  <ColorByEditor
+                    key={cmKey}
+                    ch={cmCh}
+                    pickerLogs={cmLog ? [cmLog] : logs}
+                    selfName={contextMenu.channelName}
+                    onSet={(colorBy, lo, hi, lowColor, highColor) =>
+                      onSetChannelColorBy(contextMenu.logFileId, contextMenu.channelName, colorBy, lo, hi, lowColor, highColor)
+                    }
+                  />
+                </div>
                 {/* Line width */}
                 <div className="px-3 py-1">
                   <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Width</div>
@@ -1130,19 +1190,6 @@ export function TraceContainer({
                       {Math.round((cmCh?.opacity ?? 1) * 100)}%
                     </span>
                   </div>
-                </div>
-                {/* Color by channel */}
-                <div className="px-3 py-1">
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Color by channel</div>
-                  <ColorByEditor
-                    key={cmKey}
-                    ch={cmCh}
-                    pickerLogs={cmLog ? [cmLog] : logs}
-                    selfName={contextMenu.channelName}
-                    onSet={(colorBy, lo, hi) =>
-                      onSetChannelColorBy(contextMenu.logFileId, contextMenu.channelName, colorBy, lo, hi)
-                    }
-                  />
                 </div>
               </>
             )}

@@ -46,7 +46,7 @@ interface Props {
   onSetChannelWidth: (traceId: string, logFileId: Id<"files">, channelName: string, width: number) => void;
   onSetChannelDash: (traceId: string, logFileId: Id<"files">, channelName: string, dash: number[] | undefined) => void;
   onSetChannelAxisRange: (traceId: string, logFileId: Id<"files">, channelName: string, axisMin?: number, axisMax?: number) => void;
-  onSetChannelColorBy: (traceId: string, logFileId: Id<"files">, channelName: string, colorBy?: string, colorByMin?: number, colorByMax?: number) => void;
+  onSetChannelColorBy: (traceId: string, logFileId: Id<"files">, channelName: string, colorBy?: string, colorByMin?: number, colorByMax?: number, colorByLowColor?: string, colorByHighColor?: string) => void;
   onAddZone: (traceId: string, zone: HighlightZoneConfig) => void;
   onUpdateZone: (traceId: string, zoneId: string, updates: Partial<Omit<HighlightZoneConfig, "id">>) => void;
   onRemoveZone: (traceId: string, zoneId: string) => void;
@@ -525,8 +525,8 @@ export function TracePanel({
                 onSetChannelAxisRange={(logFileId, channelName, axisMin, axisMax) =>
                   onSetChannelAxisRange(trace.id, logFileId, channelName, axisMin, axisMax)
                 }
-                onSetChannelColorBy={(logFileId, channelName, colorBy, colorByMin, colorByMax) =>
-                  onSetChannelColorBy(trace.id, logFileId, channelName, colorBy, colorByMin, colorByMax)
+                onSetChannelColorBy={(logFileId, channelName, colorBy, colorByMin, colorByMax, colorByLowColor, colorByHighColor) =>
+                  onSetChannelColorBy(trace.id, logFileId, channelName, colorBy, colorByMin, colorByMax, colorByLowColor, colorByHighColor)
                 }
                 isActive={activeTraceId === trace.id}
                 onSetActive={() => onSetActiveTrace(trace.id)}

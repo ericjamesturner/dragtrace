@@ -76,6 +76,9 @@ export interface ChannelOnTrace {
   colorBy?: string;
   colorByMin?: number;
   colorByMax?: number;
+  // Optional custom gradient endpoints (hex); default LUT when unset.
+  colorByLowColor?: string;
+  colorByHighColor?: string;
 }
 
 export interface HighlightZoneConfig {
@@ -201,7 +204,7 @@ export type ViewerAction =
   | { type: "setWheelZoomEnabled"; enabled: boolean }
   | { type: "setWheelZoomFactor"; factor: number }
   | { type: "toggleAvgOnSelection" }
-  | { type: "setChannelColorBy"; traceId: string; logFileId: Id<"files">; channelName: string; colorBy: string | undefined; colorByMin?: number; colorByMax?: number }
+  | { type: "setChannelColorBy"; traceId: string; logFileId: Id<"files">; channelName: string; colorBy: string | undefined; colorByMin?: number; colorByMax?: number; colorByLowColor?: string; colorByHighColor?: string }
   | { type: "toggleTimeslip" }
   | { type: "toggleTimeslipExpand"; id: string }
   | { type: "addScatter"; scatter: Omit<ScatterConfig, "id">; id?: string }
@@ -460,7 +463,7 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         ...state,
         pages: mapChannelInPages(
           state.pages, action.traceId, action.logFileId, action.channelName,
-          (c) => ({ ...c, colorBy: action.colorBy, colorByMin: action.colorByMin, colorByMax: action.colorByMax }),
+          (c) => ({ ...c, colorBy: action.colorBy, colorByMin: action.colorByMin, colorByMax: action.colorByMax, colorByLowColor: action.colorByLowColor, colorByHighColor: action.colorByHighColor }),
         ),
       };
     case "toggleTimeslip":

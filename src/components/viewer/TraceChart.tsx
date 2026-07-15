@@ -72,6 +72,13 @@ const COLOR_STOPS: [number, number, number][] = [
 ];
 
 /** Map a normalized value t∈[0,1] to an interpolated gradient RGB triple. */
+function hexToRgbTuple(hex: string): [number, number, number] | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
 function valueToColor(t: number): [number, number, number] {
   const c = Math.max(0, Math.min(1, t));
   const idx = c * (COLOR_STOPS.length - 1);
@@ -310,7 +317,7 @@ export function TraceChart({
   // Build a stable key for dependencies
   const groupsKey = logGroups
     .map((g) =>
-      `${g.log.fileId}:${g.timeOffset}:${g.channels.map((c) => `${c.channelName}:${c.color ?? ""}:${c.opacity ?? ""}:${c.width ?? ""}:${(c.dash ?? []).join(".")}:${c.axisMin ?? ""}:${c.axisMax ?? ""}:${c.colorBy ?? ""}:${c.colorByMin ?? ""}:${c.colorByMax ?? ""}`).join(",")}`
+      `${g.log.fileId}:${g.timeOffset}:${g.channels.map((c) => `${c.channelName}:${c.color ?? ""}:${c.opacity ?? ""}:${c.width ?? ""}:${(c.dash ?? []).join(".")}:${c.axisMin ?? ""}:${c.axisMax ?? ""}:${c.colorBy ?? ""}:${c.colorByMin ?? ""}:${c.colorByMax ?? ""}:${c.colorByLowColor ?? ""}:${c.colorByHighColor ?? ""}`).join(",")}`
     )
     .join("|");
 
@@ -354,6 +361,8 @@ export function TraceChart({
       colorBy?: string;
       colorByVals?: (number | null)[] | null;
       colorByMetricUnit?: string;
+      colorByLowColor?: string;
+      colorByHighColor?: string;
       colorByMin?: number;
       colorByMax?: number;
     }
@@ -397,6 +406,8 @@ export function TraceChart({
           colorBy: ch.colorBy,
           colorByVals,
           colorByMetricUnit,
+          colorByLowColor: ch.colorByLowColor,
+          colorByHighColor: ch.colorByHighColor,
           colorByMin: ch.colorByMin,
           colorByMax: ch.colorByMax,
         });
@@ -692,6 +703,21 @@ export function TraceChart({
                 if (meta.colorByMax != null) cMax = meta.colorByMax;
                 const span = cMax - cMin || 1;
 
+                // Custom gradient endpoints override the default LUT
+                const lowRgb = meta.colorByLowColor ? hexToRgbTuple(meta.colorByLowColor) : null;
+                const highRgb = meta.colorByHighColor ? hexToRgbTuple(meta.colorByHighColor) : null;
+                const colorFor = (t: number): [number, number, number] => {
+                  const tc = Math.max(0, Math.min(1, t));
+                  if (lowRgb && highRgb) {
+                    return [
+                      Math.round(lowRgb[0] + (highRgb[0] - lowRgb[0]) * tc),
+                      Math.round(lowRgb[1] + (highRgb[1] - lowRgb[1]) * tc),
+                      Math.round(lowRgb[2] + (highRgb[2] - lowRgb[2]) * tc),
+                    ];
+                  }
+                  return valueToColor(tc);
+                };
+
                 ctx.save();
                 ctx.lineWidth = (meta.width || 1.5) * dpr;
                 ctx.lineCap = "round";
@@ -710,7 +736,7 @@ export function TraceChart({
                     if ((px >= left && px <= right) || (prevPx >= left && prevPx <= right)) {
                       const cv = cbVals[j];
                       const t = cv == null ? 0 : (conv(cv) - cMin) / span;
-                      const [r, g, b] = valueToColor(t);
+                      const [r, g, b] = colorFor(t);
                       ctx.strokeStyle = `rgb(${r},${g},${b})`;
                       ctx.beginPath();
                       ctx.moveTo(prevPx, prevPy);
@@ -732,7 +758,7 @@ export function TraceChart({
                   const ly = u.bbox.top + (u.bbox.height - lh) / 2;
                   ctx.save();
                   for (let k = 0; k < lh; k++) {
-                    const [r, g, b] = valueToColor(1 - k / lh);
+                    const [r, g, b] = colorFor(1 - k / lh);
                     ctx.fillStyle = `rgb(${r},${g},${b})`;
                     ctx.fillRect(lx, ly + k, lw, 1.5);
                   }
