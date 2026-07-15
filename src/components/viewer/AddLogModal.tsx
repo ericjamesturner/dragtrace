@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -40,7 +40,7 @@ export function AddLogModal({ open, onOpenChange, currentVehicleId, loadedFileId
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-xl sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Add Log</DialogTitle>
         </DialogHeader>
@@ -127,11 +127,21 @@ function EventPicker({
   onSelect: (eventId: Id<"events">, eventName: string) => void;
 }) {
   const vehicle = useQuery(api.vehicles.get, { id: vehicleId });
-  const events = useQuery(api.events.listByVehicle, { vehicleId });
+  const rawEvents = useQuery(api.events.listByVehicle, { vehicleId });
   const displayName = vehicleName || vehicle?.name || "...";
 
+  // Most recent events first (by event date, then creation time)
+  const events = useMemo(() => {
+    if (!rawEvents) return rawEvents;
+    return [...rawEvents].sort((a, b) => {
+      const byDate = (b.date ?? "").localeCompare(a.date ?? "");
+      if (byDate !== 0) return byDate;
+      return b.createdAt - a.createdAt;
+    });
+  }, [rawEvents]);
+
   return (
-    <div>
+    <div className="min-w-0">
       <button
         onClick={onBack}
         className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-2 cursor-pointer"
@@ -182,10 +192,16 @@ function FilePicker({
   onBack: () => void;
   onSelect: (fileId: Id<"files">) => void;
 }) {
-  const files = useQuery(api.files.listByEvent, { eventId });
+  const rawFiles = useQuery(api.files.listByEvent, { eventId });
+
+  // Most recent passes first
+  const files = useMemo(() => {
+    if (!rawFiles) return rawFiles;
+    return [...rawFiles].sort((a, b) => b.uploadedAt - a.uploadedAt);
+  }, [rawFiles]);
 
   return (
-    <div>
+    <div className="min-w-0">
       <button
         onClick={onBack}
         className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-2 cursor-pointer"
@@ -193,7 +209,7 @@ function FilePicker({
         <ChevronLeftIcon className="size-3" />
         {vehicleName || "Back"}
       </button>
-      <p className="text-sm font-medium mb-2">{eventName}</p>
+      <p className="text-sm font-medium mb-2 truncate">{eventName}</p>
       <div className="space-y-1 max-h-72 overflow-y-auto">
         {files === undefined ? (
           <p className="text-sm text-muted-foreground py-4 text-center">Loading...</p>
@@ -211,7 +227,9 @@ function FilePicker({
                 onClick={isLoaded ? undefined : () => onSelect(f._id)}
               >
                 <FileIcon className="size-4 text-muted-foreground shrink-0" />
-                <span className="flex-1 truncate">{f.fileName.replace(/\.[^.]+$/, "")}</span>
+                <span className="flex-1 min-w-0 truncate" title={f.fileName}>
+                  {f.fileName.replace(/\.[^.]+$/, "")}
+                </span>
                 {isLoaded ? (
                   <span className="text-xs text-muted-foreground">Loaded</span>
                 ) : (
