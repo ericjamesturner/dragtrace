@@ -6,10 +6,15 @@ import { resolveChannelStyle } from "@/lib/viewer-types";
 import type { ChannelOnTrace, LoadedLog } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import { convertForDisplay, getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
+import { readableTextColor } from "@/lib/colors";
+import { formatSlipTime } from "@/lib/timeslip-zones";
 import { formatValue, formatDuration } from "@/lib/cursor-utils";
 
 const GRID_POINTS = 2000;
 const Y_AXIS_SIZE = 45;
+// Height (CSS px) of one timeslip zone's row in the bottom band. One row per
+// timeslip so two logs' slips stack instead of overprinting each other.
+const TIMESLIP_ROW_H = 16;
 
 // Channels in the same scale group share a common Y axis (union range, single
 // axis) so they're directly comparable — e.g. all EGTs on one scale, engine +
@@ -133,6 +138,9 @@ interface Props {
   wheelZoomEnabled?: boolean;
   wheelZoomFactor?: number;
   evaluatedZones?: EvaluatedZone[];
+  /** Timeslip zones render as their own solid band across the bottom of the
+   *  plot (mirroring the OverviewBar strip) — not through the zone plugin. */
+  timeslipZones?: EvaluatedZone[];
   expandedZoneIds?: Set<string>;
   onToggleZoneExpand?: (zoneId: string) => void;
   // Persist a dragged zone-label vertical position (0..1 fraction of chart height).
@@ -227,6 +235,7 @@ export function TraceChart({
   wheelZoomEnabled,
   wheelZoomFactor,
   evaluatedZones,
+  timeslipZones,
   expandedZoneIds,
   onToggleZoneExpand,
   onMoveZoneLabel,
@@ -286,6 +295,8 @@ export function TraceChart({
   currentRangeRef.current = zoomRange ?? globalRange;
   const evaluatedZonesRef = useRef(evaluatedZones);
   evaluatedZonesRef.current = evaluatedZones;
+  const timeslipZonesRef = useRef(timeslipZones);
+  timeslipZonesRef.current = timeslipZones;
   const expandedZoneIdsRef = useRef(expandedZoneIds);
   expandedZoneIdsRef.current = expandedZoneIds;
   const onToggleZoneExpandRef = useRef(onToggleZoneExpand);
@@ -1000,6 +1011,81 @@ export function TraceChart({
       },
     });
 
+    // Timeslip band — solid contiguous segments across the bottom of the plot,
+    // mirroring the OverviewBar strip so the same 60'/330'/660'/1320' markers
+    // read the same in both places. Drawn last so labels stay on top of any
+    // expanded zone tint.
+    plugins.push({
+      hooks: {
+        draw: [
+          (u: uPlot) => {
+            const zones = timeslipZonesRef.current;
+            if (!zones || zones.length === 0) return;
+            const ctx = u.ctx;
+            const dpr = devicePixelRatio;
+            const ROW_H = TIMESLIP_ROW_H * dpr;
+            const GAP = 4 * dpr; // label ↔ time spacing, and min text padding
+            const plotRight = u.bbox.left + u.bbox.width;
+            const bandTop = u.bbox.top + u.bbox.height - ROW_H * zones.length;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(u.bbox.left, bandTop, u.bbox.width, ROW_H * zones.length);
+            ctx.clip();
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+
+            zones.forEach((zone, zi) => {
+              const rowTop = bandTop + zi * ROW_H;
+              const textCy = rowTop + ROW_H / 2;
+
+              for (const region of zone.regions) {
+                const x0 = Math.max(u.bbox.left, u.valToPos(region.start, "x", true));
+                const x1 = Math.min(plotRight, u.valToPos(region.end, "x", true));
+                if (x1 <= x0) continue;
+
+                const bg = region.color ?? zone.config.color;
+                ctx.fillStyle = bg;
+                ctx.fillRect(x0, rowTop, x1 - x0, ROW_H);
+                if (!region.label) continue;
+
+                // Fit "60'  1.23s"; drop the time, then the whole label, rather
+                // than spilling half-clipped text into the next segment.
+                const boldFont = `600 ${Math.round(11 * dpr)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+                const timeFont = `${Math.round(11 * dpr)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+                const timeText = region.time != null ? `${formatSlipTime(region.time)}s` : "";
+                ctx.font = boldFont;
+                const labelW = ctx.measureText(region.label).width;
+                ctx.font = timeFont;
+                const timeW = timeText ? ctx.measureText(timeText).width : 0;
+
+                const avail = x1 - x0 - GAP * 2;
+                const withTime = timeText ? labelW + GAP * 2 + timeW : labelW;
+                const drawTime = timeText && withTime <= avail;
+                const totalW = drawTime ? withTime : labelW;
+                if (totalW > avail) continue; // too narrow for even the marker
+
+                const fg = readableTextColor(bg);
+                let tx = (x0 + x1) / 2 - totalW / 2;
+                ctx.fillStyle = fg;
+                ctx.font = boldFont;
+                ctx.fillText(region.label, tx, textCy);
+                if (drawTime) {
+                  tx += labelW + GAP * 2;
+                  ctx.font = timeFont;
+                  ctx.globalAlpha = 0.9;
+                  ctx.fillText(timeText, tx, textCy);
+                  ctx.globalAlpha = 1;
+                }
+              }
+            });
+
+            ctx.restore();
+          },
+        ],
+      },
+    });
+
     // Destroy old
     if (chartRef.current) {
       chartRef.current.destroy();
@@ -1078,10 +1164,12 @@ export function TraceChart({
 
     if (raceStartTimes.length > 0) {
       // Bottom of the plot: the top strip is where zone labels stack, and the
-      // label must never cover a label pill someone is trying to grab.
+      // label must never cover a label pill someone is trying to grab. Sits
+      // above the timeslip band when one is showing.
+      const bandH = (timeslipZones?.length ?? 0) * TIMESLIP_ROW_H;
       raceCursorLabel = document.createElement("div");
       raceCursorLabel.style.cssText =
-        "position:absolute;bottom:8px;display:none;pointer-events:none;z-index:10;" +
+        `position:absolute;bottom:${8 + bandH}px;display:none;pointer-events:none;z-index:10;` +
         "padding:1px 6px;font-size:13px;line-height:18px;white-space:nowrap;" +
         "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;" +
         "color:#4ade80;background:#18181b;border:1px solid rgba(74,222,128,0.35);border-radius:4px;";
@@ -1393,6 +1481,7 @@ export function TraceChart({
     unitSystem,
     unitOverrides,
     evaluatedZones,
+    timeslipZones,
     expandedZoneIds,
     maxYAxes,
   ]);

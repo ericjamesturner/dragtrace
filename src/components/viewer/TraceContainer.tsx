@@ -445,11 +445,11 @@ export function TraceContainer({
     unitOverrides,
   );
 
-  // Timeslip strips render through the same plugin as expression zones; prepend
-  // them so they sit at the top of the stack on every trace.
+  // Timeslips don't go through the zone plugin — they get their own solid band
+  // across the bottom of the chart (see TraceChart's timeslip plugin).
   const allZones = useMemo(
-    () => [...(timeslipZones ?? []), ...evaluatedZones, ...evaluatedSharedZones],
-    [timeslipZones, evaluatedZones, evaluatedSharedZones],
+    () => [...evaluatedZones, ...evaluatedSharedZones],
+    [evaluatedZones, evaluatedSharedZones],
   );
   const mergedExpanded = useMemo(
     () =>
@@ -725,6 +725,7 @@ export function TraceContainer({
             wheelZoomEnabled={wheelZoomEnabled}
             wheelZoomFactor={wheelZoomFactor}
             evaluatedZones={allZones}
+            timeslipZones={timeslipZones}
             expandedZoneIds={mergedExpanded}
             onToggleZoneExpand={handleToggleZoneExpand}
             onMoveZoneLabel={(zoneId, frac) => onUpdateZone?.(zoneId, { labelYFraction: frac })}

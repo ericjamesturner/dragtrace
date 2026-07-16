@@ -2,6 +2,8 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { lttbDownsample } from "@/lib/downsample";
+import { readableTextColor } from "@/lib/colors";
+import { formatSlipTime } from "@/lib/timeslip-zones";
 import { formatDuration } from "@/lib/cursor-utils";
 import type { LoadedLog } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
@@ -10,16 +12,8 @@ import type { Id } from "../../../convex/_generated/dataModel";
 const OVERVIEW_HEIGHT = 48;
 const DOWNSAMPLE = 1000;
 const HANDLE_HIT = 8;
-
-/** Pick black or white text for legibility on a given hex background (YIQ). */
-function readableTextColor(hex: string): string {
-  const h = hex.replace("#", "");
-  if (h.length < 6) return "#fff";
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return (r * 299 + g * 587 + b * 114) / 1000 >= 128 ? "#000" : "#fff";
-}
+// Height of one slip's row in the timeslip band (one row per loaded log's slip).
+const TIMESLIP_ROW_H = 18;
 
 interface Props {
   logs: LoadedLog[];
@@ -285,44 +279,48 @@ export function OverviewBar({
           </span>
         )}
       </div>
-      {/* Timeslip strip — its own band above the RPM minimap (60'/330'/660'/1320') */}
+      {/* Timeslip strip — its own band above the RPM minimap (60'/330'/660'/1320').
+          One row per slip, matching the per-trace band, so multiple loaded logs
+          stack and stay comparable instead of overprinting each other. */}
       {(timeslipZones?.length ?? 0) > 0 && (
-        <div className="relative border-t border-border/40" style={{ height: 18 }}>
-          {timeslipZones!.map((z) =>
-            z.regions.map((r, i) => {
-              const bg = r.color ?? z.config.color;
-              const fg = readableTextColor(bg);
-              return (
-                <div
-                  key={`${z.config.id}:${i}`}
-                  className="absolute inset-y-0 flex items-center justify-center overflow-hidden"
-                  style={{
-                    left: `${((r.start - fullMin) / fullSpan) * 100}%`,
-                    width: `${((r.end - r.start) / fullSpan) * 100}%`,
-                    backgroundColor: bg,
-                  }}
-                  title={r.label ? `${r.label} — ${r.time?.toFixed(3)}s` : z.config.label}
-                >
-                  {r.label && (
-                    <span
-                      className="text-[11px] leading-none px-0.5 flex items-baseline gap-2 whitespace-nowrap"
-                      style={{
-                        color: fg,
-                        textShadow: fg === "#000"
-                          ? "0 0 1px rgba(255,255,255,0.5)"
-                          : "0 0 1px rgba(0,0,0,0.6)",
-                      }}
-                    >
-                      <span className="font-bold">{r.label}</span>
-                      {r.time != null && (
-                        <span className="font-medium tabular-nums opacity-90">{r.time.toFixed(2)}s</span>
-                      )}
-                    </span>
-                  )}
-                </div>
-              );
-            })
-          )}
+        <div className="border-t border-border/40">
+          {timeslipZones!.map((z) => (
+            <div key={z.config.id} className="relative" style={{ height: TIMESLIP_ROW_H }}>
+              {z.regions.map((r, i) => {
+                const bg = r.color ?? z.config.color;
+                const fg = readableTextColor(bg);
+                return (
+                  <div
+                    key={`${z.config.id}:${i}`}
+                    className="absolute inset-y-0 flex items-center justify-center overflow-hidden"
+                    style={{
+                      left: `${((r.start - fullMin) / fullSpan) * 100}%`,
+                      width: `${((r.end - r.start) / fullSpan) * 100}%`,
+                      backgroundColor: bg,
+                    }}
+                    title={r.label ? `${r.label} — ${r.time != null ? formatSlipTime(r.time) : "?"}s` : z.config.label}
+                  >
+                    {r.label && (
+                      <span
+                        className="text-[11px] leading-none px-0.5 flex items-baseline gap-2 whitespace-nowrap"
+                        style={{
+                          color: fg,
+                          textShadow: fg === "#000"
+                            ? "0 0 1px rgba(255,255,255,0.5)"
+                            : "0 0 1px rgba(0,0,0,0.6)",
+                        }}
+                      >
+                        <span className="font-bold">{r.label}</span>
+                        {r.time != null && (
+                          <span className="font-medium tabular-nums opacity-90">{formatSlipTime(r.time)}s</span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
       <div

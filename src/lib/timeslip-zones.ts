@@ -4,6 +4,15 @@ import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 
 type SlipKey = "sixtyFt" | "threeThirty" | "eighthEt" | "thousandFt" | "et";
 
+/**
+ * Format a timeslip time at its stored precision, up to 3dp and never padded —
+ * 6.325 stays 6.325, a 6.3 dial stays 6.3. Matches the sidebar readout, which
+ * prints the raw stored value. toFixed first so float noise can't leak through.
+ */
+export function formatSlipTime(seconds: number): string {
+  return String(parseFloat(seconds.toFixed(3)));
+}
+
 // Distance markers in run order; keys match the `timeslips` table fields.
 const TIMESLIP_SEGMENTS: { key: SlipKey; label: string; color: string }[] = [
   { key: "sixtyFt", label: "60'", color: "#ef4444" }, // red
@@ -16,12 +25,12 @@ const TIMESLIP_SEGMENTS: { key: SlipKey; label: string; color: string }[] = [
 /**
  * Convert each loaded file's timeslip(s) into a synthetic EvaluatedZone whose
  * regions each carry their own segment color, anchored at the log's detected
- * race-start (raceStartTime + alignment offset). These render through the
- * existing highlight-zone strip plugin in TraceChart on every trace.
+ * race-start (raceStartTime + alignment offset).
  *
- * Zone ids are prefixed `timeslip:<_id>` so the chart can route their
- * expand/collapse to the persisted `expandedTimeslipIds` config (not the
- * ephemeral expression-zone Set).
+ * These render as a solid band — one row per zone — across the bottom of every
+ * trace (TraceChart's timeslip plugin) and again above the OverviewBar minimap.
+ * Both draw straight from `regions`; neither goes through the highlight-zone
+ * strip plugin.
  */
 export function buildTimeslipZones(
   logs: LoadedLog[],
@@ -55,7 +64,7 @@ export function buildTimeslipZones(
           id: `timeslip:${slip._id}`,
           expression: "",
           color: regions[0].color, // checkbox + label pill color
-          label: `${lastLabel} ${lastEt.toFixed(3)}s`, // e.g. "1320' 11.234s"
+          label: `${lastLabel} ${formatSlipTime(lastEt)}s`, // e.g. "1320' 11.234s"
           enabled: true,
         },
         regions,
