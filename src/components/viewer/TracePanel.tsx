@@ -12,6 +12,10 @@ import { OverviewBar } from "./OverviewBar";
 import { PlusIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 
+// Arrow-key nudge for a parked marker line. Fine ≈ one sample at 100Hz.
+const MARKER_STEP_FINE = 0.01;
+const MARKER_STEP_COARSE = 0.1;
+
 interface Props {
   traces: TraceConfig[];
   pinnedFromOtherIds: Set<string>;
@@ -311,6 +315,18 @@ export function TracePanel({
             Math.min(globalRange[1], newMax),
           ]);
         }
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        // Nudge a parked marker line. Cmd/Ctrl/Shift = coarse step. Meta+Arrow
+        // is browser back/forward, so this must preventDefault to hold the page.
+        const sel = selectionRef.current;
+        if (!sel || sel[0] !== sel[1]) return; // only a point marker, not a range
+        e.preventDefault();
+        const step = e.metaKey || e.ctrlKey || e.shiftKey ? MARKER_STEP_COARSE : MARKER_STEP_FINE;
+        const dir = e.key === "ArrowLeft" ? -1 : 1;
+        // Stay inside what's on screen, so the marker can't be nudged out of view
+        const [lo, hi] = zoomRangeRef.current ?? globalRange;
+        const t = Math.min(Math.max(sel[0] + dir * step, lo), hi);
+        setSelection([t, t]);
       }
     };
     window.addEventListener("keydown", handler);

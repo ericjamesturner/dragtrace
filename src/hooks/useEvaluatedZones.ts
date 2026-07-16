@@ -6,9 +6,18 @@ import { evaluateZoneExpression, scanTrueRegions } from "@/lib/zone-evaluator";
 
 export interface EvaluatedZone {
   config: HighlightZoneConfig;
-  // Each region may carry its own fill color, plus a label + cumulative time
-  // (used by timeslip overlay segments); expression zones leave these undefined.
-  regions: { start: number; end: number; color?: string; label?: string; time?: number }[];
+  // Each region may carry its own fill color, plus a label + cumulative time,
+  // the marker's distance in feet, and the trapped mph where the slip has one
+  // (used by timeslip segments); expression zones leave these undefined.
+  regions: {
+    start: number;
+    end: number;
+    color?: string;
+    label?: string;
+    time?: number;
+    feet?: number;
+    mph?: number;
+  }[];
   error: string | null;
 }
 

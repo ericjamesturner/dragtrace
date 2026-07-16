@@ -7,7 +7,7 @@ import type { ChannelOnTrace, LoadedLog } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import { convertForDisplay, getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { readableTextColor } from "@/lib/colors";
-import { formatSlipTime } from "@/lib/timeslip-zones";
+import { formatSlipTime, distanceAtTime, findSlipAtLaunch } from "@/lib/timeslip-zones";
 import { formatValue, formatDuration } from "@/lib/cursor-utils";
 
 const GRID_POINTS = 2000;
@@ -794,6 +794,56 @@ export function TraceChart({
       });
     }
 
+    // Race time at a chart time, plus distance down track when the matching log
+    // has a timeslip to derive it from. Shared by the hover readout and the
+    // parked marker line so they always agree.
+    const raceLabelText = (time: number): string | null => {
+      const rs = raceStartTimes[0];
+      if (!rs) return null;
+      const launch = rs.time + rs.offset;
+      let text = `${(time - launch).toFixed(3)}s`;
+      const slip = findSlipAtLaunch(timeslipZonesRef.current, launch);
+      const feet = slip ? distanceAtTime(slip, time) : null;
+      if (feet != null) text += `  ${Math.round(feet)} ft`;
+      return text;
+    };
+
+    // Timeslip checkpoint lines — where each marker falls, up through the plot.
+    // Thin/dashed/translucent so they read as reference lines instead of
+    // covering the traces. Drawn before the selection + zone layers so their
+    // labels stay on top of these.
+    plugins.push({
+      hooks: {
+        draw: [
+          (u: uPlot) => {
+            const zones = timeslipZonesRef.current;
+            if (!zones || zones.length === 0) return;
+            const ctx = u.ctx;
+            const dpr = devicePixelRatio;
+            const plotRight = u.bbox.left + u.bbox.width;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(u.bbox.left, u.bbox.top, u.bbox.width, u.bbox.height);
+            ctx.clip();
+            ctx.lineWidth = 1.25 * dpr;
+            ctx.setLineDash([4.5 * dpr, 3.5 * dpr]);
+            for (const zone of zones) {
+              for (const region of zone.regions) {
+                const x = u.valToPos(region.end, "x", true);
+                if (x < u.bbox.left || x > plotRight) continue;
+                ctx.strokeStyle = hexToRgba(region.color ?? zone.config.color, 0.6);
+                ctx.beginPath();
+                ctx.moveTo(x, u.bbox.top);
+                ctx.lineTo(x, u.bbox.top + u.bbox.height);
+                ctx.stroke();
+              }
+            }
+            ctx.restore();
+          },
+        ],
+      },
+    });
+
     // Selection highlight plugin (reads from ref, redrawn via separate effect)
     plugins.push({
       hooks: {
@@ -818,6 +868,28 @@ export function TraceChart({
               ctx.moveTo(x0, u.bbox.top);
               ctx.lineTo(x0, u.bbox.top + u.bbox.height);
               ctx.stroke();
+              // Race time (+ distance) parked on the line, so a marker left
+              // behind still says where it is without hovering it.
+              const text = raceLabelText(sel[0]);
+              if (text) {
+                const pad = 4 * dpr;
+                const h = Math.round(16 * dpr);
+                ctx.font = `bold ${Math.round(11 * dpr)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+                const w = ctx.measureText(text).width;
+                const lx = Math.min(
+                  Math.max(x0 - w / 2, plotLeft + pad),
+                  plotRight - w - pad,
+                );
+                const ly = u.bbox.top + Math.round(4 * dpr);
+                ctx.fillStyle = "rgba(10, 10, 12, 0.85)";
+                ctx.beginPath();
+                ctx.roundRect(lx - pad, ly, w + pad * 2, h, 3 * dpr);
+                ctx.fill();
+                ctx.fillStyle = "rgb(147, 197, 253)";
+                ctx.textAlign = "left";
+                ctx.textBaseline = "middle";
+                ctx.fillText(text, lx, ly + h / 2);
+              }
               ctx.restore();
               return;
             }
@@ -1011,10 +1083,10 @@ export function TraceChart({
       },
     });
 
-    // Timeslip band — solid contiguous segments across the bottom of the plot,
-    // mirroring the OverviewBar strip so the same 60'/330'/660'/1320' markers
-    // read the same in both places. Drawn last so labels stay on top of any
-    // expanded zone tint.
+    // Timeslip band — solid contiguous segments in the strip reserved below the
+    // plot (see `padding`), mirroring the OverviewBar so the same 60'/330'/660'/
+    // 1320' markers read the same in both places. It sits outside the plot area
+    // on purpose: overlaying it hid the traces near the bottom of the chart.
     plugins.push({
       hooks: {
         draw: [
@@ -1026,7 +1098,8 @@ export function TraceChart({
             const ROW_H = TIMESLIP_ROW_H * dpr;
             const GAP = 4 * dpr; // label ↔ time spacing, and min text padding
             const plotRight = u.bbox.left + u.bbox.width;
-            const bandTop = u.bbox.top + u.bbox.height - ROW_H * zones.length;
+            // Bottom of the canvas — the reserved strip, below the x axis.
+            const bandTop = ctx.canvas.height - ROW_H * zones.length;
 
             ctx.save();
             ctx.beginPath();
@@ -1049,20 +1122,25 @@ export function TraceChart({
                 ctx.fillRect(x0, rowTop, x1 - x0, ROW_H);
                 if (!region.label) continue;
 
-                // Fit "60'  1.23s"; drop the time, then the whole label, rather
-                // than spilling half-clipped text into the next segment.
+                // Fit "660' 4.167s @180.04"; shed the mph, then the time, then
+                // the whole label, rather than spilling half-clipped text into
+                // the next segment.
                 const boldFont = `600 ${Math.round(11 * dpr)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
                 const timeFont = `${Math.round(11 * dpr)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
                 const timeText = region.time != null ? `${formatSlipTime(region.time)}s` : "";
+                const mphText = region.mph != null ? `@${region.mph}` : "";
                 ctx.font = boldFont;
                 const labelW = ctx.measureText(region.label).width;
                 ctx.font = timeFont;
                 const timeW = timeText ? ctx.measureText(timeText).width : 0;
+                const mphW = mphText ? ctx.measureText(mphText).width : 0;
 
                 const avail = x1 - x0 - GAP * 2;
-                const withTime = timeText ? labelW + GAP * 2 + timeW : labelW;
-                const drawTime = timeText && withTime <= avail;
-                const totalW = drawTime ? withTime : labelW;
+                const wTime = timeText ? labelW + GAP * 2 + timeW : labelW;
+                const wMph = mphText ? wTime + GAP * 2 + mphW : wTime;
+                const drawMph = !!mphText && wMph <= avail;
+                const drawTime = !!timeText && (drawMph || wTime <= avail);
+                const totalW = drawMph ? wMph : drawTime ? wTime : labelW;
                 if (totalW > avail) continue; // too narrow for even the marker
 
                 const fg = readableTextColor(bg);
@@ -1075,6 +1153,10 @@ export function TraceChart({
                   ctx.font = timeFont;
                   ctx.globalAlpha = 0.9;
                   ctx.fillText(timeText, tx, textCy);
+                  if (drawMph) {
+                    tx += timeW + GAP * 2;
+                    ctx.fillText(mphText, tx, textCy);
+                  }
                   ctx.globalAlpha = 1;
                 }
               }
@@ -1101,7 +1183,9 @@ export function TraceChart({
       {
         width,
         height,
-        padding: [0, 0, 0, 0],
+        // Reserve a strip at the bottom for the timeslip band so it never
+        // overlays the traces. Zero when there's no timeslip to show.
+        padding: [0, 0, (timeslipZones?.length ?? 0) * TIMESLIP_ROW_H, 0],
         legend: { show: false },
         cursor: {
           show: true,
@@ -1135,9 +1219,7 @@ export function TraceChart({
               if (raceCursorLabel) {
                 if (left != null && left >= 0) {
                   const time = u.posToVal(left, "x");
-                  const rs = raceStartTimes[0];
-                  const rt = time - (rs.time + rs.offset);
-                  raceCursorLabel.textContent = `${rt.toFixed(3)}s`;
+                  raceCursorLabel.textContent = raceLabelText(time) ?? "";
                   const w = raceCursorLabel.offsetWidth;
                   const maxLeft = u.over.clientWidth - w - 2;
                   raceCursorLabel.style.left = `${Math.min(Math.max(left - w / 2, 2), maxLeft)}px`;
@@ -1164,12 +1246,11 @@ export function TraceChart({
 
     if (raceStartTimes.length > 0) {
       // Bottom of the plot: the top strip is where zone labels stack, and the
-      // label must never cover a label pill someone is trying to grab. Sits
-      // above the timeslip band when one is showing.
-      const bandH = (timeslipZones?.length ?? 0) * TIMESLIP_ROW_H;
+      // label must never cover a label pill someone is trying to grab. The
+      // timeslip band is outside the plot area, so it can't collide here.
       raceCursorLabel = document.createElement("div");
       raceCursorLabel.style.cssText =
-        `position:absolute;bottom:${8 + bandH}px;display:none;pointer-events:none;z-index:10;` +
+        "position:absolute;bottom:8px;display:none;pointer-events:none;z-index:10;" +
         "padding:1px 6px;font-size:13px;line-height:18px;white-space:nowrap;" +
         "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;" +
         "color:#4ade80;background:#18181b;border:1px solid rgba(74,222,128,0.35);border-radius:4px;";
