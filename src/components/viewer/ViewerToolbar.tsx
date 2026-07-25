@@ -1,7 +1,7 @@
 import type { LoadedLog } from "@/lib/viewer-types";
 import type { UnitSystem } from "@/lib/units";
 import { Button } from "@/components/ui/button";
-import { ChevronLeftIcon, PlusIcon, AlignCenterHorizontalIcon, RulerIcon, TagIcon, ThermometerIcon, ZoomInIcon, SigmaIcon, FlagIcon } from "lucide-react";
+import { ChevronLeftIcon, PlusIcon, AlignCenterHorizontalIcon, RulerIcon, TagIcon, ThermometerIcon, ZoomInIcon, SigmaIcon, FlagIcon, StretchVerticalIcon, ListIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 
 interface Props {
@@ -12,6 +12,9 @@ interface Props {
   unitSystem: UnitSystem;
   wheelZoomEnabled: boolean;
   wheelZoomFactor: number;
+  wheelMode: "zoom" | "scroll";
+  fitTraces: boolean;
+  compactLegend: boolean;
   avgOnSelection: boolean;
   showTimeslip: boolean;
   onToggleAlignment: () => void;
@@ -20,6 +23,10 @@ interface Props {
   onToggleUnitSystem: () => void;
   onToggleWheelZoom: () => void;
   onSetWheelZoomFactor: (factor: number) => void;
+  onSetWheelMode: (mode: "zoom" | "scroll") => void;
+  onToggleFitTraces: () => void;
+  onApplyLayoutPreset: (preset: "focusTop" | "equal") => void;
+  onToggleCompactLegend: () => void;
   onToggleAvgOnSelection: () => void;
   onToggleTimeslip: () => void;
   onAddTrace: () => void;
@@ -27,7 +34,7 @@ interface Props {
   workspaceMenu?: React.ReactNode;
 }
 
-export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels, unitSystem, wheelZoomEnabled, wheelZoomFactor, avgOnSelection, showTimeslip, onToggleAlignment, onToggleAxes, onToggleAxisLabels, onToggleUnitSystem, onToggleWheelZoom, onSetWheelZoomFactor, onToggleAvgOnSelection, onToggleTimeslip, onAddTrace, onBack, workspaceMenu }: Props) {
+export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels, unitSystem, wheelZoomEnabled, wheelZoomFactor, wheelMode, fitTraces, compactLegend, avgOnSelection, showTimeslip, onToggleAlignment, onToggleAxes, onToggleAxisLabels, onToggleUnitSystem, onToggleWheelZoom, onSetWheelZoomFactor, onSetWheelMode, onToggleFitTraces, onApplyLayoutPreset, onToggleCompactLegend, onToggleAvgOnSelection, onToggleTimeslip, onAddTrace, onBack, workspaceMenu }: Props) {
   const hasRaceData = logs.some((l) => l.raceStartTime !== null);
 
   return (
@@ -97,18 +104,72 @@ export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels,
           </Button>
         </Tip>
         {wheelZoomEnabled && (
-          <Tip content="Wheel zoom sensitivity">
+          <>
+            <Tip content="Wheel zoom sensitivity">
+              <select
+                value={String(wheelZoomFactor)}
+                onChange={(e) => onSetWheelZoomFactor(Number(e.target.value))}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm cursor-pointer"
+              >
+                <option value="1.1">Low</option>
+                <option value="1.25">Med</option>
+                <option value="1.5">High</option>
+              </select>
+            </Tip>
+            <Tip
+              content={
+                wheelMode === "zoom"
+                  ? "Wheel zooms time; shift+wheel scrolls the trace list"
+                  : "Wheel scrolls the trace list; shift/ctrl+wheel zooms time"
+              }
+            >
+              <select
+                value={wheelMode}
+                onChange={(e) => onSetWheelMode(e.target.value as "zoom" | "scroll")}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm cursor-pointer"
+              >
+                <option value="zoom">Zoom</option>
+                <option value="scroll">Scroll</option>
+              </select>
+            </Tip>
+          </>
+        )}
+        <Tip content="Size traces to fill the panel instead of using fixed heights">
+          <Button
+            variant={fitTraces ? "default" : "outline"}
+            size="sm"
+            onClick={onToggleFitTraces}
+          >
+            <StretchVerticalIcon className="size-4 mr-1" />
+            Fit
+          </Button>
+        </Tip>
+        {fitTraces && (
+          <Tip content="Preset trace proportions">
             <select
-              value={String(wheelZoomFactor)}
-              onChange={(e) => onSetWheelZoomFactor(Number(e.target.value))}
+              value=""
+              onChange={(e) => {
+                if (e.target.value) onApplyLayoutPreset(e.target.value as "focusTop" | "equal");
+                e.target.value = "";
+              }}
               className="h-8 rounded-md border border-input bg-background px-2 text-sm cursor-pointer"
             >
-              <option value="1.1">Low</option>
-              <option value="1.25">Med</option>
-              <option value="1.5">High</option>
+              <option value="">Layout…</option>
+              <option value="focusTop">Focus top</option>
+              <option value="equal">Equal</option>
             </select>
           </Tip>
         )}
+        <Tip content="Compact the channel legend into each trace's header so it stops covering the plot (the full readout returns while a range is selected)">
+          <Button
+            variant={compactLegend ? "default" : "outline"}
+            size="sm"
+            onClick={onToggleCompactLegend}
+          >
+            <ListIcon className="size-4 mr-1" />
+            Compact
+          </Button>
+        </Tip>
         <Tip content="Show average over a drag-selected range in the channel readout">
           <Button
             variant={avgOnSelection ? "default" : "outline"}

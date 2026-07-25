@@ -137,6 +137,7 @@ interface Props {
   onResetZoom?: () => void;
   wheelZoomEnabled?: boolean;
   wheelZoomFactor?: number;
+  wheelMode?: "zoom" | "scroll";
   evaluatedZones?: EvaluatedZone[];
   /** Timeslip zones render as their own solid band across the bottom of the
    *  plot (mirroring the OverviewBar strip) — not through the zone plugin. */
@@ -234,6 +235,7 @@ export function TraceChart({
   onResetZoom,
   wheelZoomEnabled,
   wheelZoomFactor,
+  wheelMode,
   evaluatedZones,
   timeslipZones,
   expandedZoneIds,
@@ -287,6 +289,8 @@ export function TraceChart({
   wheelEnabledRef.current = wheelZoomEnabled;
   const wheelFactorRef = useRef(wheelZoomFactor);
   wheelFactorRef.current = wheelZoomFactor;
+  const wheelModeRef = useRef(wheelMode);
+  wheelModeRef.current = wheelMode;
   const globalRangeRef = useRef(globalRange);
   globalRangeRef.current = globalRange;
   // Read AND optimistically written by the wheel handler so rapid wheel events
@@ -345,9 +349,13 @@ export function TraceChart({
   // Race-line style serialized so the chart rebuilds when it changes.
   const raceLineKey = `${raceLine?.color ?? ""}:${raceLine?.width ?? ""}:${(raceLine?.dash ?? []).join(",")}`;
 
+  // Too narrow to mount a plot at all. Only *crossing* this threshold needs a
+  // rebuild — ordinary size changes go through the setSize effect below.
+  const canMount = width >= 50;
+
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || logGroups.length === 0 || width < 50) return;
+    if (!el || logGroups.length === 0 || !canMount) return;
 
     // Determine x-range
     const xRange: [number, number] = zoomRange ?? globalRange;
@@ -1464,9 +1472,19 @@ export function TraceChart({
     document.addEventListener("mouseup", onZoneUp);
 
     // --- Cursor-centered mouse-wheel zoom on the x (time) axis ---
+    // Anything we don't handle as a zoom must fall through *without*
+    // preventDefault, so the event reaches the scroll container and scrolls the
+    // trace list natively. `over` covers nearly the whole panel, so swallowing
+    // the wheel unconditionally makes the list unscrollable.
     const onWheel = (e: WheelEvent) => {
       if (wheelEnabledRef.current === false) return;
-      e.preventDefault(); // stop page scroll
+      // Trackpad pinch arrives as ctrlKey+wheel, so it reads as zoom in both modes.
+      const wantsZoom =
+        (wheelModeRef.current ?? "zoom") === "zoom"
+          ? !e.shiftKey
+          : e.ctrlKey || e.metaKey || e.shiftKey;
+      if (!wantsZoom) return; // let it scroll
+
       const factorOut = wheelFactorRef.current ?? 1.25;
       const factor = e.deltaY > 0 ? factorOut : 1 / factorOut; // out : in
       const rect = over.getBoundingClientRect();
@@ -1476,9 +1494,16 @@ export function TraceChart({
       const halfSpan = ((curMax - curMin) * factor) / 2;
       const next = clampWheelRange(center - halfSpan, center + halfSpan, globalRangeRef.current);
       if (next === null) {
+        const [gMin, gMax] = globalRangeRef.current;
+        const alreadyFull = curMin <= gMin && curMax >= gMax;
+        // Already zoomed all the way out and still wheeling out: there's nothing
+        // left to do, so hand the gesture back rather than dead-ending on it.
+        if (alreadyFull) return;
+        e.preventDefault();
         currentRangeRef.current = globalRangeRef.current;
         onResetZoomRef.current?.();
       } else {
+        e.preventDefault();
         currentRangeRef.current = next; // optimistic; accumulates across events
         onZoomRef.current?.(next[0], next[1]);
       }
@@ -1547,8 +1572,7 @@ export function TraceChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     groupsKey,
-    width,
-    height,
+    canMount,
     syncKey,
     zoomRange?.[0],
     zoomRange?.[1],
@@ -1566,6 +1590,17 @@ export function TraceChart({
     expandedZoneIds,
     maxYAxes,
   ]);
+
+  // Resize in place instead of rebuilding. Every draw plugin reads live
+  // geometry (u.bbox.*, ctx.canvas.height) rather than the closed-over props,
+  // so setSize + its implicit redraw is enough. Tearing the plot down here
+  // would re-resample every series on every drag frame and window resize.
+  useEffect(() => {
+    const u = chartRef.current;
+    if (!u || !canMount) return;
+    if (u.width === width && u.height === height) return;
+    u.setSize({ width, height });
+  }, [width, height, canMount]);
 
   // Redraw chart when selection changes (the draw plugin reads from ref)
   useEffect(() => {

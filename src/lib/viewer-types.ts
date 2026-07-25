@@ -101,12 +101,24 @@ export interface HighlightZoneConfig {
 export interface TraceConfig {
   id: string;
   channels: ChannelOnTrace[];
+  /**
+   * Absolute px when `fitTraces` is off; a relative weight when it's on
+   * (rendered height = height / Σ heights × available). Same number either way,
+   * so toggling fit round-trips losslessly and old configs need no migration.
+   */
   height: number;
   pinned?: boolean;
+  // Collapsed to a title-only strip; drops out of the fit-mode weight budget.
+  collapsed?: boolean;
+  // Channels unchecked in the floating legend, as `${logFileId}:${channelName}`.
+  hiddenChannels?: string[];
   highlightZones?: HighlightZoneConfig[];
   // Dragged position of the floating channels legend (px within the chart).
   legendPos?: { x: number; y: number };
 }
+
+/** Smallest usable trace chart area, in px. Also the floor for a weight. */
+export const MIN_TRACE_HEIGHT = 80;
 
 // ── Non-trace viz panel types, persisted inside the same workspace JSON blob ──
 
@@ -167,6 +179,17 @@ export interface ViewerConfig {
   // Cursor-centered mouse-wheel zoom (default on; factor default 1.25).
   wheelZoomEnabled?: boolean;
   wheelZoomFactor?: number;
+  // What a bare wheel does over a chart; the other gesture moves to a modifier.
+  // Default "zoom" (shift+wheel scrolls). "scroll" inverts it.
+  wheelMode?: "zoom" | "scroll";
+  // Size traces to fill the panel by weight instead of using absolute px.
+  // Default on.
+  fitTraces?: boolean;
+  // Collapse the floating channels legend into a one-line strip in the trace
+  // header so it stops covering the plot. Default off. The overlay comes back
+  // automatically while a range is selected, since the MIN/AVG/MAX/Δ table
+  // doesn't fit on one line.
+  compactLegend?: boolean;
   // Show AVG over a drag-selected range in the readout (default on).
   avgOnSelection?: boolean;
   // Timeslip overlay strip on traces.
@@ -211,6 +234,12 @@ export type ViewerAction =
   | { type: "toggleZone"; traceId: string; zoneId: string }
   | { type: "setWheelZoomEnabled"; enabled: boolean }
   | { type: "setWheelZoomFactor"; factor: number }
+  | { type: "setWheelMode"; mode: "zoom" | "scroll" }
+  | { type: "setFitTraces"; enabled: boolean }
+  | { type: "setCompactLegend"; enabled: boolean }
+  | { type: "setTraceHeights"; heights: { traceId: string; height: number }[] }
+  | { type: "toggleTraceCollapsed"; traceId: string }
+  | { type: "setChannelsHidden"; traceId: string; keys: string[]; hidden: boolean }
   | { type: "toggleAvgOnSelection" }
   | { type: "setTraceLegendPos"; traceId: string; x: number; y: number }
   | { type: "setChannelColorBy"; traceId: string; logFileId: Id<"files">; channelName: string; colorBy: string | undefined; colorByMin?: number; colorByMax?: number; colorByLowColor?: string; colorByHighColor?: string }
@@ -352,8 +381,48 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         ...state,
         pages: mapTraceById(state.pages, action.traceId, (t) => ({
           ...t,
-          height: action.height,
+          height: Math.max(MIN_TRACE_HEIGHT, action.height),
         })),
+      };
+    // Update several traces in one dispatch — a splitter drag touches a pair,
+    // a layout preset touches all of them. One action keeps the 2s Convex save
+    // debounce from thrashing.
+    case "setTraceHeights": {
+      const byId = new Map(
+        action.heights.map((h) => [h.traceId, Math.max(MIN_TRACE_HEIGHT, h.height)]),
+      );
+      return {
+        ...state,
+        pages: state.pages.map((p) => ({
+          ...p,
+          traces: p.traces.map((t) => {
+            const h = byId.get(t.id);
+            return h === undefined ? t : { ...t, height: h };
+          }),
+        })),
+      };
+    }
+    case "toggleTraceCollapsed":
+      return {
+        ...state,
+        pages: mapTraceById(state.pages, action.traceId, (t) => ({
+          ...t,
+          collapsed: !t.collapsed,
+        })),
+      };
+    // Takes a key set so the legend's per-log checkbox (which flips every
+    // channel of one log) stays a single dispatch.
+    case "setChannelsHidden":
+      return {
+        ...state,
+        pages: mapTraceById(state.pages, action.traceId, (t) => {
+          const next = new Set(t.hiddenChannels ?? []);
+          for (const k of action.keys) {
+            if (action.hidden) next.add(k);
+            else next.delete(k);
+          }
+          return { ...t, hiddenChannels: next.size > 0 ? Array.from(next) : undefined };
+        }),
       };
     case "toggleAlignment":
       return { ...state, alignByRaceTime: !state.alignByRaceTime };
@@ -478,6 +547,12 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
       return { ...state, wheelZoomEnabled: action.enabled };
     case "setWheelZoomFactor":
       return { ...state, wheelZoomFactor: action.factor };
+    case "setWheelMode":
+      return { ...state, wheelMode: action.mode };
+    case "setFitTraces":
+      return { ...state, fitTraces: action.enabled };
+    case "setCompactLegend":
+      return { ...state, compactLegend: action.enabled };
     case "toggleAvgOnSelection":
       return { ...state, avgOnSelection: !(state.avgOnSelection ?? true) };
     case "setChannelColorBy":
@@ -793,21 +868,36 @@ export function remapConfigToFiles(
   const dedupPages = config.pages.map((page) => ({
     ...page,
     traces: page.traces
-      .map((trace) => ({
-        ...trace,
-        channels: trace.channels
+      .map((trace) => {
+        // hiddenChannels keys embed a file id, so they have to follow their
+        // channel across a remap or the hidden channels silently reappear.
+        const hidden = new Set(trace.hiddenChannels ?? []);
+        const keptHidden = new Set<string>();
+        const channels = trace.channels
           .map((ch) => {
-            if (loadedFileIds.has(ch.logFileId as string)) return ch;
-            if (!needsRemap) return null;
-            const newFileId = channelToFile.get(ch.channelName);
-            if (!newFileId) return null;
-            return { ...ch, logFileId: newFileId };
+            const wasHidden = hidden.has(`${ch.logFileId}:${ch.channelName}`);
+            let out: ChannelOnTrace | null;
+            if (loadedFileIds.has(ch.logFileId as string)) {
+              out = ch;
+            } else if (!needsRemap) {
+              out = null;
+            } else {
+              const newFileId = channelToFile.get(ch.channelName);
+              out = newFileId ? { ...ch, logFileId: newFileId } : null;
+            }
+            if (out && wasHidden) keptHidden.add(`${out.logFileId}:${out.channelName}`);
+            return out;
           })
           .filter((ch): ch is ChannelOnTrace => ch !== null)
           .filter((ch, i, arr) =>
             arr.findIndex((c) => c.logFileId === ch.logFileId && c.channelName === ch.channelName) === i
-          ),
-      }))
+          );
+        return {
+          ...trace,
+          channels,
+          hiddenChannels: keptHidden.size > 0 ? Array.from(keptHidden) : undefined,
+        };
+      })
       .filter((trace) => trace.channels.length > 0),
     // Non-trace viz panels reference a single log; remap stale ids to a loaded
     // log (channels are shared across same-vehicle logs).

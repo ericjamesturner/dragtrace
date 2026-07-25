@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import type { LoadedLog, ChannelOnTrace, TraceConfig, HighlightZoneConfig } from "@/lib/viewer-types";
-import { resolveChannelStyle, CHART_COLORS } from "@/lib/viewer-types";
+import { resolveChannelStyle, CHART_COLORS, MIN_TRACE_HEIGHT } from "@/lib/viewer-types";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { TraceChart } from "./TraceChart";
 import { TraceSettingsPanel, ChannelPicker } from "./TraceSettingsPanel";
@@ -16,6 +16,13 @@ interface ContextMenuState {
   logFileId: Id<"files">;
   channelName: string;
 }
+
+/**
+ * Header + borders + resize handle around a trace's chart area. Only used to
+ * set the flex min-height so the *chart* can still reach MIN_TRACE_HEIGHT;
+ * being a few px off just nudges where the scroll fallback kicks in.
+ */
+export const TRACE_CHROME_PX = 34;
 
 const WIDTH_OPTIONS = [1, 1.5, 2.5, 4];
 const STYLE_OPTIONS: { label: string; dash: number[] | undefined }[] = [
@@ -287,12 +294,26 @@ interface Props {
   onResetZoom?: () => void;
   wheelZoomEnabled?: boolean;
   wheelZoomFactor?: number;
+  wheelMode?: "zoom" | "scroll";
   avgOnSelection?: boolean;
   onRemoveTrace: () => void;
   onRemoveChannel: (logFileId: Id<"files">, channelName: string) => void;
   onAddChannel: (channel: ChannelOnTrace) => void;
   onMoveChannel: (sourceTraceId: string, logFileId: Id<"files">, channelName: string) => void;
   onResizeHeight: (height: number) => void;
+  /** Fit mode: `trace.height` is a flex weight, not px. */
+  fitTraces?: boolean;
+  /**
+   * Splitter drag against the trace below. `deltaPx` is the cumulative move
+   * since mousedown; `commit` marks the final call on mouseup.
+   */
+  onSplitterDrag?: (deltaPx: number, commit: boolean) => void;
+  /** No trace below this one to trade height with, so no resize handle. */
+  isLastExpanded?: boolean;
+  onToggleCollapsed?: () => void;
+  onSetChannelsHidden?: (keys: string[], hidden: boolean) => void;
+  /** Put the channels legend in the header strip instead of over the plot. */
+  compactLegend?: boolean;
   showAxes: boolean;
   showAxisLabels: boolean;
   onSetChannelColor: (logFileId: Id<"files">, channelName: string, color: string | undefined) => void;
@@ -348,12 +369,19 @@ export function TraceContainer({
   onResetZoom,
   wheelZoomEnabled,
   wheelZoomFactor,
+  wheelMode,
   avgOnSelection = true,
   onRemoveTrace,
   onRemoveChannel,
   onAddChannel,
   onMoveChannel,
   onResizeHeight,
+  fitTraces = true,
+  onSplitterDrag,
+  isLastExpanded,
+  onToggleCollapsed,
+  onSetChannelsHidden,
+  compactLegend = false,
   showAxes,
   showAxisLabels,
   onSetChannelColor,
@@ -394,7 +422,6 @@ export function TraceContainer({
   const [resolvedRanges, setResolvedRanges] = useState<Map<string, [number, number]>>(
     () => new Map(),
   );
-  const resizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   // Race-start marker line right-click menu.
   const [raceMenu, setRaceMenu] = useState<{ x: number; y: number } | null>(null);
@@ -417,7 +444,35 @@ export function TraceContainer({
   const legendDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   const chartAreaRef = useRef<HTMLDivElement>(null);
   const [hoveredChannel, setHoveredChannel] = useState<string | null>(null);
-  const [hiddenChannels, setHiddenChannels] = useState<Set<string>>(new Set());
+  const hiddenChannels = useMemo(
+    () => new Set(trace.hiddenChannels ?? []),
+    [trace.hiddenChannels],
+  );
+
+  // In fit mode the chart area is sized by flexbox, so its height has to be
+  // measured rather than read from config. Seeded with trace.height so the
+  // first paint isn't zero-height.
+  const [measuredHeight, setMeasuredHeight] = useState(trace.height);
+  useEffect(() => {
+    const el = chartAreaRef.current;
+    if (!el || !fitTraces || trace.collapsed) return;
+    const ro = new ResizeObserver((entries) => {
+      const h = entries[0]?.contentRect.height;
+      if (h && h > 0) setMeasuredHeight(Math.round(h));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fitTraces, trace.collapsed]);
+
+  const chartHeight = fitTraces ? measuredHeight : trace.height;
+  const collapsed = trace.collapsed ?? false;
+
+  // Identifies the trace in the (sticky) header and when collapsed — the header
+  // otherwise carries no label at all.
+  const traceTitle = useMemo(
+    () => Array.from(new Set(trace.channels.map((c) => c.channelName))).join(" · "),
+    [trace.channels],
+  );
 
   // Evaluate highlight zones
   const evaluatedZones = useEvaluatedZones(
@@ -570,17 +625,20 @@ export function TraceContainer({
   const handleResizeMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
-      resizeRef.current = { startY: e.clientY, startHeight: trace.height };
+      const startY = e.clientY;
+      const startHeight = trace.height;
 
+      // Fit mode: the handle is a splitter between this trace and the one
+      // below, so the parent redistributes the pair's weight. Otherwise it's
+      // the plain absolute-px resize.
       const handleMove = (ev: MouseEvent) => {
-        if (!resizeRef.current) return;
-        const delta = ev.clientY - resizeRef.current.startY;
-        const newHeight = Math.max(80, resizeRef.current.startHeight + delta);
-        onResizeHeight(newHeight);
+        const delta = ev.clientY - startY;
+        if (fitTraces) onSplitterDrag?.(delta, false);
+        else onResizeHeight(Math.max(MIN_TRACE_HEIGHT, startHeight + delta));
       };
 
-      const handleUp = () => {
-        resizeRef.current = null;
+      const handleUp = (ev: MouseEvent) => {
+        if (fitTraces) onSplitterDrag?.(ev.clientY - startY, true);
         document.removeEventListener("mousemove", handleMove);
         document.removeEventListener("mouseup", handleUp);
       };
@@ -588,7 +646,7 @@ export function TraceContainer({
       document.addEventListener("mousemove", handleMove);
       document.addEventListener("mouseup", handleUp);
     },
-    [trace.height, onResizeHeight]
+    [trace.height, onResizeHeight, fitTraces, onSplitterDrag]
   );
 
   // Compute shared y-ranges across all logs for each channel name
@@ -650,9 +708,159 @@ export function TraceContainer({
   const avgRange: [number, number] | null =
     avgOnSelection && selection && selection[0] !== selection[1] ? selection : null;
 
+  // Everything both legend renderers need, computed once. The floating overlay
+  // and the compact header strip show the same numbers; only the layout differs.
+  const legendGroups = useMemo(() => {
+    const logFileOrder: string[] = [];
+    const channelsByLogId = new Map<string, ChannelOnTrace[]>();
+    for (const ch of trace.channels) {
+      const id = ch.logFileId as string;
+      if (!channelsByLogId.has(id)) {
+        logFileOrder.push(id);
+        channelsByLogId.set(id, []);
+      }
+      channelsByLogId.get(id)!.push(ch);
+    }
+    const multiLog = logFileOrder.length > 1;
+
+    return logFileOrder.map((logId) => {
+      const logChannels = channelsByLogId.get(logId)!;
+      const log = logs.find((l) => (l.fileId as string) === logId);
+      const isLogHidden = hiddenSet.has(logId as Id<"files">);
+      const allLogChKeys = logChannels.map((c) => `${c.logFileId}:${c.channelName}`);
+      const allLogHidden = allLogChKeys.every((k) => hiddenChannels.has(k));
+      const someLogHidden = allLogChKeys.some((k) => hiddenChannels.has(k));
+
+      const rows = logChannels.map((ch, chIdx) => {
+        const chKey = `${ch.logFileId}:${ch.channelName}`;
+        const isChHidden = hiddenChannels.has(chKey);
+        const resolved = resolveChannelStyle(ch, chIdx, log?.logIndex ?? 0);
+
+        let valueStr: string | null = null;
+        let minStr: string | null = null;
+        let maxStr: string | null = null;
+        let deltaStr: string | null = null;
+        let unitLabel = "";
+        let isAvg = false;
+        const def = log?.parsed.channelDefs.find((d) => d.name === ch.channelName);
+        if (avgRange && log && !isLogHidden && !isChHidden && !def?.enumValues) {
+          const offset = offsets.get(log.fileId) ?? 0;
+          const stats = computeRangeStats(log, ch.channelName, avgRange, offset);
+          if (stats !== null) {
+            const mu = def?.metricUnit ?? "";
+            const conv = (v: number) =>
+              mu ? convertForDisplay(v, mu, unitSystem, unitOverrides) : v;
+            valueStr = formatValue(conv(stats.avg));
+            minStr = formatValue(conv(stats.min));
+            maxStr = formatValue(conv(stats.max));
+            unitLabel = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
+            isAvg = true;
+            // Start -> end change over the selection, in display units
+            // (convert endpoints first: some conversions have offsets).
+            const startV = findValueAtTime(log, ch.channelName, Math.min(avgRange[0], avgRange[1]), offset);
+            const endV = findValueAtTime(log, ch.channelName, Math.max(avgRange[0], avgRange[1]), offset);
+            if (startV !== null && endV !== null) {
+              const d = conv(endV) - conv(startV);
+              deltaStr = `${d >= 0 ? "+" : ""}${formatValue(d)}`;
+            }
+          }
+        } else if (cursorTime !== null && log && !isLogHidden && !isChHidden) {
+          const offset = offsets.get(log.fileId) ?? 0;
+          const val = findValueAtTime(log, ch.channelName, cursorTime, offset);
+          if (val !== null) {
+            const mu = def?.metricUnit ?? "";
+            const converted = mu ? convertForDisplay(val, mu, unitSystem, unitOverrides) : val;
+            valueStr = formatValue(converted);
+            unitLabel = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
+          }
+        }
+
+        return {
+          chKey, ch, indent: multiLog, isLogHidden, isChHidden,
+          logName: log ? log.fileName.replace(/\.[^.]+$/, "") : "",
+          logColor: log?.logColor ?? "#3b82f6",
+          logIndex: log?.logIndex ?? 0,
+          color: resolved.color, opacity: resolved.opacity,
+          valueStr, minStr, maxStr, deltaStr, unitLabel, isAvg,
+        };
+      });
+
+      return { logId, log, isLogHidden, multiLog, allLogChKeys, allLogHidden, someLogHidden, rows };
+    });
+  }, [
+    trace.channels, logs, hiddenSet, hiddenChannels, avgRange,
+    cursorTime, offsets, unitSystem, unitOverrides,
+  ]);
+
+  // Compact mode puts the legend in the header, but the MIN/AVG/MAX/Δ table
+  // needs the roomy overlay — so a range selection temporarily brings it back.
+  const legendInHeader = compactLegend && !avgRange && trace.channels.length > 0;
+
+  // For the header strip, collapse the per-log rows into one entry per channel
+  // NAME, with that channel's value from each log side by side. Comparing two
+  // logs is the whole point of the overlay, and this is both half the width of
+  // one-chip-per-series and easier to read: the numbers you're comparing end up
+  // adjacent instead of a screen apart.
+  const compactChannels = useMemo(() => {
+    const byName = new Map<string, typeof legendGroups[number]["rows"]>();
+    for (const g of legendGroups) {
+      for (const row of g.rows) {
+        const existing = byName.get(row.ch.channelName);
+        if (existing) existing.push(row);
+        else byName.set(row.ch.channelName, [row]);
+      }
+    }
+    return [...byName.entries()].map(([name, rows]) => ({
+      name,
+      // Stable log order, so a value sits in the same position in every group
+      // even when one log is missing that channel.
+      rows: [...rows].sort((a, b) => a.logIndex - b.logIndex),
+      unitLabel: rows.find((r) => r.unitLabel)?.unitLabel ?? "",
+    }));
+  }, [legendGroups]);
+
+  /**
+   * The logs represented on this trace, in log order. When there's more than
+   * one, the compact strip colours values by LOG rather than by series: within
+   * a channel group every value is the same channel, so the log is the only
+   * thing that distinguishes them. These are the same identity colours the
+   * sidebar puts next to each log name.
+   */
+  const traceLogs = useMemo(() => {
+    const seen = new Map<string, { id: string; name: string; color: string; index: number }>();
+    for (const g of legendGroups) {
+      for (const r of g.rows) {
+        if (!seen.has(r.ch.logFileId as string)) {
+          seen.set(r.ch.logFileId as string, {
+            id: r.ch.logFileId as string,
+            name: r.logName,
+            color: r.logColor,
+            index: r.logIndex,
+          });
+        }
+      }
+    }
+    const list = [...seen.values()].sort((a, b) => a.index - b.index);
+    // Short tag for the key: racers name runs "Q1", "E1 6.325 @ 227" — the
+    // leading token is the useful part. Fall back to the full name on a clash.
+    const tags = list.map((l) => l.name.trim().split(/\s+/)[0] || l.name);
+    const unique = new Set(tags).size === tags.length;
+    return list.map((l, i) => ({ ...l, tag: unique ? tags[i] : l.name }));
+  }, [legendGroups]);
+
+  const multiLogTrace = traceLogs.length > 1;
+
   return (
     <div
-      className={`border rounded-lg mb-2 ${dragOver ? "border-primary bg-primary/5" : isPinnedFromOther ? "border-primary/30 border-dashed" : isActive ? "border-primary/50" : "border-border"}`}
+      data-trace-id={trace.id}
+      className={`flex flex-col border rounded-lg mb-2 ${collapsed ? "shrink-0" : "min-h-0"} ${dragOver ? "border-primary bg-primary/5" : isPinnedFromOther ? "border-primary/30 border-dashed" : isActive ? "border-primary/50" : "border-border"}`}
+      // Fit mode: trace.height is a weight, and flexbox turns it into pixels.
+      // A collapsed trace leaves the budget entirely (basis auto, no grow).
+      style={
+        fitTraces && !collapsed
+          ? { flexGrow: trace.height, flexBasis: 0, minHeight: MIN_TRACE_HEIGHT + TRACE_CHROME_PX }
+          : undefined
+      }
       onClick={onSetActive}
       onDragOver={(e) => {
         e.preventDefault();
@@ -662,11 +870,122 @@ export function TraceContainer({
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
     >
-      {/* Header — action buttons only */}
-      <div className="flex items-center justify-end gap-1.5 px-2 py-1 border-b bg-muted/30">
-        {trace.channels.length === 0 && (
-          <span className="text-xs text-muted-foreground flex-1">
+      {/* Header — collapse toggle, channel summary, action buttons */}
+      <div className="sticky top-0 z-20 flex items-center gap-1.5 px-2 py-1 border-b bg-muted rounded-t-lg shrink-0">
+        <Tip content={collapsed ? "Expand trace" : "Collapse trace"}>
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleCollapsed?.(); }}
+            className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+          >
+            {collapsed ? <ChevronRightIcon className="size-4" /> : <ChevronDownIcon className="size-4" />}
+          </button>
+        </Tip>
+        {trace.channels.length === 0 ? (
+          <span className="text-xs text-muted-foreground flex-1 truncate">
             Drop channels here or click a channel in the sidebar
+          </span>
+        ) : legendInHeader && !collapsed ? (
+          // Compact legend: one scrollable line of channel chips. Same
+          // interactions as the overlay rows — toggle, hover-to-highlight,
+          // drag to another trace, right-click to style.
+          <div className="flex-1 min-w-0 flex items-center overflow-x-auto whitespace-nowrap">
+            {/* Colour key: which run is which. Same colours the sidebar shows
+                against each log, and the same order the values appear in. */}
+            {multiLogTrace && (
+              <div className="flex items-baseline gap-2 shrink-0 pr-2.5">
+                {traceLogs.map((l) => (
+                  <span
+                    key={l.id}
+                    title={l.name}
+                    className="text-[10px] font-bold uppercase tracking-wider max-w-[84px] truncate"
+                    style={{ color: l.color }}
+                  >
+                    {l.tag}
+                  </span>
+                ))}
+              </div>
+            )}
+            {compactChannels.map(({ name, rows, unitLabel }, gi) => (
+              <div
+                key={name}
+                className={`flex items-baseline gap-1.5 shrink-0 px-2.5 ${
+                  gi > 0 || multiLogTrace ? "border-l border-border/60" : "pl-0"
+                }`}
+              >
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 max-w-[104px] truncate">
+                  {name}
+                </span>
+                {rows.map((r) => {
+                  const isHovered = hoveredChannel === r.chKey;
+                  const isDimmed = hoveredChannel !== null && !isHovered;
+                  const muted = r.isChHidden || r.isLogHidden;
+                  return (
+                    <span
+                      key={r.chKey}
+                      draggable
+                      // The value IS the control: click toggles that series,
+                      // so no checkbox chrome is needed in the strip.
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSetChannelsHidden?.([r.chKey], !r.isChHidden);
+                      }}
+                      onMouseEnter={() => setHoveredChannel(r.chKey)}
+                      onMouseLeave={() => setHoveredChannel(null)}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData(
+                          "text/plain",
+                          JSON.stringify({
+                            logFileId: r.ch.logFileId,
+                            channelName: r.ch.channelName,
+                            sourceTraceId: trace.id,
+                          }),
+                        );
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setCmAppearanceOpen(false);
+                        setContextMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          logFileId: r.ch.logFileId,
+                          channelName: r.ch.channelName,
+                        });
+                      }}
+                      title={`${r.logName ? `${r.logName} · ` : ""}${name}${
+                        r.isChHidden ? " (hidden)" : ""
+                      } — click to ${r.isChHidden ? "show" : "hide"}, drag to move, right-click to style`}
+                      data-log={r.logName}
+                      className={`font-mono text-[13px] font-semibold tabular-nums text-right min-w-[4ch] cursor-pointer rounded-sm px-0.5 transition-all ${
+                        muted ? "line-through decoration-1" : ""
+                      } ${isDimmed ? "opacity-40" : ""} ${
+                        isHovered ? "bg-foreground/15" : ""
+                      }`}
+                      style={{
+                        // Comparing logs: colour identifies the RUN. Single
+                        // log: it identifies the channel's own line.
+                        color:
+                          muted || r.valueStr === null
+                            ? undefined
+                            : multiLogTrace
+                              ? r.logColor
+                              : r.color,
+                        opacity: muted ? 0.35 : r.opacity,
+                      }}
+                    >
+                      {r.valueStr ?? "–"}
+                    </span>
+                  );
+                })}
+                {unitLabel && (
+                  <span className="text-[9px] text-muted-foreground/60 shrink-0">{unitLabel}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground flex-1 truncate" title={traceTitle}>
+            {traceTitle}
           </span>
         )}
         <Tip content={pinned ? "Unpin from all pages" : "Pin across all pages"}>
@@ -698,12 +1017,17 @@ export function TraceContainer({
       </div>
 
       {/* Chart area with legend overlay */}
-      <div ref={chartAreaRef} className="relative" style={{ height: trace.height }}>
+      {!collapsed && (
+      <div
+        ref={chartAreaRef}
+        className={`relative ${fitTraces ? "flex-1 min-h-0" : ""}`}
+        style={fitTraces ? undefined : { height: trace.height }}
+      >
         {logGroups.length > 0 ? (
           <TraceChart
             logGroups={logGroups}
             width={chartWidth}
-            height={trace.height}
+            height={chartHeight}
             syncKey={syncKey}
             zoomRange={zoomRange}
             globalRange={globalRange}
@@ -724,6 +1048,7 @@ export function TraceContainer({
             onResetZoom={onResetZoom}
             wheelZoomEnabled={wheelZoomEnabled}
             wheelZoomFactor={wheelZoomFactor}
+            wheelMode={wheelMode}
             evaluatedZones={allZones}
             timeslipZones={timeslipZones}
             expandedZoneIds={mergedExpanded}
@@ -746,8 +1071,8 @@ export function TraceContainer({
           </div>
         )}
 
-        {/* Floating channel legend */}
-        {trace.channels.length > 0 && (
+        {/* Floating channel legend — suppressed while it lives in the header */}
+        {trace.channels.length > 0 && !legendInHeader && (
           <div
             className="absolute z-10 rounded bg-black/60 backdrop-blur-sm select-none overflow-hidden"
             style={{ left: legendPos.x, top: legendPos.y }}
@@ -774,27 +1099,7 @@ export function TraceContainer({
             {!legendMinimized && (
               <div className="flex flex-col gap-0.5 px-2 py-1">
                 {(() => {
-                  // Group channels by log file, preserving order
-                  const logFileOrder: string[] = [];
-                  const channelsByLogId = new Map<string, ChannelOnTrace[]>();
-                  for (const ch of trace.channels) {
-                    const id = ch.logFileId as string;
-                    if (!channelsByLogId.has(id)) {
-                      logFileOrder.push(id);
-                      channelsByLogId.set(id, []);
-                    }
-                    channelsByLogId.get(id)!.push(ch);
-                  }
-                  const multiLog = logFileOrder.length > 1;
-
-                  return logFileOrder.map((logId) => {
-                    const logChannels = channelsByLogId.get(logId)!;
-                    const log = logs.find((l) => (l.fileId as string) === logId);
-                    const isHidden = hiddenSet.has(logId as Id<"files">);
-                    const allLogChKeys = logChannels.map((c) => `${c.logFileId}:${c.channelName}`);
-                    const allLogHidden = allLogChKeys.every((k) => hiddenChannels.has(k));
-                    const someLogHidden = allLogChKeys.some((k) => hiddenChannels.has(k));
-
+                  return legendGroups.map(({ logId, log, isLogHidden: isHidden, multiLog, allLogChKeys, allLogHidden, someLogHidden, rows }) => {
                     return (
                       <div key={logId} className={isHidden ? "opacity-30" : ""}>
                         {multiLog && log && (
@@ -804,68 +1109,14 @@ export function TraceContainer({
                               checked={!allLogHidden}
                               ref={(el) => { if (el) el.indeterminate = someLogHidden && !allLogHidden; }}
                               onChange={() => {
-                                setHiddenChannels((prev) => {
-                                  const next = new Set(prev);
-                                  if (allLogHidden) {
-                                    allLogChKeys.forEach((k) => next.delete(k));
-                                  } else {
-                                    allLogChKeys.forEach((k) => next.add(k));
-                                  }
-                                  return next;
-                                });
+                                onSetChannelsHidden?.(allLogChKeys, !allLogHidden);
                               }}
                               className="accent-white/60 cursor-pointer"
                             />
                             {log.fileName.replace(/\.[^.]+$/, "")}
                           </div>
                         )}
-                        {logChannels.map((ch, chIdx) => {
-                          const chKey = `${ch.logFileId}:${ch.channelName}`;
-                          const indent = multiLog;
-                          const isChHidden = hiddenChannels.has(chKey);
-                          const resolved = resolveChannelStyle(
-                            ch,
-                            chIdx,
-                            log?.logIndex ?? 0,
-                          );
-                          let valueStr: string | null = null;
-                          let minStr: string | null = null;
-                          let maxStr: string | null = null;
-                          let deltaStr: string | null = null;
-                          let unitLabel = "";
-                          let isAvg = false;
-                          const def = log?.parsed.channelDefs.find(d => d.name === ch.channelName);
-                          if (avgRange && log && !isHidden && !isChHidden && !def?.enumValues) {
-                            const offset = offsets.get(log.fileId) ?? 0;
-                            const stats = computeRangeStats(log, ch.channelName, avgRange, offset);
-                            if (stats !== null) {
-                              const mu = def?.metricUnit ?? "";
-                              const conv = (v: number) =>
-                                mu ? convertForDisplay(v, mu, unitSystem, unitOverrides) : v;
-                              valueStr = formatValue(conv(stats.avg));
-                              minStr = formatValue(conv(stats.min));
-                              maxStr = formatValue(conv(stats.max));
-                              unitLabel = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
-                              isAvg = true;
-                              // Start -> end change over the selection, in display units
-                              // (convert endpoints first: some conversions have offsets).
-                              const startV = findValueAtTime(log, ch.channelName, Math.min(avgRange[0], avgRange[1]), offset);
-                              const endV = findValueAtTime(log, ch.channelName, Math.max(avgRange[0], avgRange[1]), offset);
-                              if (startV !== null && endV !== null) {
-                                const d = conv(endV) - conv(startV);
-                                deltaStr = `${d >= 0 ? "+" : ""}${formatValue(d)}`;
-                              }
-                            }
-                          } else if (cursorTime !== null && log && !isHidden && !isChHidden) {
-                            const offset = offsets.get(log.fileId) ?? 0;
-                            const val = findValueAtTime(log, ch.channelName, cursorTime, offset);
-                            if (val !== null) {
-                              const mu = def?.metricUnit ?? "";
-                              const converted = mu ? convertForDisplay(val, mu, unitSystem, unitOverrides) : val;
-                              valueStr = formatValue(converted);
-                              unitLabel = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
-                            }
-                          }
+                        {rows.map(({ chKey, ch, indent, isChHidden, color, opacity, valueStr, minStr, maxStr, deltaStr, unitLabel, isAvg }) => {
                           const isHovered = hoveredChannel === chKey;
                           const isDimmed = hoveredChannel !== null && !isHovered;
                           return (
@@ -903,17 +1154,12 @@ export function TraceContainer({
                                 type="checkbox"
                                 checked={!isChHidden}
                                 onChange={() => {
-                                  setHiddenChannels((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(chKey)) next.delete(chKey);
-                                    else next.add(chKey);
-                                    return next;
-                                  });
+                                  onSetChannelsHidden?.([chKey], !isChHidden);
                                 }}
                                 className="accent-white/60 cursor-pointer shrink-0"
                                 style={{ width: 10, height: 10 }}
                               />
-                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: resolved.color, opacity: resolved.opacity }} />
+                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color, opacity }} />
                               <span className="text-white/70 truncate max-w-[140px]">
                                 {ch.channelName}
                               </span>
@@ -964,12 +1210,16 @@ export function TraceContainer({
           </div>
         )}
       </div>
+      )}
 
-      {/* Resize handle */}
-      <div
-        className="h-1.5 cursor-ns-resize hover:bg-primary/20 transition-colors"
-        onMouseDown={handleResizeMouseDown}
-      />
+      {/* Resize handle. In fit mode it's a splitter against the trace below, so
+          the last expanded trace has nothing to trade with and gets none. */}
+      {!collapsed && !(fitTraces && isLastExpanded) && (
+        <div
+          className="h-1.5 shrink-0 cursor-ns-resize hover:bg-primary/20 transition-colors"
+          onMouseDown={handleResizeMouseDown}
+        />
+      )}
 
       {/* Context menu (channel row right-click OR chart line right-click) */}
       {contextMenu && (() => {

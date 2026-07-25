@@ -1,9 +1,10 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import type { LoadedLog, TraceConfig, ChannelOnTrace, PageConfig, HighlightZoneConfig, ScatterConfig, HeatmapConfig, ScatterSuggestion } from "@/lib/viewer-types";
+import { MIN_TRACE_HEIGHT } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import type { UnitSystem, UnitOverrides } from "@/lib/units";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { TraceContainer } from "./TraceContainer";
+import { TraceContainer, TRACE_CHROME_PX } from "./TraceContainer";
 import { ScatterContainer } from "./ScatterContainer";
 import { ScatterConfigDialog } from "./ScatterConfigDialog";
 import { HeatmapContainer } from "./HeatmapContainer";
@@ -56,6 +57,12 @@ interface Props {
   unitOverrides?: UnitOverrides;
   wheelZoomEnabled?: boolean;
   wheelZoomFactor?: number;
+  wheelMode?: "zoom" | "scroll";
+  fitTraces?: boolean;
+  compactLegend?: boolean;
+  onSetTraceHeights: (heights: { traceId: string; height: number }[]) => void;
+  onToggleTraceCollapsed: (traceId: string) => void;
+  onSetChannelsHidden: (traceId: string, keys: string[], hidden: boolean) => void;
   avgOnSelection: boolean;
   persistedSelection?: [number, number] | null;
   onPersistSelection?: (sel: [number, number] | null) => void;
@@ -113,6 +120,12 @@ export function TracePanel({
   unitOverrides,
   wheelZoomEnabled,
   wheelZoomFactor,
+  wheelMode,
+  fitTraces = true,
+  compactLegend = false,
+  onSetTraceHeights,
+  onToggleTraceCollapsed,
+  onSetChannelsHidden,
   avgOnSelection,
   persistedSelection,
   onPersistSelection,
@@ -134,6 +147,7 @@ export function TracePanel({
   const [dragPreview, setDragPreview] = useState<[number, number] | null>(null);
   const [cursorTime, setCursorTime] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(800);
   const [dragOverBlank, setDragOverBlank] = useState(false);
   const dragCounterRef = useRef(0);
@@ -213,6 +227,60 @@ export function TracePanel({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // --- Splitter drag: move the boundary between a trace and the one below ---
+  // Only the grabbed pair changes; their combined weight is preserved exactly,
+  // so every other trace keeps its rendered height to the pixel.
+  const tracesRef = useRef(traces);
+  tracesRef.current = traces;
+  const splitterRef = useRef<{
+    aId: string; bId: string; hA: number; hB: number; wA: number; wB: number;
+  } | null>(null);
+
+  const handleSplitterDrag = useCallback(
+    (traceId: string, deltaPx: number, commit: boolean) => {
+      let s = splitterRef.current;
+      if (!s) {
+        // Capture the starting geometry once. deltaPx stays cumulative from
+        // mousedown, so later moves stay correct as the DOM reflows.
+        const expanded = tracesRef.current.filter((t) => !t.collapsed);
+        const i = expanded.findIndex((t) => t.id === traceId);
+        if (i < 0 || i + 1 >= expanded.length) return;
+        const a = expanded[i];
+        const b = expanded[i + 1];
+        const root = scrollRef.current;
+        const elA = root?.querySelector<HTMLElement>(`[data-trace-id="${a.id}"]`);
+        const elB = root?.querySelector<HTMLElement>(`[data-trace-id="${b.id}"]`);
+        if (!elA || !elB) return;
+        s = splitterRef.current = {
+          aId: a.id,
+          bId: b.id,
+          hA: elA.getBoundingClientRect().height,
+          hB: elB.getBoundingClientRect().height,
+          wA: a.height,
+          wB: b.height,
+        };
+      }
+
+      const totalH = s.hA + s.hB;
+      const totalW = s.wA + s.wB;
+      const minH = MIN_TRACE_HEIGHT + TRACE_CHROME_PX;
+      if (totalH < minH * 2 || totalW <= 0) {
+        if (commit) splitterRef.current = null;
+        return; // pair too small to split further
+      }
+
+      const newHA = Math.max(minH, Math.min(totalH - minH, s.hA + deltaPx));
+      const wA = (newHA / totalH) * totalW;
+      const heights = [
+        { traceId: s.aId, height: Math.round(wA) },
+        { traceId: s.bId, height: Math.round(totalW - wA) },
+      ];
+      if (commit) splitterRef.current = null;
+      onSetTraceHeights(heights);
+    },
+    [onSetTraceHeights],
+  );
 
   const handleZoom = useCallback((min: number, max: number) => {
     setZoomRange([min, max]);
@@ -393,6 +461,13 @@ export function TracePanel({
   }, [tabRename, onRenamePage]);
 
   // Max y-axis count across all traces — used to pad narrower charts so plot areas align
+  // The bottom-most expanded trace has no neighbour below to trade height with,
+  // so it gets no splitter handle.
+  const lastExpandedId = useMemo(() => {
+    const expanded = traces.filter((t) => !t.collapsed);
+    return expanded.length > 0 ? expanded[expanded.length - 1].id : null;
+  }, [traces]);
+
   const maxYAxes = showAxes
     ? Math.max(1, ...traces.map(t => new Set(t.channels.map(c => c.channelName)).size))
     : undefined;
@@ -478,8 +553,12 @@ export function TracePanel({
         </Tip>
       </div>
 
-      {/* Scrollable trace area */}
+      {/* Scrollable trace area. In fit mode the traces are flex items weighted
+          by trace.height, so they divide this box up and it never overflows —
+          until their min-heights no longer fit, at which point overflow-y-auto
+          takes over on its own. */}
       <div
+        ref={scrollRef}
         className="flex-1 overflow-y-auto overflow-x-hidden p-3 flex flex-col"
         onMouseLeave={() => setCursorTime(null)}
       >
@@ -525,6 +604,7 @@ export function TracePanel({
                 onResetZoom={handleResetZoom}
                 wheelZoomEnabled={wheelZoomEnabled}
                 wheelZoomFactor={wheelZoomFactor}
+                wheelMode={wheelMode}
                 avgOnSelection={avgOnSelection}
                 onRemoveTrace={() => onRemoveTrace(trace.id)}
                 onRemoveChannel={(logFileId, channelName) =>
@@ -535,6 +615,12 @@ export function TracePanel({
                   onRemoveChannel(sourceTraceId, logFileId, channelName)
                 }
                 onResizeHeight={(h) => onResizeTrace(trace.id, h)}
+                fitTraces={fitTraces}
+                compactLegend={compactLegend}
+                isLastExpanded={trace.id === lastExpandedId}
+                onSplitterDrag={(delta, commit) => handleSplitterDrag(trace.id, delta, commit)}
+                onToggleCollapsed={() => onToggleTraceCollapsed(trace.id)}
+                onSetChannelsHidden={(keys, hidden) => onSetChannelsHidden(trace.id, keys, hidden)}
                 showAxes={showAxes}
                 showAxisLabels={showAxisLabels}
                 onSetChannelColor={(logFileId, channelName, color) =>
@@ -614,9 +700,17 @@ export function TracePanel({
                 onConfigure={() => setHeatmapDialog({ mode: "edit", heatmap: hm })}
               />
             ))}
-            {/* Blank space drop zone */}
+            {/* Blank space drop zone. In fit mode it must not compete with the
+                traces for space, so it shrinks to a thin strip unless something
+                is actually being dragged over it. */}
             <div
-              className="flex-1 min-h-[100px]"
+              className={
+                fitTraces && !dragOverBlank
+                  ? "shrink-0 h-6"
+                  : fitTraces
+                    ? "shrink-0"
+                    : "flex-1 min-h-[100px]"
+              }
               onDragEnter={handleBlankDragEnter}
               onDragOver={handleBlankDragOver}
               onDragLeave={handleBlankDragLeave}

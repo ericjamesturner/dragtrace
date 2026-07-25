@@ -184,7 +184,7 @@ export function ScatterContainer({
 
   return (
     <div
-      className="mb-2 rounded relative"
+      className="mb-2 rounded relative shrink-0"
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
