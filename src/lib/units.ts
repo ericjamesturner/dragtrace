@@ -11,6 +11,13 @@ export interface UnitOption {
 
 const identity = (v: number) => v;
 
+// cc/min -> lb/hr: v (cc/min) * density (g/cc) * 60 (min/hr) / 453.592 (g/lb)
+const ccMinToLbHr = (density: number) => (v: number) => v * density * 60 / 453.592;
+const lbHrToCcMin = (density: number) => (v: number) => v * 453.592 / 60 / density;
+const GAS_DENSITY = 0.743;
+const E85_DENSITY = 0.781;
+const METH_DENSITY = 0.7918;
+
 export const UNIT_OPTIONS: Record<string, UnitOption[]> = {
   lambda: [
     { key: 'lambda', label: 'Lambda', unit: 'λ', convert: identity, invert: identity },
@@ -42,6 +49,12 @@ export const UNIT_OPTIONS: Record<string, UnitOption[]> = {
     { key: 'g', label: 'g', unit: 'g', convert: (v) => v / 9.80665, invert: (v) => v * 9.80665 },
     { key: 'ms2', label: 'm/s²', unit: 'm/s²', convert: identity, invert: identity },
   ],
+  'cc/min': [
+    { key: 'ccmin', label: 'cc/min', unit: 'cc/min', convert: identity, invert: identity },
+    { key: 'lbhr_gas', label: 'lb/hr Gas', unit: 'lb/hr Gas', convert: ccMinToLbHr(GAS_DENSITY), invert: lbHrToCcMin(GAS_DENSITY) },
+    { key: 'lbhr_e85', label: 'lb/hr E85', unit: 'lb/hr E85', convert: ccMinToLbHr(E85_DENSITY), invert: lbHrToCcMin(E85_DENSITY) },
+    { key: 'lbhr_meth', label: 'lb/hr Meth', unit: 'lb/hr Meth', convert: ccMinToLbHr(METH_DENSITY), invert: lbHrToCcMin(METH_DENSITY) },
+  ],
 };
 
 const IMPERIAL_DEFAULTS: Record<string, string> = {
@@ -51,6 +64,7 @@ const IMPERIAL_DEFAULTS: Record<string, string> = {
   'km/h': 'mph',
   km: 'mi',
   'm/s^2': 'g',
+  'cc/min': 'ccmin',
 };
 
 const METRIC_DEFAULTS: Record<string, string> = {
@@ -60,6 +74,7 @@ const METRIC_DEFAULTS: Record<string, string> = {
   'km/h': 'kmh',
   km: 'km',
   'm/s^2': 'ms2',
+  'cc/min': 'ccmin',
 };
 
 export type UnitOverrides = Record<string, string>;
