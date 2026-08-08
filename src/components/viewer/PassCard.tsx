@@ -62,7 +62,7 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
         isOnlyLoaded ? "cursor-default" : "cursor-pointer"
       } ${
         active ? "border-primary/60 bg-muted/40" : "border-border hover:bg-muted/30"
-      } ${outcome === "aborted" ? "opacity-60" : ""} ${isPending ? "animate-pulse" : ""}`}
+      } ${outcome === "aborted" ? "opacity-60" : ""}`}
     >
       <div className="flex items-baseline gap-2">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
@@ -109,30 +109,29 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
         }}
         disabled={isOnlyLoaded}
         title={
-          isPending
-            ? "Loading this pass…"
-            : isOnlyLoaded
-              ? "The only pass on the chart — add another before removing this one"
-              : loaded
-                ? "Remove from chart"
-                : "Add to chart"
+          isOnlyLoaded
+            ? "The only pass on the chart — add another before removing this one"
+            : loaded
+              ? "Remove from chart"
+              : "Add to chart"
         }
         className={`absolute right-2 top-2 rounded p-1 transition-opacity ${
-          isPending
-            ? "text-muted-foreground opacity-100"
-            : loaded
-              ? "text-primary opacity-100"
-              : "text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
+          loaded
+            ? "text-primary opacity-100"
+            : "text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
         }`}
       >
-        {isPending ? (
-          <LoaderCircleIcon className="size-3.5 animate-spin" />
-        ) : loaded ? (
-          <CheckIcon className="size-3.5" />
-        ) : (
-          <PlusIcon className="size-3.5" />
-        )}
+        {loaded ? <CheckIcon className="size-3.5" /> : <PlusIcon className="size-3.5" />}
       </button>
+
+      {isPending && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-lg bg-background/85 backdrop-blur-[1px] ring-2 ring-inset ring-sky-500/60">
+          <LoaderCircleIcon className="size-9 animate-spin text-sky-400" />
+          <span className="text-sm font-semibold uppercase tracking-wider text-sky-400">
+            Loading
+          </span>
+        </div>
+      )}
     </div>
   );
 }
