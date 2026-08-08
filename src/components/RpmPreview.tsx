@@ -123,7 +123,7 @@ export function RpmPreview({ file, onRaceTiming, alignWindow }: RpmPreviewProps)
   }, [file.preview]);
 
   // Only fetch the raw log when there is no stored preview to reuse.
-  const url = useQuery(api.files.getUrl, stored ? "skip" : { storageId: file.storageId });
+  const url = useQuery(api.files.getUrl, stored ? "skip" : { fileId: file._id });
   const savePreview = useMutation(api.files.savePreview);
   const chartRef = useRef<HTMLDivElement>(null);
   const uplotRef = useRef<uPlot | null>(null);

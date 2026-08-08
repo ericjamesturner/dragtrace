@@ -7,10 +7,12 @@ import { useLoadedLogs } from "@/hooks/useLoadedLogs";
 import { useTimeslips } from "@/hooks/useTimeslips";
 import { useViewerSync } from "@/hooks/useViewerSync";
 import { useScatterSuggestions } from "@/hooks/useScatterSuggestions";
+import { useUnitPreferences } from "@/hooks/useUnitPreferences";
+import { buildDefaultConfig } from "@/lib/default-layout";
+import { cycleUnit as cycleUnitFn } from "@/lib/units";
 import { computeAlignment } from "@/lib/alignment";
 import { buildTimeslipZones } from "@/lib/timeslip-zones";
 import {
-  defaultViewerConfig,
   migrateConfig,
   remapConfigToFiles,
   getEffectiveTraces,
@@ -182,8 +184,25 @@ function LogViewerReady({
         // invalid config, fall through
       }
     }
-    return loadSavedConfig(eventId) ?? defaultViewerConfig;
+    return loadSavedConfig(eventId) ?? buildDefaultConfig(logs);
   });
+
+  // Display units come from the user's preferences with this vehicle's
+  // overrides on top, so a choice made here follows them to every other log.
+  const units = useUnitPreferences(vehicleId);
+  const seedPrefs = useMutation(api.userPreferences.seedFromWorkspace);
+  const seededRef = useRef(false);
+  useEffect(() => {
+    // One-time lift of unit choices that predate preferences existing.
+    if (seededRef.current || units.loading) return;
+    seededRef.current = true;
+    if (config.unitSystem || config.unitOverrides) {
+      void seedPrefs({
+        unitSystem: config.unitSystem,
+        unitOverrides: config.unitOverrides ? JSON.stringify(config.unitOverrides) : undefined,
+      });
+    }
+  }, [units.loading, config.unitSystem, config.unitOverrides, seedPrefs]);
 
   // Compute effective traces
   const effectiveTraces = useMemo(() => getEffectiveTraces(config), [config]);
@@ -194,8 +213,8 @@ function LogViewerReady({
   useScatterSuggestions(
     logs,
     config,
-    config.unitSystem ?? "imperial",
-    config.unitOverrides,
+    units.unitSystem,
+    units.resolved,
     (suggestions, key) => dispatch({ type: "setScatterSuggestions", suggestions, key }),
   );
 
@@ -467,7 +486,7 @@ function LogViewerReady({
         alignByRaceTime={config.alignByRaceTime}
         showAxes={!!config.showAxes}
         showAxisLabels={!!config.showAxisLabels}
-        unitSystem={config.unitSystem ?? "imperial"}
+        unitSystem={units.unitSystem}
         wheelZoomEnabled={config.wheelZoomEnabled ?? true}
         wheelZoomFactor={config.wheelZoomFactor ?? 1.25}
         wheelMode={config.wheelMode ?? "zoom"}
@@ -478,7 +497,7 @@ function LogViewerReady({
         onToggleAlignment={() => dispatch({ type: "toggleAlignment" })}
         onToggleAxes={() => dispatch({ type: "toggleAxes" })}
         onToggleAxisLabels={() => dispatch({ type: "toggleAxisLabels" })}
-        onToggleUnitSystem={() => dispatch({ type: "setUnitSystem", system: (config.unitSystem ?? "imperial") === "imperial" ? "metric" : "imperial" })}
+        onToggleUnitSystem={() => units.setUserSystem(units.unitSystem === "imperial" ? "metric" : "imperial")}
         onToggleWheelZoom={() => dispatch({ type: "setWheelZoomEnabled", enabled: !(config.wheelZoomEnabled ?? true) })}
         onSetWheelZoomFactor={(f) => dispatch({ type: "setWheelZoomFactor", factor: f })}
         onSetWheelMode={(m) => dispatch({ type: "setWheelMode", mode: m })}
@@ -512,6 +531,7 @@ function LogViewerReady({
           <ViewerSidebar
             logs={logs}
             vehicleId={vehicleId}
+            eventId={eventId}
             loadedFileIds={fileIds}
             traces={effectiveTraces}
             hiddenLogIds={config.hiddenLogIds ?? []}
@@ -530,9 +550,13 @@ function LogViewerReady({
               dispatch({ type: "toggleMirrorLog", logFileId })
             }
             activeTraceId={activeTraceId}
-            unitSystem={config.unitSystem ?? "imperial"}
-            unitOverrides={config.unitOverrides}
-            onCycleUnit={(metricUnit) => dispatch({ type: "cycleUnit", metricUnit })}
+            unitSystem={units.unitSystem}
+            unitOverrides={units.resolved}
+            onCycleUnit={(quantitySlug) =>
+              units.setVehicleOverrides(
+                cycleUnitFn(quantitySlug, units.unitSystem, units.resolved),
+              )
+            }
           />
         </div>
 
@@ -606,8 +630,8 @@ function LogViewerReady({
           onToggleZone={(traceId, zoneId) =>
             dispatch({ type: "toggleZone", traceId, zoneId })
           }
-          unitSystem={config.unitSystem ?? "imperial"}
-          unitOverrides={config.unitOverrides}
+          unitSystem={units.unitSystem}
+          unitOverrides={units.resolved}
           wheelZoomEnabled={config.wheelZoomEnabled ?? true}
           wheelZoomFactor={config.wheelZoomFactor ?? 1.25}
           wheelMode={config.wheelMode ?? "zoom"}

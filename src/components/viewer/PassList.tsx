@@ -1,0 +1,161 @@
+import { useMemo, useState } from "react";
+import { useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import type { Doc, Id } from "../../../convex/_generated/dataModel";
+import { useTimeslips } from "@/hooks/useTimeslips";
+import { PassCard } from "./PassCard";
+import { ChevronRightIcon } from "lucide-react";
+
+/**
+ * Every run for this car, grouped the way a season actually happened — by
+ * weekend. The event you're working in starts open and the rest stay folded, so
+ * the list is short by default but a comparison against last month is two
+ * clicks away rather than a dialog.
+ */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Parse a YYYY-MM-DD date without letting the timezone shift it a day. */
+function parseDay(s: string): { y: number; m: number; d: number } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  return m ? { y: +m[1], m: +m[2] - 1, d: +m[3] } : null;
+}
+
+/**
+ * Compact date for an event header: "Mar 11–14", or across months
+ * "Mar 30 – Apr 2". The year only appears when it isn't the current one, which
+ * is exactly when you need it — scrolling back through past seasons.
+ */
+function formatEventDate(date: string, endDate?: string): string {
+  const a = parseDay(date);
+  if (!a) return "";
+  const b = endDate ? parseDay(endDate) : null;
+  const year = new Date().getFullYear();
+  const suffix = a.y !== year ? ` '${String(a.y).slice(2)}` : "";
+
+  if (!b || (b.y === a.y && b.m === a.m && b.d === a.d)) {
+    return `${MONTHS[a.m]} ${a.d}${suffix}`;
+  }
+  if (b.y === a.y && b.m === a.m) {
+    return `${MONTHS[a.m]} ${a.d}–${b.d}${suffix}`;
+  }
+  return `${MONTHS[a.m]} ${a.d} – ${MONTHS[b.m]} ${b.d}${suffix}`;
+}
+
+export function PassList({
+  vehicleId,
+  eventId,
+  loadedFileIds,
+  onAddFile,
+  onRemoveFile,
+}: {
+  vehicleId: Id<"vehicles">;
+  eventId: Id<"events">;
+  loadedFileIds: Id<"files">[];
+  onAddFile: (fileId: Id<"files">) => void;
+  onRemoveFile: (fileId: Id<"files">) => void;
+}) {
+  const [search, setSearch] = useState("");
+  // Only what the user has explicitly toggled; everything else is derived, so
+  // groups don't need resetting when the data changes underneath them.
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
+
+  const files = useQuery(api.files.listByVehicle, { vehicleId });
+  const events = useQuery(api.events.listByVehicle, { vehicleId });
+
+  const query = search.trim().toLowerCase();
+
+  const groups = useMemo(() => {
+    if (!files || !events) return [];
+    const byEvent = new Map<string, Doc<"files">[]>();
+    for (const f of files) {
+      if (query && !f.fileName.toLowerCase().includes(query)) continue;
+      const list = byEvent.get(f.eventId) ?? [];
+      list.push(f);
+      byEvent.set(f.eventId, list);
+    }
+    // events arrives sorted by date descending, which is the order we want.
+    return events
+      .filter((e) => byEvent.has(e._id))
+      .map((e) => ({ event: e, files: byEvent.get(e._id)! }));
+  }, [files, events, query]);
+
+  const fileIds = useMemo(() => groups.flatMap((g) => g.files.map((f) => f._id)), [groups]);
+  const timeslips = useTimeslips(fileIds);
+  const loaded = useMemo(() => new Set(loadedFileIds), [loadedFileIds]);
+
+  // Open the event being viewed; failing that the most recent one. A search
+  // opens everything it matched, since a hit inside a folded group is invisible.
+  const defaultOpenId = groups.some((g) => g.event._id === eventId)
+    ? eventId
+    : groups[0]?.event._id;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="px-2 pb-2">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search passes…"
+          className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+        />
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        {groups.map(({ event, files: eventFiles }) => {
+          const open = toggled[event._id] ?? (query ? true : event._id === defaultOpenId);
+          return (
+            <div key={event._id} className="mb-1">
+              <button
+                onClick={() =>
+                  setToggled((prev) => ({ ...prev, [event._id]: !open }))
+                }
+                className="flex w-full items-center gap-1.5 rounded px-1 py-1.5 text-left hover:bg-muted/50"
+              >
+                <ChevronRightIcon
+                  className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${
+                    open ? "rotate-90" : ""
+                  }`}
+                />
+                <span className="min-w-0 truncate text-xs font-semibold uppercase tracking-wider">
+                  {event.name}
+                </span>
+                <span className="shrink-0 text-[11px] text-muted-foreground">
+                  {formatEventDate(event.date, event.endDate)}
+                </span>
+                <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                  {eventFiles.length}
+                </span>
+              </button>
+
+              {open && (
+                <div className="mt-1 space-y-2">
+                  {eventFiles.map((file) => {
+                    const isLoaded = loaded.has(file._id);
+                    return (
+                      <PassCard
+                        key={file._id}
+                        file={file}
+                        timeslip={timeslips.get(file._id)?.[0]}
+                        loaded={isLoaded}
+                        active={isLoaded}
+                        onToggle={() =>
+                          isLoaded ? onRemoveFile(file._id) : onAddFile(file._id)
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {groups.length === 0 && (
+          <p className="px-1 py-6 text-center text-sm text-muted-foreground">
+            {query ? `No passes match “${search}”.` : "No passes yet."}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -1,15 +1,17 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
-import type { ChannelDef, LogSession } from "@/lib/log-types";
+import type { ChannelDef, ChannelStatus, LogSession } from "@/lib/log-types";
 import type { LoadedLog, TraceConfig, ChannelOnTrace } from "@/lib/viewer-types";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { PlusIcon, XIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { AddLogModal } from "./AddLogModal";
-import { getDisplayUnit, UNIT_OPTIONS, type UnitSystem, type UnitOverrides } from "@/lib/units";
+import { PassList } from "./PassList";
+import { getDisplayUnit, getUnitOptions, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { GROUP_COLORS, type GroupNode, type GroupChannel } from "@/lib/channel-groups";
 import { useChannelGroups } from "@/hooks/useChannelGroups";
+import { DEFAULT_ECU_TYPE } from "@/lib/ecu/registry";
 
 function countGroupChannels(node: GroupNode): number {
   return node.channels.length + node.children.reduce((sum, c) => sum + c.channels.length, 0);
@@ -71,6 +73,7 @@ function detectEmptyChannels(defs: ChannelDef[], session: LogSession): Set<strin
 interface Props {
   logs: LoadedLog[];
   vehicleId: Id<"vehicles">;
+  eventId: Id<"events">;
   loadedFileIds: Id<"files">[];
   traces: TraceConfig[];
   hiddenLogIds: string[];
@@ -85,12 +88,13 @@ interface Props {
   activeTraceId: string | null;
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
-  onCycleUnit?: (metricUnit: string) => void;
+  onCycleUnit?: (quantitySlug: string) => void;
 }
 
 export function ViewerSidebar({
   logs,
   vehicleId,
+  eventId,
   loadedFileIds,
   hiddenLogIds,
   mirroredLogIds,
@@ -111,8 +115,28 @@ export function ViewerSidebar({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [hideEmpty, setHideEmpty] = useState(true);
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(() => new Set(logs.map((l) => l.fileId)));
+  const [tab, setTab] = useState<"channels" | "passes">("channels");
   const [isDragTarget, setIsDragTarget] = useState(false);
   const sidebarDragCounter = useRef(0);
+
+  // Per-vehicle channel renaming. The shared taxonomy is curated reference
+  // data, so a user's own naming lives against their vehicle instead.
+  const setOverride = useMutation(api.vehicleChannelOverrides.setOverride);
+  const removeOverride = useMutation(api.vehicleChannelOverrides.removeOverride);
+  const [renaming, setRenaming] = useState<string | null>(null);
+
+  const handleRename = useCallback(
+    (channelName: string, name: string) => {
+      const trimmed = name.trim();
+      setRenaming(null);
+      if (trimmed) {
+        void setOverride({ vehicleId, channelName, displayName: trimmed });
+      } else {
+        void removeOverride({ vehicleId, channelName });
+      }
+    },
+    [setOverride, removeOverride, vehicleId],
+  );
 
   // Combine all channel defs from all logs for the hook
   const allDefs = useMemo(() => {
@@ -130,7 +154,7 @@ export function ViewerSidebar({
   }, [logs]);
 
   // DB-driven channel grouping (falls back to hardcoded while loading)
-  const { tree: masterTree } = useChannelGroups(allDefs, "haltech", vehicleId);
+  const { tree: masterTree } = useChannelGroups(allDefs, DEFAULT_ECU_TYPE, vehicleId);
 
   const emptyChannelsByLog = useMemo(() => {
     const map = new Map<Id<"files">, Set<string>>();
@@ -221,6 +245,32 @@ export function ViewerSidebar({
       onDragLeave={handleSidebarDragLeave}
       onDrop={handleSidebarDrop}
     >
+      <div className="flex border-b">
+        {(["channels", "passes"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors ${
+              tab === t
+                ? "border-b-2 border-primary text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t === "channels" ? "Channels" : "Passes"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "passes" ? (
+        <PassList
+          vehicleId={vehicleId}
+          eventId={eventId}
+          loadedFileIds={loadedFileIds}
+          onAddFile={onAddFile}
+          onRemoveFile={onRemoveFile}
+        />
+      ) : (
+      <>
       <div className="p-3 border-b">
         <input
           type="text"
@@ -243,6 +293,9 @@ export function ViewerSidebar({
         {logs.map((log, logIndex) => {
           const isLogOpen = expandedLogs.has(log.fileId);
           const emptySet = emptyChannelsByLog.get(log.fileId) ?? new Set<string>();
+          const statusMap =
+            log.parsed.sessions[log.activeSessionIndex]?.channelStatus ??
+            new Map<string, ChannelStatus>();
 
           const logDefNames = new Set(log.parsed.channelDefs.map((d) => d.name));
           const searchLower = search.toLowerCase();
@@ -312,6 +365,10 @@ export function ViewerSidebar({
                       isSearching={isSearching}
                       expanded={expanded}
                       emptySet={emptySet}
+                      statusMap={statusMap}
+                      renaming={renaming}
+                      onStartRename={setRenaming}
+                      onCommitRename={handleRename}
                       logFileId={log.fileId}
                       unitSystem={unitSystem}
                       unitOverrides={unitOverrides}
@@ -340,6 +397,9 @@ export function ViewerSidebar({
           Add Log
         </button>
       </div>
+
+      </>
+      )}
 
       <AddLogModal
         open={addLogOpen}
@@ -442,6 +502,10 @@ function SidebarGroupNode({
   isSearching,
   expanded,
   emptySet,
+  statusMap,
+  renaming,
+  onStartRename,
+  onCommitRename,
   logFileId,
   unitSystem,
   unitOverrides,
@@ -458,6 +522,10 @@ function SidebarGroupNode({
   isSearching: boolean;
   expanded: Set<string>;
   emptySet: Set<string>;
+  statusMap: Map<string, ChannelStatus>;
+  renaming: string | null;
+  onStartRename: (channelName: string | null) => void;
+  onCommitRename: (channelName: string, name: string) => void;
   logFileId: Id<"files">;
   unitSystem?: UnitSystem;
   unitOverrides?: UnitOverrides;
@@ -466,7 +534,7 @@ function SidebarGroupNode({
   onDragStart: (e: React.DragEvent, logFileId: Id<"files">, channelName: string) => void;
   onAddChannel: (traceId: string, channel: ChannelOnTrace) => void;
   onAddTraceWithChannel: (channel: ChannelOnTrace) => void;
-  onCycleUnit?: (metricUnit: string) => void;
+  onCycleUnit?: (quantitySlug: string) => void;
 }) {
   const groupKey = `${keyPrefix}${node.tag}`;
   const isOpen = isSearching || expanded.has(groupKey);
@@ -494,6 +562,10 @@ function SidebarGroupNode({
               ch={ch}
               logFileId={logFileId}
               isEmpty={emptySet.has(ch.def.name)}
+              status={statusMap.get(ch.def.name)}
+              isRenaming={renaming === ch.def.name}
+              onStartRename={() => onStartRename(ch.def.name)}
+              onCommitRename={(name) => onCommitRename(ch.def.name, name)}
               unitSystem={isRoot ? unitSystem : undefined}
               unitOverrides={isRoot ? unitOverrides : undefined}
               onDragStart={onDragStart}
@@ -515,6 +587,10 @@ function SidebarGroupNode({
               isSearching={isSearching}
               expanded={expanded}
               emptySet={emptySet}
+              statusMap={statusMap}
+              renaming={renaming}
+              onStartRename={onStartRename}
+              onCommitRename={onCommitRename}
               logFileId={logFileId}
               activeTraceId={activeTraceId}
               onToggleGroup={onToggleGroup}
@@ -530,6 +606,17 @@ function SidebarGroupNode({
   );
 }
 
+/**
+ * Explains why a channel is blank. A channel that reported a fault for its
+ * whole run is a dead sensor, not a missing feature — worth saying plainly.
+ */
+function statusNote(status: ChannelStatus): string {
+  const reason = status.dominantLabel ?? `status ${status.dominantCode}`;
+  if (status.samples >= status.rowCount) return `no reading all run (${reason})`;
+  const pct = Math.round((status.samples / status.rowCount) * 100);
+  return `${reason} for ${pct || "<1"}% of the run`;
+}
+
 function ChannelRow({
   ch,
   logFileId,
@@ -539,6 +626,10 @@ function ChannelRow({
   onDragStart,
   onClick,
   onCycleUnit,
+  status,
+  isRenaming,
+  onStartRename,
+  onCommitRename,
 }: {
   ch: GroupChannel;
   logFileId: Id<"files">;
@@ -547,19 +638,55 @@ function ChannelRow({
   unitOverrides?: UnitOverrides;
   onDragStart: (e: React.DragEvent, logFileId: Id<"files">, channelName: string) => void;
   onClick: () => void;
-  onCycleUnit?: (metricUnit: string) => void;
+  onCycleUnit?: (quantitySlug: string) => void;
+  status?: ChannelStatus;
+  isRenaming: boolean;
+  onStartRename: () => void;
+  onCommitRename: (name: string) => void;
 }) {
-  const metricUnit = ch.def.metricUnit;
-  const displayUnit = metricUnit && unitSystem ? getDisplayUnit(metricUnit, unitSystem, unitOverrides) : "";
-  const canCycle = !!(metricUnit && onCycleUnit && (UNIT_OPTIONS[metricUnit]?.length ?? 0) > 1);
-  const baseTip = displayUnit ? `${ch.def.name} (${displayUnit})` : ch.def.name;
-  const tipText = ch.def.computed ? `${baseTip} — math channel` : baseTip;
+  const quantitySlug = ch.def.quantitySlug;
+  const displayUnit = quantitySlug && unitSystem ? getDisplayUnit(quantitySlug, unitSystem, unitOverrides) : "";
+  const canCycle = !!(quantitySlug && onCycleUnit && getUnitOptions(quantitySlug).length > 1);
+  // When renamed, keep the ECU's own name visible so the channel stays
+  // identifiable against the tuning software.
+  const renamedFrom = ch.displayName !== ch.def.name ? ch.def.name : null;
+  const baseTip = displayUnit ? `${ch.displayName} (${displayUnit})` : ch.displayName;
+  const tipText = ch.def.computed
+    ? `${baseTip} — math channel`
+    : [baseTip, renamedFrom, ch.def.description, status && statusNote(status)]
+        .filter(Boolean)
+        .join(" — ");
+  if (isRenaming) {
+    return (
+      <div className="flex items-center gap-2 px-2 py-1 pl-6">
+        <input
+          autoFocus
+          defaultValue={ch.displayName}
+          onBlur={(e) => onCommitRename(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onCommitRename(e.currentTarget.value);
+            if (e.key === "Escape") onCommitRename(ch.displayName);
+          }}
+          className="flex-1 min-w-0 bg-background border rounded px-1 py-0.5 text-sm"
+        />
+      </div>
+    );
+  }
+
   return (
     <Tip content={tipText} side="right">
       <div
         draggable
         onDragStart={(e) => onDragStart(e, logFileId, ch.def.name)}
         onClick={onClick}
+        onContextMenu={
+          ch.def.computed
+            ? undefined
+            : (e) => {
+                e.preventDefault();
+                onStartRename();
+              }
+        }
         className={`flex items-center gap-2 px-2 py-1 pl-6 rounded text-sm cursor-pointer select-none ${
           isEmpty
             ? "opacity-35 text-muted-foreground"
@@ -569,13 +696,13 @@ function ChannelRow({
         {ch.def.computed && (
           <span className="shrink-0 font-serif italic text-xs text-lime-400">ƒ</span>
         )}
-        <span className="flex-1 truncate">{ch.def.name}</span>
+        <span className="flex-1 truncate">{ch.displayName}</span>
         {displayUnit && (
           canCycle ? (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onCycleUnit!(metricUnit!);
+                onCycleUnit!(quantitySlug!);
               }}
               title="Click to change units"
               className="text-xs text-muted-foreground hover:text-foreground border border-transparent hover:border-border rounded px-1 -mr-1 cursor-pointer"

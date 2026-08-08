@@ -219,7 +219,7 @@ function FileRow({
   alignWindow?: { preRace: number; postRace: number };
   onOpenViewer: () => void;
 }) {
-  const url = useQuery(api.files.getUrl, { storageId: file.storageId });
+  const url = useQuery(api.files.getUrl, { fileId: file._id });
   const timeslips = useQuery(api.timeslips.listByFile, { fileId: file._id });
   const updateNotes = useMutation(api.files.updateNotes);
   const renameFile = useMutation(api.files.rename);
