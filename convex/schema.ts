@@ -5,11 +5,23 @@ import { v } from "convex/values";
 export default defineSchema({
   ...authTables,
 
+  // How this user wants values displayed, everywhere, unless a vehicle says
+  // otherwise. `unitSystem` is the baseline preset rather than a frozen set of
+  // choices, so a quantity we haven't seen before still picks a sensible unit.
+  // `unitOverrides` is JSON: { [quantitySlug]: alternateKey }.
+  userPreferences: defineTable({
+    userId: v.id("users"),
+    unitSystem: v.optional(v.string()),
+    unitOverrides: v.optional(v.string()),
+  }).index("by_user", ["userId"]),
+
   vehicles: defineTable({
     userId: v.id("users"),
     name: v.string(),
     description: v.optional(v.string()),
     createdAt: v.number(),
+    /** Sparse per-quantity overrides layered over the user's preferences. */
+    unitOverrides: v.optional(v.string()),
   }).index("by_user", ["userId"]),
 
   events: defineTable({
@@ -94,6 +106,17 @@ export default defineSchema({
     adminUserId: v.id("users"),
     targetUserId: v.id("users"),
   }).index("by_admin", ["adminUserId"]),
+
+  // Ownership record for freshly-uploaded scratch files (timeslip photos) that
+  // have no `files` row yet. A bare storage id carries no owner, so anything
+  // that reads or deletes one by id must check the claim first.
+  tempUploads: defineTable({
+    userId: v.id("users"),
+    storageId: v.id("_storage"),
+    createdAt: v.number(),
+  })
+    .index("by_storage", ["storageId"])
+    .index("by_created", ["createdAt"]),
 
   timeslips: defineTable({
     userId: v.id("users"),

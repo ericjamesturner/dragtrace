@@ -1,10 +1,12 @@
 import { query, mutation } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { requireAdmin } from "./authz";
 import { v } from "convex/values";
 
 export const listByEcuType = query({
   args: { ecuType: v.string() },
   handler: async (ctx, args) => {
+    if (!(await getAuthUserId(ctx))) return [];
     return await ctx.db
       .query("channelCategories")
       .withIndex("by_ecu_type", (q) => q.eq("ecuType", args.ecuType))
@@ -21,8 +23,7 @@ export const create = mutation({
     sortOrder: v.number(),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    await requireAdmin(ctx);
     return await ctx.db.insert("channelCategories", {
       name: args.name,
       parentId: args.parentId,
@@ -43,8 +44,7 @@ export const update = mutation({
     parentId: v.optional(v.id("channelCategories")),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    await requireAdmin(ctx);
     const { id, ...patch } = args;
     // Remove undefined fields
     const cleaned: Record<string, unknown> = {};
@@ -58,8 +58,7 @@ export const update = mutation({
 export const remove = mutation({
   args: { id: v.id("channelCategories") },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    await requireAdmin(ctx);
 
     const category = await ctx.db.get(args.id);
     if (!category) throw new Error("Category not found");
@@ -110,8 +109,7 @@ export const reorder = mutation({
     })),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    await requireAdmin(ctx);
     for (const update of args.updates) {
       await ctx.db.patch(update.id, { sortOrder: update.sortOrder });
     }

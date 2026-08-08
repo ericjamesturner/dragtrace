@@ -13,6 +13,21 @@ export async function isAdminUser(
 }
 
 /**
+ * Gate for the shared per-ECU channel taxonomy (`channelCategories`,
+ * `channelMappings`). Those tables are curated reference data with no tenancy
+ * column — one row is visible to every customer — so a plain "is signed in"
+ * check would let any account rewrite the channel tree for everyone. User-level
+ * customization belongs in `vehicleChannelOverrides`, which is scoped per
+ * vehicle.
+ */
+export async function requireAdmin(ctx: QueryCtx): Promise<Id<"users">> {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) throw new Error("Not authenticated");
+  if (!(await isAdminUser(ctx, userId))) throw new Error("Not authorized");
+  return userId;
+}
+
+/**
  * The user whose data this request operates on: the signed-in user, or the
  * impersonated customer when the signed-in user is an admin with an active
  * impersonation.

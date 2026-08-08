@@ -63,6 +63,8 @@ export const removeOverride = mutation({
   handler: async (ctx, args) => {
     const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
+    const vehicle = await ctx.db.get(args.vehicleId);
+    if (!vehicle || vehicle.userId !== userId) throw new Error("Not found");
 
     const existing = await ctx.db
       .query("vehicleChannelOverrides")

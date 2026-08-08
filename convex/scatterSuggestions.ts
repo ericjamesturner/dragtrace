@@ -1,4 +1,5 @@
 import { action } from "./_generated/server";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 const SYSTEM_PROMPT = `You are an expert automotive tuner analyzing ECU datalog channels. Given the available channels and their units, suggest the most useful XY scatter plot combinations for diagnosing tuning issues, analyzing performance, and understanding engine behavior. Focus on combinations that reveal meaningful correlations. CRITICAL: Use ONLY the exact channel name string in quotes — do NOT include units, brackets, or any other text. For example if the channel is listed as "RPM" [unit: RPM], use "RPM" not "RPM (RPM)". For the optional color channel, pick a 3rd variable that adds diagnostic value (e.g. coloring an RPM vs MAP scatter by AFR shows rich/lean areas of the fuel map). Suggest 4-8 scatter plots ordered by usefulness.`;
@@ -19,7 +20,11 @@ export const generate = action({
       description: v.string(),
     }),
   ),
-  handler: async (_ctx, args) => {
+  handler: async (ctx, args) => {
+    // Billed against our Anthropic key, so it must never be callable anonymously.
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
+
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
 

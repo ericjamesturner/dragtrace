@@ -1,7 +1,16 @@
-import { query, mutation } from "./_generated/server";
+import { query, mutation, internalQuery } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { isAdminUser } from "./authz";
+
+/**
+ * Admin check for actions. Actions have no `ctx.db`, so they cannot call
+ * `requireAdmin` directly and must hop through this.
+ */
+export const isAdminInternal = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => isAdminUser(ctx, args.userId),
+});
 
 export const state = query({
   args: {},

@@ -7,6 +7,8 @@ export const listByVehicle = query({
   handler: async (ctx, args) => {
     const userId = await getEffectiveUserId(ctx);
     if (!userId) return [];
+    const vehicle = await ctx.db.get(args.vehicleId);
+    if (!vehicle || vehicle.userId !== userId) return [];
     const events = await ctx.db
       .query("events")
       .withIndex("by_vehicle", (q) => q.eq("vehicleId", args.vehicleId))

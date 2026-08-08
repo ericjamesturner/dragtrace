@@ -1,11 +1,13 @@
 import { query, mutation, action, internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { requireAdmin } from "./authz";
 import { v } from "convex/values";
 
 export const listByEcuType = query({
   args: { ecuType: v.string() },
   handler: async (ctx, args) => {
+    if (!(await getAuthUserId(ctx))) return [];
     return await ctx.db
       .query("channelMappings")
       .withIndex("by_ecu_type", (q) => q.eq("ecuType", args.ecuType))
@@ -22,8 +24,7 @@ export const upsert = mutation({
     source: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    await requireAdmin(ctx);
 
     const existing = await ctx.db
       .query("channelMappings")
@@ -88,8 +89,7 @@ export const move = mutation({
     newCategoryId: v.id("channelCategories"),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    await requireAdmin(ctx);
 
     const mapping = await ctx.db
       .query("channelMappings")
@@ -112,8 +112,7 @@ export const setDisplayName = mutation({
     displayName: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    await requireAdmin(ctx);
 
     const mapping = await ctx.db
       .query("channelMappings")
@@ -133,8 +132,7 @@ export const setAliases = mutation({
     aliases: v.array(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    await requireAdmin(ctx);
 
     const mapping = await ctx.db
       .query("channelMappings")
@@ -156,8 +154,7 @@ export const reorder = mutation({
     })),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    await requireAdmin(ctx);
     for (const u of args.updates) {
       const mapping = await ctx.db
         .query("channelMappings")
@@ -176,8 +173,7 @@ export const remove = mutation({
     ecuType: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    await requireAdmin(ctx);
 
     const mapping = await ctx.db
       .query("channelMappings")
@@ -211,6 +207,14 @@ export const categorizeChannels = action({
     ecuType: v.string(),
   },
   handler: async (ctx, args) => {
+    // Writes the shared taxonomy and bills our Anthropic key, so it is an
+    // admin/seeding tool — not something a customer's log load may trigger.
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
+    if (!(await ctx.runQuery(internal.admin.isAdminInternal, { userId }))) {
+      throw new Error("Not authorized");
+    }
+
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
 

@@ -1,4 +1,5 @@
 import { action } from "./_generated/server";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 const ZONE_COLORS = [
@@ -17,7 +18,11 @@ export const generate = action({
     unitPrefs: v.string(),
     sampleData: v.string(),
   },
-  handler: async (_ctx, args) => {
+  handler: async (ctx, args) => {
+    // Billed against our Anthropic key, so it must never be callable anonymously.
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
+
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
 

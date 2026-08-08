@@ -38,6 +38,9 @@ export const save = mutation({
       return args.id;
     }
 
+    const vehicle = await ctx.db.get(args.vehicleId);
+    if (!vehicle || vehicle.userId !== userId) throw new Error("Not found");
+
     return await ctx.db.insert("workspaces", {
       userId,
       vehicleId: args.vehicleId,

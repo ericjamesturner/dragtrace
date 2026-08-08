@@ -37,6 +37,7 @@ export function TimeslipForm({
   const createTimeslip = useMutation(api.timeslips.create);
   const updateTimeslip = useMutation(api.timeslips.update);
   const generateUploadUrl = useMutation(api.files.generateUploadUrl);
+  const claimTempUpload = useMutation(api.timeslips.claimTempUpload);
   const parseTimeslipImage = useAction(api.timeslips.parseTimeslipImage);
   const [values, setValues] = useState<Record<string, string>>({});
   const [scanning, setScanning] = useState(false);
@@ -57,6 +58,9 @@ export function TimeslipForm({
         });
         const { storageId } = await uploadResult.json();
 
+        // Record ownership of the scratch object before the action reads it.
+        await claimTempUpload({ storageId });
+
         // Call Claude to parse the timeslip
         const parsed = await parseTimeslipImage({ storageId });
 
@@ -75,7 +79,7 @@ export function TimeslipForm({
         if (scanInputRef.current) scanInputRef.current.value = "";
       }
     },
-    [generateUploadUrl, parseTimeslipImage]
+    [generateUploadUrl, claimTempUpload, parseTimeslipImage]
   );
 
   useEffect(() => {

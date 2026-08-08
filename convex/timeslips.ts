@@ -1,4 +1,12 @@
-import { query, mutation, action } from "./_generated/server";
+import {
+  query,
+  mutation,
+  action,
+  internalQuery,
+  internalMutation,
+} from "./_generated/server";
+import { getAuthUserId } from "@convex-dev/auth/server";
+import { internal } from "./_generated/api";
 import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
 
@@ -19,6 +27,8 @@ export const listByFile = query({
   handler: async (ctx, args) => {
     const userId = await getEffectiveUserId(ctx);
     if (!userId) return [];
+    const file = await ctx.db.get(args.fileId);
+    if (!file || file.userId !== userId) return [];
     return await ctx.db
       .query("timeslips")
       .withIndex("by_file", (q) => q.eq("fileId", args.fileId))
@@ -88,9 +98,55 @@ export const remove = mutation({
   },
 });
 
+/** Record that the signed-in user uploaded this scratch object. */
+export const claimTempUpload = mutation({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    const userId = await getEffectiveUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
+    await ctx.db.insert("tempUploads", {
+      userId,
+      storageId: args.storageId,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const tempUploadOwnerInternal = internalQuery({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    const claim = await ctx.db
+      .query("tempUploads")
+      .withIndex("by_storage", (q) => q.eq("storageId", args.storageId))
+      .unique();
+    return claim?.userId ?? null;
+  },
+});
+
+export const releaseTempUploadInternal = internalMutation({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    const claim = await ctx.db
+      .query("tempUploads")
+      .withIndex("by_storage", (q) => q.eq("storageId", args.storageId))
+      .unique();
+    if (claim) await ctx.db.delete(claim._id);
+    await ctx.storage.delete(args.storageId);
+  },
+});
+
 export const parseTimeslipImage = action({
   args: { storageId: v.id("_storage") },
   handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
+    // A storage id has no owner of its own, so the caller must hold the claim
+    // written at upload time. Without this, any id could be read and deleted.
+    const owner = await ctx.runQuery(internal.timeslips.tempUploadOwnerInternal, {
+      storageId: args.storageId,
+    });
+    if (owner !== userId) throw new Error("Not found");
+
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
 
@@ -167,7 +223,9 @@ Return ONLY valid JSON, no other text.`,
     const parsed = JSON.parse(jsonMatch[0]);
 
     // Clean up temp image from storage
-    await ctx.storage.delete(args.storageId);
+    await ctx.runMutation(internal.timeslips.releaseTempUploadInternal, {
+      storageId: args.storageId,
+    });
 
     // Return only valid numeric fields
     const fields = ["dialIn", "rt", "sixtyFt", "threeThirty", "eighthEt", "eighthMph", "thousandFt", "et", "mph"] as const;

@@ -26,6 +26,11 @@ export const saveFile = mutation({
     // Verify event ownership
     const event = await ctx.db.get(args.eventId);
     if (!event || event.userId !== userId) throw new Error("Not found");
+    // ...and that the vehicle is the caller's, and is the event's vehicle, so
+    // a file can't be grafted onto another tenant's by_vehicle listing.
+    if (event.vehicleId !== args.vehicleId) throw new Error("Not found");
+    const vehicle = await ctx.db.get(args.vehicleId);
+    if (!vehicle || vehicle.userId !== userId) throw new Error("Not found");
     // Shift existing files down to make room at the top
     const existing = await ctx.db
       .query("files")
@@ -53,11 +58,29 @@ export const listByEvent = query({
   handler: async (ctx, args) => {
     const userId = await getEffectiveUserId(ctx);
     if (!userId) return [];
+    const event = await ctx.db.get(args.eventId);
+    if (!event || event.userId !== userId) return [];
     const files = await ctx.db
       .query("files")
       .withIndex("by_event", (q) => q.eq("eventId", args.eventId))
       .collect();
     return files.sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
+  },
+});
+
+/** Every pass for one vehicle, newest first — the pass list's wider scope. */
+export const listByVehicle = query({
+  args: { vehicleId: v.id("vehicles") },
+  handler: async (ctx, args) => {
+    const userId = await getEffectiveUserId(ctx);
+    if (!userId) return [];
+    const vehicle = await ctx.db.get(args.vehicleId);
+    if (!vehicle || vehicle.userId !== userId) return [];
+    const files = await ctx.db
+      .query("files")
+      .withIndex("by_vehicle", (q) => q.eq("vehicleId", args.vehicleId))
+      .collect();
+    return files.sort((a, b) => b.uploadedAt - a.uploadedAt);
   },
 });
 
@@ -72,10 +95,16 @@ export const get = query({
   },
 });
 
+// Takes a file id rather than a storage id so the caller's ownership of the
+// underlying log can be checked. A raw storage id carries no owner.
 export const getUrl = query({
-  args: { storageId: v.id("_storage") },
+  args: { fileId: v.id("files") },
   handler: async (ctx, args) => {
-    return await ctx.storage.getUrl(args.storageId);
+    const userId = await getEffectiveUserId(ctx);
+    if (!userId) return null;
+    const file = await ctx.db.get(args.fileId);
+    if (!file || file.userId !== userId) return null;
+    return await ctx.storage.getUrl(file.storageId);
   },
 });
 
