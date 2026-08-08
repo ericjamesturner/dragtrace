@@ -54,6 +54,12 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
 
   const name = file.fileName.replace(/\.[^.]+$/, "");
 
+  const stats: { label: string; value: string }[] = [];
+  if (timeslip?.sixtyFt !== undefined) stats.push({ label: "60ft", value: timeslip.sixtyFt.toFixed(3) });
+  if (timeslip?.eighthEt !== undefined) stats.push({ label: "1/8", value: timeslip.eighthEt.toFixed(3) });
+  if (timeslip?.et !== undefined) stats.push({ label: "1/4", value: timeslip.et.toFixed(3) });
+  if (timeslip?.mph !== undefined) stats.push({ label: "mph", value: timeslip.mph.toFixed(2) });
+
   return (
     <div
       onClick={isOnlyLoaded ? undefined : onToggle}
@@ -88,17 +94,24 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
         ) : null}
       </svg>
 
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="min-w-0 flex-1 truncate tabular-nums">
-          {outcome === "aborted" && runLength !== null
-            ? `aborted at ${runLength.toFixed(1)} s`
-            : [
-                timeslip?.sixtyFt !== undefined ? `60ft ${timeslip.sixtyFt.toFixed(3)}` : null,
-                timeslip?.mph !== undefined ? `${timeslip.mph.toFixed(2)} mph` : null,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-        </span>
+      <div className="flex items-end gap-2 text-xs text-muted-foreground">
+        {outcome === "aborted" && runLength !== null ? (
+          <span className="min-w-0 flex-1 truncate tabular-nums">
+            aborted at {runLength.toFixed(1)} s
+          </span>
+        ) : (
+          // The numbers that say what the pass actually was, labelled so they
+          // can't be mistaken for each other. Only what the slip recorded is
+          // shown, so a partial pass doesn't invent an eighth or a trap speed.
+          <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+            {stats.map((s) => (
+              <span key={s.label} className="whitespace-nowrap">
+                <span className="text-muted-foreground/60">{s.label} </span>
+                <span className="tabular-nums text-foreground/80">{s.value}</span>
+              </span>
+            ))}
+          </span>
+        )}
         {style && <span className={`shrink-0 font-medium ${style.text}`}>{style.label}</span>}
       </div>
 
