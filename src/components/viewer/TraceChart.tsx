@@ -28,7 +28,9 @@ const SCALE_GROUP_LABELS: Record<string, string> = { egt: "EGT", rpm: "RPM", lam
 // voltage) get a minimum auto-scale span — a fraction of the channel's
 // factory DisplayMaxMin range — so a 4 psi fuel-pressure wiggle doesn't
 // stretch to full chart height. Other families (RPM, TPS…) stay data-fit.
-const SPAN_FLOOR_UNITS = new Set(["kPa", "K", "V"]);
+const SPAN_FLOOR_UNITS = new Set([
+  "pressure", "abs-pressure", "temperature", "voltage", "battery-voltage",
+]);
 const SPAN_FLOOR_FRAC = 0.12;
 
 function scaleGroupKey(name: string): string | null {
@@ -469,7 +471,7 @@ export function TraceChart({
     const groupIdOf = (channelName: string): string | null => {
       const g = scaleGroupKey(channelName);
       if (g) return g;
-      if (quantitySlugByChannel.get(channelName) === "lambda") return "lambda";
+      if (quantitySlugByChannel.get(channelName) === "afr") return "lambda";
       return null;
     };
 

@@ -182,7 +182,8 @@ export function TracePanel({
         const session = log?.parsed.sessions[log.activeSessionIndex];
         if (!log || !session) continue;
         const def = log.parsed.channelDefs.find((d) => d.name === ch.channelName);
-        if (def?.quantitySlug !== "lambda") continue;
+        // "lambda" is the scale-group id; the quantity behind it is AFR.
+        if (def?.quantitySlug !== "afr") continue;
         const data = session.channels.get(ch.channelName);
         if (!data) continue;
         for (let i = 0; i < data.length; i++) {
