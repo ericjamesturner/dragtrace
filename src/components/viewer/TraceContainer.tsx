@@ -4,8 +4,8 @@ import { resolveChannelStyle, CHART_COLORS, MIN_TRACE_HEIGHT } from "@/lib/viewe
 import type { Id } from "../../../convex/_generated/dataModel";
 import { TraceChart } from "./TraceChart";
 import { TraceSettingsPanel, ChannelPicker } from "./TraceSettingsPanel";
-import { findValueAtTime, formatValue, computeRangeStats } from "@/lib/cursor-utils";
-import { convertForDisplay, convertFromDisplay, getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
+import { findValueAtTime, formatValue, formatChannelValue, computeRangeStats } from "@/lib/cursor-utils";
+import { convertForDisplay, convertFromDisplay, getDisplayUnit, getDisplayPrecision, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, GripHorizontalIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
@@ -747,7 +747,7 @@ export function TraceContainer({
           const offset = offsets.get(log.fileId) ?? 0;
           const stats = computeRangeStats(log, ch.channelName, avgRange, offset);
           if (stats !== null) {
-            const mu = def?.metricUnit ?? "";
+            const mu = def?.quantitySlug ?? "";
             const conv = (v: number) =>
               mu ? convertForDisplay(v, mu, unitSystem, unitOverrides) : v;
             valueStr = formatValue(conv(stats.avg));
@@ -768,10 +768,18 @@ export function TraceContainer({
           const offset = offsets.get(log.fileId) ?? 0;
           const val = findValueAtTime(log, ch.channelName, cursorTime, offset);
           if (val !== null) {
-            const mu = def?.metricUnit ?? "";
-            const converted = mu ? convertForDisplay(val, mu, unitSystem, unitOverrides) : val;
-            valueStr = formatValue(converted);
-            unitLabel = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
+            const mu = def?.quantitySlug ?? "";
+            if (def?.enumValues) {
+              // A state channel reads as its label, with no unit suffix.
+              valueStr = formatChannelValue(val, { enumValues: def.enumValues });
+              unitLabel = "";
+            } else {
+              const converted = mu ? convertForDisplay(val, mu, unitSystem, unitOverrides) : val;
+              valueStr = formatChannelValue(converted, {
+                decimals: getDisplayPrecision(mu, unitSystem, unitOverrides),
+              });
+              unitLabel = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
+            }
           }
         }
 
@@ -1249,7 +1257,7 @@ export function TraceContainer({
         }
         const hasManualAxis = cmCh?.axisMin !== undefined || cmCh?.axisMax !== undefined;
         const cmDef = cmLog?.parsed.channelDefs.find((d) => d.name === contextMenu.channelName);
-        const cmMu = cmDef?.metricUnit ?? "";
+        const cmMu = cmDef?.quantitySlug ?? "";
         const cmToDisplay = (v: number) =>
           cmMu ? convertForDisplay(v, cmMu, unitSystem, unitOverrides) : v;
         const cmDisplayUnit = cmMu ? getDisplayUnit(cmMu, unitSystem, unitOverrides) : "";

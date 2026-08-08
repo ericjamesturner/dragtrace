@@ -100,11 +100,40 @@ export function findIndexAtTime(ts: Float64Array, t: number): number {
   return lo > 0 && Math.abs(ts[lo - 1] - t) < Math.abs(ts[lo] - t) ? lo - 1 : lo;
 }
 
-export function formatValue(v: number): string {
+export function formatValue(v: number, decimals?: number): string {
+  if (decimals !== undefined) return v.toFixed(decimals);
   const abs = Math.abs(v);
   if (abs >= 100) return v.toFixed(0);
   if (abs >= 10) return v.toFixed(1);
   return v.toFixed(2);
+}
+
+/**
+ * Format a channel reading for display. State channels read as their label
+ * ("Main limiter") rather than the number behind it, and a channel whose unit
+ * has a conventional precision uses it instead of a magnitude guess.
+ */
+export function formatChannelValue(
+  value: number,
+  opts?: { enumValues?: Record<number, string>; decimals?: number },
+): string {
+  if (opts?.enumValues && Number.isInteger(value)) {
+    const label = opts.enumValues[value];
+    if (label !== undefined) return label;
+  }
+  return formatValue(value, opts?.decimals);
+}
+
+/**
+ * Enumerated channels use large sentinels for "not applicable" (65535 reads as
+ * "None"). Plotted literally they flatten every other trace sharing the axis.
+ */
+export function isEnumSentinel(
+  value: number,
+  enumValues: Record<number, string> | undefined,
+): boolean {
+  if (!enumValues || !Number.isInteger(value)) return false;
+  return value >= 65535 && enumValues[value] !== undefined;
 }
 
 export function formatDuration(seconds: number): string {

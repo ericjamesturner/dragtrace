@@ -16,6 +16,7 @@ import {
 import { PlusIcon, XIcon, ChevronDownIcon, ChevronRightIcon, PencilIcon, SparklesIcon, RotateCcwIcon, LayersIcon } from "lucide-react";
 import { GROUP_COLORS, type GroupNode } from "@/lib/channel-groups";
 import { useChannelGroups } from "@/hooks/useChannelGroups";
+import { DEFAULT_ECU_TYPE } from "@/lib/ecu/registry";
 
 interface Props {
   open: boolean;
@@ -69,7 +70,7 @@ export function ChannelPicker({
     return defs;
   }, [logs]);
 
-  const { tree } = useChannelGroups(allDefs, "haltech");
+  const { tree } = useChannelGroups(allDefs, DEFAULT_ECU_TYPE);
 
   const toggleGroup = (key: string) => {
     setExpanded((prev) => {
@@ -239,7 +240,7 @@ function ZoneBuilder({
                 name: def.name,
                 data,
                 timestamps: session.timestamps,
-                metricUnit: def.metricUnit ?? "",
+                quantitySlug: def.quantitySlug ?? "",
               });
             }
           }

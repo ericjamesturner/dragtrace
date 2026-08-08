@@ -53,13 +53,13 @@ export function useEvaluatedZones(
         const offset = offsets.get(log.fileId) ?? 0;
 
         // Build unit converter
-        const metricUnitByChannel = new Map<string, string>();
+        const quantitySlugByChannel = new Map<string, string>();
         for (const def of log.parsed.channelDefs) {
-          if (def.metricUnit) metricUnitByChannel.set(def.name, def.metricUnit);
+          if (def.quantitySlug) quantitySlugByChannel.set(def.name, def.quantitySlug);
         }
 
         const converter = (channelName: string, value: number): number => {
-          const mu = metricUnitByChannel.get(channelName);
+          const mu = quantitySlugByChannel.get(channelName);
           if (!mu) return value;
           return convertForDisplay(value, mu, unitSystem, unitOverrides);
         };

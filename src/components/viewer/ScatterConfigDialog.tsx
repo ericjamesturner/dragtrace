@@ -51,8 +51,8 @@ function ChannelPicker({
   }, [search, channelDefs]);
 
   const selectedDef = channelDefs.find((d) => d.name === value);
-  const metricUnit = selectedDef?.metricUnit ?? "";
-  const displayUnit = metricUnit ? getDisplayUnit(metricUnit, unitSystem, unitOverrides) : "";
+  const quantitySlug = selectedDef?.quantitySlug ?? "";
+  const displayUnit = quantitySlug ? getDisplayUnit(quantitySlug, unitSystem, unitOverrides) : "";
 
   return (
     <div>
@@ -83,7 +83,7 @@ function ChannelPicker({
           {results.length > 0 && open && (
             <div className="absolute left-0 right-0 top-full mt-1 z-50 max-h-48 overflow-y-auto rounded-lg border border-border bg-popover shadow-md">
               {results.map((def) => {
-                const du = def.metricUnit ? getDisplayUnit(def.metricUnit, unitSystem, unitOverrides) : "";
+                const du = def.quantitySlug ? getDisplayUnit(def.quantitySlug, unitSystem, unitOverrides) : "";
                 return (
                   <button
                     key={def.name}

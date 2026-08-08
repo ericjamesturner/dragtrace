@@ -409,7 +409,7 @@ export function TraceChart({
           const cbData = session.channels.get(ch.colorBy);
           if (cbData) {
             colorByVals = resampleToGrid(session.timestamps, cbData, group.timeOffset, gridTs);
-            colorByMetricUnit = group.log.parsed.channelDefs.find((d) => d.name === ch.colorBy)?.metricUnit;
+            colorByMetricUnit = group.log.parsed.channelDefs.find((d) => d.name === ch.colorBy)?.quantitySlug;
           }
         }
 
@@ -443,14 +443,14 @@ export function TraceChart({
       x: { time: false, range: () => xRange },
     };
 
-    // Build metricUnit + factory display range lookups from logGroups
-    const metricUnitByChannel = new Map<string, string>();
+    // Build quantitySlug + factory display range lookups from logGroups
+    const quantitySlugByChannel = new Map<string, string>();
     const displayRangeByChannel = new Map<string, [number, number]>();
     for (const group of logGroups) {
       for (const ch of group.channels) {
-        if (!metricUnitByChannel.has(ch.channelName)) {
+        if (!quantitySlugByChannel.has(ch.channelName)) {
           const def = group.log.parsed.channelDefs.find(d => d.name === ch.channelName);
-          if (def?.metricUnit) metricUnitByChannel.set(ch.channelName, def.metricUnit);
+          if (def?.quantitySlug) quantitySlugByChannel.set(ch.channelName, def.quantitySlug);
           if (
             def &&
             Number.isFinite(def.displayMin) &&
@@ -469,7 +469,7 @@ export function TraceChart({
     const groupIdOf = (channelName: string): string | null => {
       const g = scaleGroupKey(channelName);
       if (g) return g;
-      if (metricUnitByChannel.get(channelName) === "lambda") return "lambda";
+      if (quantitySlugByChannel.get(channelName) === "lambda") return "lambda";
       return null;
     };
 
@@ -496,7 +496,7 @@ export function TraceChart({
         scaleKeyById.set(scaleId, scaleKey);
         scaleColor.set(scaleKey, meta.color);
         scaleGroupByKey.set(scaleKey, groupIdOf(meta.channelName));
-        const mu = metricUnitByChannel.get(meta.channelName);
+        const mu = quantitySlugByChannel.get(meta.channelName);
         if (mu) scaleMetricUnit.set(scaleKey, mu);
       }
       const scaleKey = scaleKeyById.get(scaleId)!;
@@ -533,7 +533,7 @@ export function TraceChart({
       // Minimum-span floor for calm sensor families (see SPAN_FLOOR_UNITS)
       if (manualMin === undefined && manualMax === undefined) {
         const firstMember = (channelsInScale.get(scaleId) ?? [])[0];
-        const mu = firstMember ? metricUnitByChannel.get(firstMember) : undefined;
+        const mu = firstMember ? quantitySlugByChannel.get(firstMember) : undefined;
         const dispRange = firstMember ? displayRangeByChannel.get(firstMember) : undefined;
         if (mu && SPAN_FLOOR_UNITS.has(mu) && dispRange) {
           const floorSpan = (dispRange[1] - dispRange[0]) * SPAN_FLOOR_FRAC;

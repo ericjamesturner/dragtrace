@@ -50,9 +50,9 @@ export function ScatterContainer({
   const colorData = scatter.colorChannel ? session?.channels.get(scatter.colorChannel) : undefined;
 
   const defOf = (n: string) => log?.parsed.channelDefs.find((d) => d.name === n);
-  const xMetric = defOf(scatter.xChannel)?.metricUnit ?? "";
-  const yMetric = defOf(scatter.yChannel)?.metricUnit ?? "";
-  const cMetric = scatter.colorChannel ? defOf(scatter.colorChannel)?.metricUnit ?? "" : "";
+  const xMetric = defOf(scatter.xChannel)?.quantitySlug ?? "";
+  const yMetric = defOf(scatter.yChannel)?.quantitySlug ?? "";
+  const cMetric = scatter.colorChannel ? defOf(scatter.colorChannel)?.quantitySlug ?? "" : "";
 
   const handleResizeStart = useCallback(
     (e: React.MouseEvent) => {

@@ -8,6 +8,8 @@
     "dev:convex": "npx convex dev",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "gen:quantities": "node scripts/gen-quantities.mjs",
+    "gen:channels": "node scripts/gen-channel-defs.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

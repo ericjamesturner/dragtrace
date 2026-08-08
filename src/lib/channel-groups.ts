@@ -389,3 +389,83 @@ export function buildTree(defs: ChannelDef[]): GroupNode[] {
 
   return dedupeDisplayNames(roots);
 }
+
+// --- Definition-pack grouping ---------------------------------------------
+//
+// When the ECU's own definition data is available, its object paths give the
+// manufacturer's real hierarchy for every channel — which beats both the
+// hand-maintained CHANNEL_GROUPS table below and any keyword guessing, and
+// needs no upkeep as new channels appear.
+
+/** "AVERAGE_DUTY_CYCLE" / "InjectionSystem" -> "Average Duty Cycle". */
+function prettifySegment(seg: string): string {
+  if (!seg) return seg;
+  const spaced = seg.includes("_")
+    ? seg.toLowerCase().replace(/_+/g, " ")
+    : seg.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+  return spaced.replace(/\b[a-z]/g, (c) => c.toUpperCase()).trim();
+}
+
+/** Path segments that carry no grouping information. */
+const SKIP_SEGMENTS = new Set(["settings", "value", "values"]);
+
+const MAX_DEPTH = 3;
+
+/**
+ * Group channels by their definition path. Channels with no identity fall back
+ * to the keyword tree so a partially-resolved pack still produces a full list.
+ */
+export function buildTreeFromPaths(
+  defs: ChannelDef[],
+  identities: Map<string, { path?: string; shortName?: string; longName?: string }>,
+): GroupNode[] {
+  const roots: GroupNode[] = [];
+  const unresolved: ChannelDef[] = [];
+
+  const nodeAt = (segments: string[]): GroupNode => {
+    let level = roots;
+    let node: GroupNode | undefined;
+    for (const seg of segments) {
+      node = level.find((n) => n.tag === seg);
+      if (!node) {
+        node = { tag: seg, channels: [], children: [] };
+        level.push(node);
+      }
+      level = node.children;
+    }
+    return node!;
+  };
+
+  for (const def of defs) {
+    const path = identities.get(def.name)?.path;
+    if (!path) {
+      unresolved.push(def);
+      continue;
+    }
+    // The final segment names the channel itself, not a group.
+    const segments = path
+      .split("/")
+      .slice(0, -1)
+      .filter((s) => s && !SKIP_SEGMENTS.has(s.toLowerCase()))
+      .map(prettifySegment)
+      .slice(0, MAX_DEPTH);
+
+    if (segments.length === 0) {
+      unresolved.push(def);
+      continue;
+    }
+    nodeAt(segments).channels.push({ def, displayName: def.name });
+  }
+
+  if (unresolved.length > 0) {
+    roots.push(...buildTree(unresolved));
+  }
+
+  const sortNode = (n: GroupNode): GroupNode => ({
+    ...n,
+    channels: [...n.channels].sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    children: n.children.map(sortNode).sort((a, b) => a.tag.localeCompare(b.tag)),
+  });
+
+  return roots.map(sortNode).sort((a, b) => a.tag.localeCompare(b.tag));
+}

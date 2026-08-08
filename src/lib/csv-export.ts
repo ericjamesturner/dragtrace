@@ -52,7 +52,7 @@ export function buildSelectionCsv(
   const defs = log.parsed.channelDefs;
   const header = ["Time (s)"];
   for (const d of defs) {
-    const unit = d.metricUnit ? getDisplayUnit(d.metricUnit, unitSystem, unitOverrides) : "";
+    const unit = d.quantitySlug ? getDisplayUnit(d.quantitySlug, unitSystem, unitOverrides) : "";
     header.push(csvField(unit ? `${d.name} (${unit})` : d.name));
   }
   const lines = [header.join(",")];
@@ -66,7 +66,7 @@ export function buildSelectionCsv(
         cols.push("");
         continue;
       }
-      const cv = d.metricUnit ? convertForDisplay(v, d.metricUnit, unitSystem, unitOverrides) : v;
+      const cv = d.quantitySlug ? convertForDisplay(v, d.quantitySlug, unitSystem, unitOverrides) : v;
       cols.push(fmtNum(cv));
     }
     lines.push(cols.join(","));

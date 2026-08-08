@@ -1,14 +1,25 @@
-import { useMemo, useRef, useEffect } from "react";
-import { useQuery, useAction } from "convex/react";
+import { useMemo } from "react";
+import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { ChannelDef } from "@/lib/log-types";
-import { buildTree, dedupeDisplayNames, type GroupNode, type GroupChannel } from "@/lib/channel-groups";
+import {
+  buildTree,
+  buildTreeFromPaths,
+  dedupeDisplayNames,
+  type GroupNode,
+  type GroupChannel,
+} from "@/lib/channel-groups";
+import { useChannelDefinitions } from "./useChannelDefinitions";
 
 /**
- * Replaces buildTree() with database-driven channel grouping.
- * Falls back to hardcoded buildTree() while DB data is loading.
- * Supports arbitrary nesting depth.
+ * Channel grouping, in order of preference:
+ *
+ *   1. the admin-curated taxonomy in Convex, when one exists for this ECU;
+ *   2. the ECU manufacturer's own object paths from the definition pack;
+ *   3. the hand-maintained keyword tree, as a last resort.
+ *
+ * Per-vehicle overrides apply on top of whichever produced the tree.
  */
 export function useChannelGroups(
   channelDefs: ChannelDef[],
@@ -22,34 +33,14 @@ export function useChannelGroups(
     vehicleId ? { vehicleId } : "skip",
   );
 
-  const categorizeChannels = useAction(api.channelMappings.categorizeChannels);
-  const categorizingRef = useRef(false);
+  const { identities } = useChannelDefinitions(channelDefs, ecuType);
 
   const dbLoading = categories === undefined || mappings === undefined;
 
-  // Computed (math) channels live in their own group and are never sent to
-  // the AI categorizer — they aren't real ECU channels.
+  // Computed (math) channels live in their own group — they aren't real ECU
+  // channels, so they never carry a definition-pack identity.
   const realDefs = useMemo(() => channelDefs.filter((d) => !d.computed), [channelDefs]);
   const computedDefs = useMemo(() => channelDefs.filter((d) => d.computed), [channelDefs]);
-
-  // Detect unmapped channels and trigger AI categorization (bootstraps from zero)
-  useEffect(() => {
-    if (dbLoading || categorizingRef.current) return;
-    if (!mappings || !categories) return;
-    if (realDefs.length === 0) return;
-
-    const mappedNames = new Set(mappings.map((m) => m.channelName));
-    const unmapped = realDefs
-      .map((d) => d.name)
-      .filter((name) => !mappedNames.has(name));
-
-    if (unmapped.length === 0) return;
-
-    categorizingRef.current = true;
-    categorizeChannels({ channelNames: unmapped, ecuType })
-      .catch((err) => console.error("AI categorization failed:", err))
-      .finally(() => { categorizingRef.current = false; });
-  }, [dbLoading, mappings, categories, realDefs, ecuType, categorizeChannels]);
 
   const tree = useMemo(() => {
     const withMathGroup = (roots: GroupNode[]): GroupNode[] => {
@@ -64,9 +55,21 @@ export function useChannelGroups(
       ];
     };
 
-    // Fallback to hardcoded while loading
     if (dbLoading || !categories || categories.length === 0) {
-      return withMathGroup(buildTree(realDefs));
+      const hidden = new Set(
+        (overrides ?? []).filter((o) => o.hidden).map((o) => o.channelName),
+      );
+      const renamed = new Map(
+        (overrides ?? [])
+          .filter((o) => o.displayName)
+          .map((o) => [o.channelName, o.displayName!]),
+      );
+      const visible = hidden.size ? realDefs.filter((d) => !hidden.has(d.name)) : realDefs;
+      const roots =
+        identities.size > 0
+          ? buildTreeFromPaths(visible, identities)
+          : buildTree(visible);
+      return withMathGroup(renamed.size ? applyRenames(roots, renamed) : roots);
     }
 
     // Build override lookup
@@ -162,7 +165,7 @@ export function useChannelGroups(
         rootCats.map(buildNode).filter((n): n is GroupNode => n !== null),
       ),
     );
-  }, [dbLoading, categories, mappings, overrides, realDefs, computedDefs]);
+  }, [dbLoading, categories, mappings, overrides, realDefs, computedDefs, identities]);
 
   return { tree, loading: dbLoading };
 }
@@ -175,4 +178,15 @@ function stripPrefix(name: string, prefix: string): string {
     if (rest.length > 0) return rest;
   }
   return name;
+}
+
+/** Apply the user's per-vehicle channel names to an already-built tree. */
+function applyRenames(nodes: GroupNode[], renamed: Map<string, string>): GroupNode[] {
+  return nodes.map((node) => ({
+    ...node,
+    channels: node.channels.map((ch) =>
+      renamed.has(ch.def.name) ? { ...ch, displayName: renamed.get(ch.def.name)! } : ch,
+    ),
+    children: applyRenames(node.children, renamed),
+  }));
 }

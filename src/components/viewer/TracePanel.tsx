@@ -182,7 +182,7 @@ export function TracePanel({
         const session = log?.parsed.sessions[log.activeSessionIndex];
         if (!log || !session) continue;
         const def = log.parsed.channelDefs.find((d) => d.name === ch.channelName);
-        if (def?.metricUnit !== "lambda") continue;
+        if (def?.quantitySlug !== "lambda") continue;
         const data = session.channels.get(ch.channelName);
         if (!data) continue;
         for (let i = 0; i < data.length; i++) {

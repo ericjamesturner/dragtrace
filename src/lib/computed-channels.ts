@@ -55,7 +55,7 @@ export function addComputedChannels(parsed: ParsedLog): void {
       displayMax: proto.displayMax,
       displayMin: proto.displayMin,
       index: parsed.channelDefs.length,
-      metricUnit: proto.metricUnit,
+      quantitySlug: proto.quantitySlug,
       computed: true,
     });
   }

@@ -4,6 +4,8 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { detectHaltech, detectRaceStartIndex, parseHaltech } from "@/lib/haltech-parser";
 import { addComputedChannels } from "@/lib/computed-channels";
+import { enrichWithDefinitions } from "@/lib/ecu/enrich";
+import { DEFAULT_ECU_TYPE } from "@/lib/ecu/registry";
 import type { ParsedLog } from "@/lib/log-types";
 import { CHART_COLORS, type LoadedLog } from "@/lib/viewer-types";
 
@@ -76,11 +78,11 @@ export function useLoadedLogs(fileIds: Id<"files">[]) {
 
   // Build URL queries from loaded docs
   const urlQueries = useMemo(() => {
-    const q: Record<string, { query: typeof api.files.getUrl; args: { storageId: Id<"_storage"> } }> = {};
+    const q: Record<string, { query: typeof api.files.getUrl; args: { fileId: Id<"files"> } }> = {};
     for (let i = 0; i < fileIds.length; i++) {
       const doc = fileResults[`f${i}`];
       if (doc && !(doc instanceof Error) && doc.storageId) {
-        q[`u${i}`] = { query: api.files.getUrl, args: { storageId: doc.storageId } };
+        q[`u${i}`] = { query: api.files.getUrl, args: { fileId: doc._id } };
       }
     }
     return q;
@@ -160,6 +162,8 @@ export function useLoadedLogs(fileIds: Id<"files">[]) {
             if (raceStartTime !== null) {
               raceStartTime = clipSessionBeforeRace(parsed, activeSessionIndex, raceStartTime);
             }
+            await enrichWithDefinitions(parsed, DEFAULT_ECU_TYPE);
+            if (cancelled) return;
             addComputedChannels(parsed);
 
             const log: LoadedLog = {

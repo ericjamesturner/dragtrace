@@ -1,11 +1,13 @@
 import type { UnitSystem, UnitOverrides } from "./units";
-import { UNIT_OPTIONS, getDisplayUnit, convertForDisplay } from "./units";
+import { quantitiesWithChoices, getDisplayUnit, convertForDisplay } from "./units";
 
+// Only quantities that actually offer a choice are worth spending prompt on —
+// the rest have exactly one unit and can't surprise the model.
 function buildUnitPreferences(unitSystem: UnitSystem, unitOverrides?: UnitOverrides): string {
   const lines: string[] = [`Unit system: ${unitSystem}`];
-  for (const baseUnit of Object.keys(UNIT_OPTIONS)) {
-    const display = getDisplayUnit(baseUnit, unitSystem, unitOverrides);
-    lines.push(`  ${baseUnit} → displayed as ${display}`);
+  for (const q of quantitiesWithChoices()) {
+    const display = getDisplayUnit(q.slug, unitSystem, unitOverrides);
+    lines.push(`  ${q.name} → displayed as ${display}`);
   }
   return lines.join("\n");
 }
@@ -23,7 +25,7 @@ export interface ChannelSample {
   name: string;
   data: Float64Array;
   timestamps: Float64Array;
-  metricUnit: string;
+  quantitySlug: string;
 }
 
 function buildSampleData(
@@ -59,7 +61,7 @@ function buildSampleData(
     }
     if (iEnd <= iStart) continue;
 
-    const displayUnit = getDisplayUnit(s.metricUnit, unitSystem, unitOverrides);
+    const displayUnit = getDisplayUnit(s.quantitySlug, unitSystem, unitOverrides);
 
     const count = Math.min(20, iEnd - iStart);
     const step = Math.max(1, Math.floor((iEnd - iStart) / count));
@@ -69,7 +71,7 @@ function buildSampleData(
     for (let i = iStart; i < iEnd; i += step) {
       const raw = s.data[i];
       if (raw !== raw) continue;
-      const v = convertForDisplay(raw, s.metricUnit, unitSystem, unitOverrides);
+      const v = convertForDisplay(raw, s.quantitySlug, unitSystem, unitOverrides);
       if (v < min) min = v;
       if (v > max) max = v;
       vals.push(v.toFixed(2));

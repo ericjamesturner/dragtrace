@@ -10,7 +10,7 @@ export function buildScatterChannelList(
 ): string {
   return defs
     .map((d) => {
-      const u = d.metricUnit ? getDisplayUnit(d.metricUnit, unitSystem, unitOverrides) : "";
+      const u = d.quantitySlug ? getDisplayUnit(d.quantitySlug, unitSystem, unitOverrides) : "";
       return u ? `- "${d.name}" [unit: ${u}]` : `- "${d.name}"`;
     })
     .join("\n");

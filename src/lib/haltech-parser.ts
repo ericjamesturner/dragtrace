@@ -1,59 +1,40 @@
-import type { ParsedLog, ChannelDef, LogSession } from './log-types';
+import type { ParsedLog, ChannelDef, LogSession, ChannelStatus } from './log-types';
+import { rawToCanonical } from './ecu/quantities';
+import { haltechAdapter, isStatusValue, statusCodeOf } from './ecu/haltech';
 
 // --- Type conversions ---
+//
+// Scaling comes from the generated quantity table rather than hand-derived
+// constants: it covers all 118 of the ECU's unit types instead of the two dozen
+// we had transcribed, and it is what the tuning software itself displays.
 
-interface ChannelTypeInfo {
-  unit: string;
-  convert: (raw: number) => number;
+/** The Haltech `Type :` token for a channel -> shared quantity slug. */
+function quantitySlugForType(type: string): string | undefined {
+  return haltechAdapter.quantitySlugForType(type);
 }
 
-const identity = (x: number) => x;
-
-const channelTypes: Record<string, ChannelTypeInfo> = {
-  EngineSpeed:      { unit: 'RPM',    convert: identity },
-  Pressure:         { unit: 'kPa',    convert: (x) => x / 10 - 101.3 },
-  AbsPressure:      { unit: 'kPa',    convert: (x) => x / 10 },
-  Temperature:      { unit: 'K',      convert: (x) => x / 10 },
-  BatteryVoltage:   { unit: 'V',      convert: (x) => x / 1000 },
-  AFR:              { unit: 'lambda', convert: (x) => x / 1000 },
-  Speed:            { unit: 'km/h',   convert: (x) => x / 10 },
-  Percentage:       { unit: '%',      convert: (x) => x / 10 },
-  Angle:            { unit: 'deg',    convert: (x) => x / 10 },
-  Decibel:          { unit: 'dB',     convert: (x) => x / 100 },
-  Time_us:          { unit: 'ms',     convert: (x) => x / 1000 },
-  Time_ms:          { unit: 'ms',     convert: identity },
-  Time_ms_as_s:     { unit: 's',      convert: (x) => x / 1000 },
-  Gear:             { unit: '',       convert: identity },
-  Raw:              { unit: '',       convert: identity },
-  GearRatio:        { unit: '',       convert: (x) => x / 100 },
-  Ratio:            { unit: '',       convert: (x) => x / 100 },
-  Flow:             { unit: 'cc/min', convert: identity },
-  Frequency:        { unit: 'Hz',     convert: identity },
-  DrivenDistance:    { unit: 'km',     convert: identity },
-  MassPerCyl:       { unit: 'mg',     convert: identity },
-  Current:          { unit: 'A',      convert: (x) => x / 1000 },
-  Acceleration:     { unit: 'm/s^2',  convert: (x) => x / 10 },
-  InjFuelVolume:    { unit: 'cc',     convert: identity },
-};
-
-const SENTINEL_THRESHOLD = -2147483600;
-
+/**
+ * Raw logged integer -> the quantity's canonical unit. Sensor faults come back
+ * as sentinels rather than numbers and become NaN here; the code itself is
+ * captured separately so the reason survives.
+ */
 function convertRawValue(raw: number, type: string): number {
-  if (raw <= SENTINEL_THRESHOLD) return NaN;
-  const info = channelTypes[type];
-  return info ? info.convert(raw) : raw;
+  if (isStatusValue(raw)) return NaN;
+  return rawToCanonical(raw, quantitySlugForType(type));
 }
 
 // Channels are logged at different rates, so on the merged row grid a slow
-// channel is mostly NaN. Continuously-varying types get linear interpolation
-// across gaps; everything else (states, gears, enums, timers) holds the
-// previous value so discrete transitions stay exact.
-const LINEAR_INTERP_TYPES = new Set([
-  'EngineSpeed', 'Pressure', 'AbsPressure', 'Temperature', 'BatteryVoltage',
-  'AFR', 'Speed', 'Percentage', 'Angle', 'Decibel', 'GearRatio', 'Ratio',
-  'Flow', 'Frequency', 'DrivenDistance', 'MassPerCyl', 'Current',
-  'Acceleration', 'InjFuelVolume',
+// channel is mostly NaN. Continuously-varying quantities get linear
+// interpolation across gaps; discrete ones (states, gears, enums, raw counters)
+// hold the previous value so transitions stay exact.
+const DISCRETE_QUANTITIES = new Set([
+  'raw', 'gear', 'hexadecimal', 'position', 'sm-steps', 'pulses-rev',
+  'time-s', 'time-ms', 'time-us', 'time-hh-mm',
 ]);
+
+function isContinuousQuantity(slug: string | undefined): boolean {
+  return !!slug && !DISCRETE_QUANTITIES.has(slug);
+}
 
 /**
  * Fill NaN gaps in a channel array in place. Interior gaps are linearly
@@ -209,7 +190,7 @@ export function parseHaltech(content: string): ParsedLog {
         displayMax: convertRawValue(currentChannel.displayMax ?? 0, currentType),
         displayMin: convertRawValue(currentChannel.displayMin ?? 0, currentType),
         index: channelIndex++,
-        metricUnit: channelTypes[currentType]?.unit,
+        quantitySlug: quantitySlugForType(currentType),
         ...(enumValues && { enumValues }),
       });
     };
@@ -262,6 +243,8 @@ export function parseHaltech(content: string): ParsedLog {
     startTime: Date;
     absMs: number[];
     rows: number[][];
+    /** Per channel: row index -> sensor status code. Sparse; faults are rare. */
+    statusHits: Map<number, number>[];
     firstBlock: number;
     lastBlock: number;
   }[] = [];
@@ -277,6 +260,10 @@ export function parseHaltech(content: string): ParsedLog {
       lineIdx++;
       const absMs: number[] = [];
       const rows: number[][] = [];
+      const statusHits: Map<number, number>[] = Array.from(
+        { length: numChannels },
+        () => new Map<number, number>(),
+      );
 
       while (lineIdx < lines.length) {
         const dataLine = lines[lineIdx].trim();
@@ -298,9 +285,17 @@ export function parseHaltech(content: string): ParsedLog {
 
         const values = dataLine.substring(commaIdx + 1).split(',');
         const row: number[] = new Array(numChannels);
+        const rowIdx = rows.length;
         for (let i = 0; i < numChannels; i++) {
           const raw = parseInt(values[i], 10);
-          row[i] = convertRawValue(raw, channelTypesList[i]);
+          if (isStatusValue(raw)) {
+            // A reported fault, not a missing sample. Recorded so the gap
+            // filler doesn't quietly interpolate a plausible value over it.
+            statusHits[i].set(rowIdx, statusCodeOf(raw));
+            row[i] = NaN;
+          } else {
+            row[i] = convertRawValue(raw, channelTypesList[i]);
+          }
         }
         rows.push(row);
 
@@ -313,11 +308,20 @@ export function parseHaltech(content: string): ParsedLog {
       const prev = blocks[blocks.length - 1];
       const gap = prev ? absMs[0] - prev.absMs[prev.absMs.length - 1] : Infinity;
       if (prev && gap >= 0 && gap <= MERGE_GAP_MS) {
+        const rowOffset = prev.rows.length;
         prev.absMs = prev.absMs.concat(absMs);
         prev.rows = prev.rows.concat(rows);
+        for (let i = 0; i < numChannels; i++) {
+          for (const [r, code] of statusHits[i]) {
+            prev.statusHits[i].set(r + rowOffset, code);
+          }
+        }
         prev.lastBlock = blockIdx;
       } else {
-        blocks.push({ startTime, absMs, rows, firstBlock: blockIdx, lastBlock: blockIdx });
+        blocks.push({
+          startTime, absMs, rows, statusHits,
+          firstBlock: blockIdx, lastBlock: blockIdx,
+        });
       }
     } else {
       lineIdx++;
@@ -333,13 +337,40 @@ export function parseHaltech(content: string): ParsedLog {
     }
 
     const channels = new Map<string, Float64Array>();
+    const channelStatus = new Map<string, ChannelStatus>();
     for (let chIdx = 0; chIdx < numChannels; chIdx++) {
+      const def = channelDefs[chIdx];
       const arr = new Float64Array(rowCount);
       for (let r = 0; r < rowCount; r++) {
         arr[r] = block.rows[r][chIdx];
       }
-      fillChannelGaps(arr, timestamps, LINEAR_INTERP_TYPES.has(channelDefs[chIdx].type));
-      channels.set(channelDefs[chIdx].name, arr);
+      const slug = quantitySlugForType(def.type);
+      fillChannelGaps(arr, timestamps, isContinuousQuantity(slug) && !def.enumValues);
+
+      // Re-blank the samples the sensor reported a fault on. Gap filling can't
+      // tell "not sampled on this row" from "sensor said Open Circuit", and
+      // interpolating the second produces a normal-looking, invented reading.
+      const hits = block.statusHits[chIdx];
+      if (hits.size > 0) {
+        const counts = new Map<number, number>();
+        for (const [r, code] of hits) {
+          if (r < rowCount) arr[r] = NaN;
+          counts.set(code, (counts.get(code) ?? 0) + 1);
+        }
+        let dominant = 0;
+        let dominantCount = 0;
+        for (const [code, n] of counts) {
+          if (n > dominantCount) { dominant = code; dominantCount = n; }
+        }
+        channelStatus.set(def.name, {
+          samples: hits.size,
+          rowCount,
+          dominantCode: dominant,
+          dominantLabel: haltechAdapter.statusLabel(dominant),
+          codes: [...counts.keys()],
+        });
+      }
+      channels.set(def.name, arr);
     }
 
     const firstNum = logNumbers[block.firstBlock];
@@ -355,6 +386,7 @@ export function parseHaltech(content: string): ParsedLog {
       startTime: block.startTime,
       timestamps,
       channels,
+      channelStatus,
       rowCount,
     });
   }

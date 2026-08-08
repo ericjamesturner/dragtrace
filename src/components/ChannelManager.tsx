@@ -1,3 +1,4 @@
+import { DEFAULT_ECU_TYPE } from "@/lib/ecu/registry";
 import { useState, useMemo, useCallback, useRef } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
@@ -30,7 +31,7 @@ type DropIndicator = {
 
 export function ChannelManager() {
   const { goToVehicles } = useNav();
-  const ecuType = "haltech";
+  const ecuType = DEFAULT_ECU_TYPE;
 
   const categories = useQuery(api.channelCategories.listByEcuType, { ecuType });
   const mappings = useQuery(api.channelMappings.listByEcuType, { ecuType });

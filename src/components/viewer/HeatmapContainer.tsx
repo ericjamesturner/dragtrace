@@ -51,9 +51,9 @@ export function HeatmapContainer({
   const valueData = session?.channels.get(heatmap.valueChannel);
 
   const defOf = (n: string) => log?.parsed.channelDefs.find((d) => d.name === n);
-  const xMetric = defOf(heatmap.xChannel)?.metricUnit ?? "";
-  const yMetric = defOf(heatmap.yChannel)?.metricUnit ?? "";
-  const vMetric = defOf(heatmap.valueChannel)?.metricUnit ?? "";
+  const xMetric = defOf(heatmap.xChannel)?.quantitySlug ?? "";
+  const yMetric = defOf(heatmap.yChannel)?.quantitySlug ?? "";
+  const vMetric = defOf(heatmap.valueChannel)?.quantitySlug ?? "";
 
   const xConvert = useCallback(
     (v: number) => (xMetric ? convertForDisplay(v, xMetric, unitSystem, unitOverrides) : v),
