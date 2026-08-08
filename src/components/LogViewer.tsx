@@ -34,6 +34,11 @@ interface Props {
   fileIds: Id<"files">[];
 }
 
+/** Total traces across every page — the signal that a layout still exists. */
+function countTraces(config: ViewerConfig): number {
+  return config.pages.reduce((n, p) => n + p.traces.length, 0);
+}
+
 function loadSavedConfig(eventId: Id<"events">): ViewerConfig | null {
   try {
     const raw = localStorage.getItem(`viewer:${eventId}`);
@@ -267,9 +272,27 @@ function LogViewerReady({
   configRef.current = config;
   const unsavedRef = useRef(false);
 
+  // A workspace that has lost every trace is almost always the result of a
+  // failed remap or mirror sync rather than the user emptying it by hand, and
+  // persisting it destroys the layout irrecoverably. Refuse to write that; the
+  // in-memory config still reflects what's on screen, so nothing is frozen.
+  const savedTraceCountRef = useRef(countTraces(config));
+  const isDestructiveSave = useCallback(() => {
+    const now = countTraces(configRef.current);
+    return now === 0 && savedTraceCountRef.current > 0;
+  }, []);
+
   const flushSave = useCallback(() => {
     clearTimeout(saveTimerRef.current);
     unsavedRef.current = false;
+    if (isDestructiveSave()) {
+      console.warn(
+        "[dragtrace] Skipped saving a workspace that lost all of its traces — " +
+          "keeping the stored layout instead.",
+      );
+      return;
+    }
+    savedTraceCountRef.current = countTraces(configRef.current);
     void saveWorkspace({
       id: workspaceIdRef.current ?? undefined,
       vehicleId,
@@ -287,7 +310,7 @@ function LogViewerReady({
         }
       }
     });
-  }, [vehicleId, saveWorkspace]);
+  }, [vehicleId, saveWorkspace, isDestructiveSave]);
 
   useEffect(() => {
     unsavedRef.current = true;

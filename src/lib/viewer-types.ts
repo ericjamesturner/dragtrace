@@ -852,8 +852,9 @@ function applyMirror(
 
     if (!pageChanged) return page;
     anyChanged = true;
-    const filtered = newTraces.filter((t) => t.channels.length > 0);
-    return { ...page, traces: filtered };
+    // Keep traces that mirror sync emptied, for the same reason the remap does:
+    // an empty trace can be refilled, a removed one can't.
+    return { ...page, traces: newTraces };
   });
 
   if (!anyChanged) return state;
@@ -943,8 +944,11 @@ export function remapConfigToFiles(
           channels,
           hiddenChannels: keptHidden.size > 0 ? Array.from(keptHidden) : undefined,
         };
-      })
-      .filter((trace) => trace.channels.length > 0),
+      }),
+    // Traces whose channels didn't survive the remap are kept, not deleted. A
+    // log recorded with different channel names would otherwise silently empty
+    // a saved layout, and the debounced save would then make that permanent.
+    // An empty trace is visible and fixable; a deleted one is gone.
     // Non-trace viz panels reference a single log; remap stale ids to a loaded
     // log (channels are shared across same-vehicle logs).
     ...(page.scatters ? { scatters: page.scatters.map((s) => loadedFileIds.has(s.logFileId as string) ? s : { ...s, logFileId: logs[0].fileId }) } : {}),
