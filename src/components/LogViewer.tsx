@@ -209,6 +209,14 @@ function LogViewerReady({
     }
   }, [units.loading, config.unitSystem, config.unitOverrides, seedPrefs]);
 
+  // Selected but not yet fetched and parsed. Adding a pass is not instant on a
+  // multi-megabyte log, and without this the card checks itself immediately
+  // while the chart stays unchanged, which reads as nothing having happened.
+  const pendingFileIds = useMemo(() => {
+    const have = new Set(logs.map((l) => l.fileId as string));
+    return fileIds.filter((id) => !have.has(id as string));
+  }, [fileIds, logs]);
+
   // Compute effective traces
   const effectiveTraces = useMemo(() => getEffectiveTraces(config), [config]);
   const pinnedFromOtherIds = useMemo(() => getPinnedFromOtherIds(config), [config]);
@@ -559,6 +567,7 @@ function LogViewerReady({
             vehicleId={vehicleId}
             eventId={eventId}
             loadedFileIds={fileIds}
+            pendingFileIds={pendingFileIds}
             traces={effectiveTraces}
             hiddenLogIds={config.hiddenLogIds ?? []}
             mirroredLogIds={config.mirroredLogIds ?? []}

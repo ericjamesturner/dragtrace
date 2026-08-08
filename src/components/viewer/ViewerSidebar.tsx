@@ -75,6 +75,7 @@ interface Props {
   vehicleId: Id<"vehicles">;
   eventId: Id<"events">;
   loadedFileIds: Id<"files">[];
+  pendingFileIds?: Id<"files">[];
   traces: TraceConfig[];
   hiddenLogIds: string[];
   mirroredLogIds: string[];
@@ -96,6 +97,7 @@ export function ViewerSidebar({
   vehicleId,
   eventId,
   loadedFileIds,
+  pendingFileIds,
   hiddenLogIds,
   mirroredLogIds,
   onAddFile,
@@ -266,6 +268,7 @@ export function ViewerSidebar({
           vehicleId={vehicleId}
           eventId={eventId}
           loadedFileIds={loadedFileIds}
+          pendingFileIds={pendingFileIds}
           onAddFile={onAddFile}
           onRemoveFile={onRemoveFile}
         />

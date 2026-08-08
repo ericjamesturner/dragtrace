@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { parsePreview, raceWindow, sparklinePath } from "@/lib/preview";
-import { PlusIcon, CheckIcon } from "lucide-react";
+import { PlusIcon, CheckIcon, LoaderCircleIcon } from "lucide-react";
 
 /**
  * A run's outcome in one word. Only `aborted` is derived today — it needs no
@@ -28,10 +28,12 @@ export interface PassCardProps {
   active: boolean;
   /** The only pass on the chart — unloading it would leave nothing to draw. */
   isOnlyLoaded?: boolean;
+  /** Selected, but its data is still being fetched and parsed. */
+  isPending?: boolean;
   onToggle: () => void;
 }
 
-export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, onToggle }: PassCardProps) {
+export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPending, onToggle }: PassCardProps) {
   const preview = useMemo(() => parsePreview(file.preview), [file.preview]);
 
   const path = useMemo(() => {
@@ -60,7 +62,7 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, onToggl
         isOnlyLoaded ? "cursor-default" : "cursor-pointer"
       } ${
         active ? "border-primary/60 bg-muted/40" : "border-border hover:bg-muted/30"
-      } ${outcome === "aborted" ? "opacity-60" : ""}`}
+      } ${outcome === "aborted" ? "opacity-60" : ""} ${isPending ? "animate-pulse" : ""}`}
     >
       <div className="flex items-baseline gap-2">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
@@ -107,19 +109,29 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, onToggl
         }}
         disabled={isOnlyLoaded}
         title={
-          isOnlyLoaded
-            ? "The only pass on the chart — add another before removing this one"
-            : loaded
-              ? "Remove from chart"
-              : "Add to chart"
+          isPending
+            ? "Loading this pass…"
+            : isOnlyLoaded
+              ? "The only pass on the chart — add another before removing this one"
+              : loaded
+                ? "Remove from chart"
+                : "Add to chart"
         }
         className={`absolute right-2 top-2 rounded p-1 transition-opacity ${
-          loaded
-            ? "text-primary opacity-100"
-            : "text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
+          isPending
+            ? "text-muted-foreground opacity-100"
+            : loaded
+              ? "text-primary opacity-100"
+              : "text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
         }`}
       >
-        {loaded ? <CheckIcon className="size-3.5" /> : <PlusIcon className="size-3.5" />}
+        {isPending ? (
+          <LoaderCircleIcon className="size-3.5 animate-spin" />
+        ) : loaded ? (
+          <CheckIcon className="size-3.5" />
+        ) : (
+          <PlusIcon className="size-3.5" />
+        )}
       </button>
     </div>
   );

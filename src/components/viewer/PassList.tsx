@@ -45,12 +45,14 @@ export function PassList({
   vehicleId,
   eventId,
   loadedFileIds,
+  pendingFileIds,
   onAddFile,
   onRemoveFile,
 }: {
   vehicleId: Id<"vehicles">;
   eventId: Id<"events">;
   loadedFileIds: Id<"files">[];
+  pendingFileIds?: Id<"files">[];
   onAddFile: (fileId: Id<"files">) => void;
   onRemoveFile: (fileId: Id<"files">) => void;
 }) {
@@ -82,6 +84,7 @@ export function PassList({
   const fileIds = useMemo(() => groups.flatMap((g) => g.files.map((f) => f._id)), [groups]);
   const timeslips = useTimeslips(fileIds);
   const loaded = useMemo(() => new Set(loadedFileIds), [loadedFileIds]);
+  const pending = useMemo(() => new Set(pendingFileIds ?? []), [pendingFileIds]);
 
   // Open the event being viewed; failing that the most recent one. A search
   // opens everything it matched, since a hit inside a folded group is invisible.
@@ -139,6 +142,7 @@ export function PassList({
                         loaded={isLoaded}
                         active={isLoaded}
                         isOnlyLoaded={isLoaded && loadedFileIds.length === 1}
+                        isPending={pending.has(file._id)}
                         onToggle={() =>
                           isLoaded ? onRemoveFile(file._id) : onAddFile(file._id)
                         }
