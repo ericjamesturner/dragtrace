@@ -26,10 +26,12 @@ export interface PassCardProps {
   timeslip?: Doc<"timeslips">;
   loaded: boolean;
   active: boolean;
+  /** The only pass on the chart — unloading it would leave nothing to draw. */
+  isOnlyLoaded?: boolean;
   onToggle: () => void;
 }
 
-export function PassCard({ file, timeslip, loaded, active, onToggle }: PassCardProps) {
+export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, onToggle }: PassCardProps) {
   const preview = useMemo(() => parsePreview(file.preview), [file.preview]);
 
   const path = useMemo(() => {
@@ -52,8 +54,11 @@ export function PassCard({ file, timeslip, loaded, active, onToggle }: PassCardP
 
   return (
     <div
-      onClick={onToggle}
-      className={`group relative cursor-pointer rounded-lg border p-3 transition-colors ${
+      onClick={isOnlyLoaded ? undefined : onToggle}
+      title={isOnlyLoaded ? "The only pass on the chart — add another before removing this one" : undefined}
+      className={`group relative rounded-lg border p-3 transition-colors ${
+        isOnlyLoaded ? "cursor-default" : "cursor-pointer"
+      } ${
         active ? "border-primary/60 bg-muted/40" : "border-border hover:bg-muted/30"
       } ${outcome === "aborted" ? "opacity-60" : ""}`}
     >
@@ -98,9 +103,16 @@ export function PassCard({ file, timeslip, loaded, active, onToggle }: PassCardP
       <button
         onClick={(e) => {
           e.stopPropagation();
-          onToggle();
+          if (!isOnlyLoaded) onToggle();
         }}
-        title={loaded ? "Remove from chart" : "Add to chart"}
+        disabled={isOnlyLoaded}
+        title={
+          isOnlyLoaded
+            ? "The only pass on the chart — add another before removing this one"
+            : loaded
+              ? "Remove from chart"
+              : "Add to chart"
+        }
         className={`absolute right-2 top-2 rounded p-1 transition-opacity ${
           loaded
             ? "text-primary opacity-100"

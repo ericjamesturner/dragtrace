@@ -449,12 +449,15 @@ function LogViewerReady({
   }, [setFileIds]);
 
   const handleRemoveFile = useCallback((fileId: Id<"files">) => {
-    setFileIds((prev) => {
-      const next = prev.filter((id) => id !== fileId);
-      return next.length > 0 ? next : prev;
-    });
+    // A viewer with no log has nothing to draw, so unloading the last one is a
+    // no-op. Crucially it must not purge either: the old code refused to drop
+    // the file but purged anyway, stripping every channel from every trace
+    // while the log stayed loaded — and since the file was still in fileIds,
+    // re-selecting it did nothing.
+    if (fileIds.length <= 1) return;
+    setFileIds((prev) => prev.filter((id) => id !== fileId));
     dispatch({ type: "purgeFile", logFileId: fileId });
-  }, [setFileIds]);
+  }, [fileIds, setFileIds]);
 
   const handleAddTrace = useCallback(
     (channels?: ChannelOnTrace[]) => {

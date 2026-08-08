@@ -138,6 +138,7 @@ export function PassList({
                         timeslip={timeslips.get(file._id)?.[0]}
                         loaded={isLoaded}
                         active={isLoaded}
+                        isOnlyLoaded={isLoaded && loadedFileIds.length === 1}
                         onToggle={() =>
                           isLoaded ? onRemoveFile(file._id) : onAddFile(file._id)
                         }

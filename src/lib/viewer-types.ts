@@ -651,12 +651,13 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         mirroredLogIds: state.mirroredLogIds?.filter((id) => id !== fid),
         pages: state.pages.map((page) => ({
           ...page,
-          traces: page.traces
-            .map((t) => ({
-              ...t,
-              channels: t.channels.filter((c) => (c.logFileId as string) !== fid),
-            }))
-            .filter((t) => t.channels.length > 0),
+          // Traces emptied by removing a log are kept, not deleted: their
+          // height, zones and position survive so re-adding the log leaves the
+          // layout where it was.
+          traces: page.traces.map((t) => ({
+            ...t,
+            channels: t.channels.filter((c) => (c.logFileId as string) !== fid),
+          })),
           ...(page.scatters ? { scatters: page.scatters.filter((s) => (s.logFileId as string) !== fid) } : {}),
           ...(page.heatmaps ? { heatmaps: page.heatmaps.filter((h) => (h.logFileId as string) !== fid) } : {}),
         })),
