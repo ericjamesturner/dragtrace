@@ -5,11 +5,14 @@ import { VehicleSidebar } from "./VehicleSidebar";
 import { EventList } from "./EventList";
 import { FileList } from "./FileList";
 import { ChannelManager } from "./ChannelManager";
+import { Preferences } from "./Preferences";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { MenuIcon, LogOutIcon, SettingsIcon } from "lucide-react";
+import { MenuIcon, LogOutIcon, SettingsIcon, SlidersHorizontalIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { AdminMenu } from "./AdminControls";
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
 
 const LogViewer = lazy(() => import("./LogViewer"));
 
@@ -18,7 +21,8 @@ type NavState =
   | { view: "events"; vehicleId: Id<"vehicles"> }
   | { view: "files"; vehicleId: Id<"vehicles">; eventId: Id<"events"> }
   | { view: "viewer"; vehicleId: Id<"vehicles">; eventId: Id<"events">; fileIds: Id<"files">[] }
-  | { view: "channel-manager" };
+  | { view: "channel-manager" }
+  | { view: "preferences" };
 
 interface NavContextValue {
   nav: NavState;
@@ -27,6 +31,7 @@ interface NavContextValue {
   goToFiles: (vehicleId: Id<"vehicles">, eventId: Id<"events">) => void;
   goToViewer: (vehicleId: Id<"vehicles">, eventId: Id<"events">, fileIds: Id<"files">[]) => void;
   goToChannelManager: () => void;
+  goToPreferences: () => void;
 }
 
 const NavContext = createContext<NavContextValue | null>(null);
@@ -41,6 +46,9 @@ function parseNavFromUrl(): NavState {
   const params = new URLSearchParams(window.location.search);
   if (params.has("channels")) {
     return { view: "channel-manager" };
+  }
+  if (params.has("preferences")) {
+    return { view: "preferences" };
   }
   const vehicleId = params.get("vehicle");
   const eventId = params.get("event");
@@ -73,6 +81,10 @@ function navToUrl(nav: NavState): string {
   const params = new URLSearchParams();
   if (nav.view === "channel-manager") {
     params.set("channels", "");
+    return `?${params.toString()}`;
+  }
+  if (nav.view === "preferences") {
+    params.set("preferences", "");
     return `?${params.toString()}`;
   }
   if (nav.view === "events" || nav.view === "files" || nav.view === "viewer") {
@@ -124,6 +136,11 @@ export function Layout() {
     []
   );
   const goToChannelManager = useCallback(() => setNav({ view: "channel-manager" }), []);
+  const goToPreferences = useCallback(() => setNav({ view: "preferences" }), []);
+
+  // The channel taxonomy is shared reference data, so only admins may edit it.
+  const adminState = useQuery(api.admin.state);
+  const isAdmin = adminState?.isAdmin ?? false;
 
   const contextValue: NavContextValue = {
     nav,
@@ -132,12 +149,21 @@ export function Layout() {
     goToFiles,
     goToViewer,
     goToChannelManager,
+    goToPreferences,
   };
 
   const sidebarContent = <VehicleSidebar onSelect={() => setMobileOpen(false)} />;
 
+  if (nav.view === "preferences") {
+    return (
+      <NavContext value={contextValue}>
+        <Preferences />
+      </NavContext>
+    );
+  }
+
   // Channel Manager takes over the full screen
-  if (nav.view === "channel-manager") {
+  if (nav.view === "channel-manager" && isAdmin) {
     return (
       <NavContext value={contextValue}>
         <ChannelManager />
@@ -169,15 +195,22 @@ export function Layout() {
             <h1 className="text-sm font-semibold tracking-tight">DragTrace</h1>
             <div className="flex items-center gap-1">
               <AdminMenu />
-              <Tip content="Channel Manager">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={goToChannelManager}
-                >
-                  <SettingsIcon />
+              <Tip content="Preferences">
+                <Button variant="ghost" size="icon-sm" onClick={goToPreferences}>
+                  <SlidersHorizontalIcon />
                 </Button>
               </Tip>
+              {isAdmin && (
+                <Tip content="Channel Manager">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={goToChannelManager}
+                  >
+                    <SettingsIcon />
+                  </Button>
+                </Tip>
+              )}
               <Tip content="Sign out">
                 <Button
                   variant="ghost"

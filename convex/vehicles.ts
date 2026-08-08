@@ -42,6 +42,25 @@ export const create = mutation({
   },
 });
 
+/**
+ * Per-quantity display overrides for one vehicle. Sparse: a quantity absent
+ * here inherits the user's preference, so a car running methanol only needs to
+ * say so about AFR.
+ */
+export const setUnitOverrides = mutation({
+  args: {
+    id: v.id("vehicles"),
+    unitOverrides: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getEffectiveUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
+    const vehicle = await ctx.db.get(args.id);
+    if (!vehicle || vehicle.userId !== userId) throw new Error("Not found");
+    await ctx.db.patch(args.id, { unitOverrides: args.unitOverrides });
+  },
+});
+
 export const update = mutation({
   args: {
     id: v.id("vehicles"),

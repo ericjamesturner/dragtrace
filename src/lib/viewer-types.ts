@@ -227,7 +227,7 @@ export type ViewerAction =
   | { type: "switchPage"; pageId: string }
   | { type: "toggleTracePin"; traceId: string }
   | { type: "setUnitSystem"; system: UnitSystem }
-  | { type: "cycleUnit"; metricUnit: string }
+  | { type: "cycleUnit"; quantitySlug: string }
   | { type: "addZone"; traceId: string; zone: HighlightZoneConfig }
   | { type: "updateZone"; traceId: string; zoneId: string; updates: Partial<Omit<HighlightZoneConfig, "id">> }
   | { type: "removeZone"; traceId: string; zoneId: string }
@@ -492,7 +492,7 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
       return { ...state, unitSystem: action.system };
     case "cycleUnit": {
       const current = state.unitOverrides ?? {};
-      return { ...state, unitOverrides: cycleUnitFn(action.metricUnit, state.unitSystem ?? "imperial", current) };
+      return { ...state, unitOverrides: cycleUnitFn(action.quantitySlug, state.unitSystem ?? "imperial", current) };
     }
     case "addZone":
       return {
@@ -719,7 +719,53 @@ function stripStaleColors(pages: PageConfig[]): PageConfig[] {
   }));
 }
 
+/**
+ * Unit preferences used to be keyed by a canonical unit string ("kPa", "K")
+ * with ad-hoc option keys. They are now keyed by quantity slug with the unit
+ * table's own alternate keys. Unmapped entries would silently revert the user
+ * to system defaults, so translate the old spellings on load.
+ */
+const LEGACY_UNIT_KEYS: Record<string, { slug: string; options: Record<string, string> }> = {
+  kPa: { slug: "pressure", options: { psi: "psi", kpa: "kpa", bar: "bar-abs", inhg: "inhg" } },
+  K: { slug: "temperature", options: { F: "degf", C: "degc", K: "degc" } },
+  "km/h": { slug: "speed", options: { mph: "mph", kmh: "km-h" } },
+  km: { slug: "driven-distance", options: { mi: "mi", km: "km" } },
+  "m/s^2": { slug: "acceleration", options: { g: "g", ms2: "m-s2" } },
+  lambda: {
+    slug: "afr",
+    options: {
+      lambda: "lambda", afr_gas: "afr-14-71", afr_e85: "afr-e85",
+      afr_meth: "afr-6-47", afr_diesel: "afr-diesel",
+    },
+  },
+  "cc/min": {
+    slug: "flow",
+    options: {
+      ccmin: "cc-min", lbhr_gas: "lbhr-gas", lbhr_e85: "lbhr-e85",
+      lbhr_meth: "meth-lb-hr",
+    },
+  },
+};
+
+function migrateUnitOverrides(raw: unknown): UnitOverrides | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: UnitOverrides = {};
+  for (const [key, value] of Object.entries(raw as Record<string, string>)) {
+    const legacy = LEGACY_UNIT_KEYS[key];
+    if (legacy) {
+      const mapped = legacy.options[value];
+      if (mapped) out[legacy.slug] = mapped;
+    } else {
+      out[key] = value;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export function migrateConfig(raw: Record<string, unknown>): ViewerConfig {
+  if (raw.unitOverrides) {
+    raw = { ...raw, unitOverrides: migrateUnitOverrides(raw.unitOverrides) };
+  }
   if (raw.pages && Array.isArray(raw.pages)) {
     const config = raw as unknown as ViewerConfig;
     return { ...config, pages: stripStaleColors(config.pages) };
