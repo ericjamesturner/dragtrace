@@ -1112,7 +1112,76 @@ export function TraceContainer({
                     strip uses, so switching between them changes only where the
                     legend sits, not how it reads. Range mode keeps the per-log
                     grouping below, since MIN/AVG/MAX/delta per log won't fit. */}
-                {multiLogTrace && !avgRange ? (
+                {avgRange ? (
+                  // Range selected: the stat labels belong in a header row, not
+                  // repeated on every line, and a channel is named once with a
+                  // row per run beneath it.
+                  <>
+                    <div className="flex items-center gap-1.5 text-[9px] font-semibold leading-tight pb-0.5 mb-0.5 border-b border-white/10">
+                      <span className="flex-1 text-white/40 uppercase tracking-wider">
+                        {multiLogTrace ? "Channel / run" : "Channel"}
+                      </span>
+                      <span className="w-14 text-right text-white/40">MIN</span>
+                      <span className="w-14 text-right text-amber-400">AVG</span>
+                      <span className="w-14 text-right text-white/40">MAX</span>
+                      <span className="w-14 text-right text-sky-400">Δ</span>
+                      <span className="w-8 shrink-0" />
+                    </div>
+                    {compactChannels.map(({ name, rows, unitLabel }) => {
+                      const keys = rows.map((r) => r.chKey);
+                      const allHidden = rows.every((r) => r.isChHidden);
+                      const someHidden = rows.some((r) => r.isChHidden);
+                      const stats = (r: typeof rows[number], showTag: boolean) => (
+                        <>
+                          {showTag && (
+                            <span
+                              className="font-bold uppercase tracking-wider text-[10px] truncate max-w-[84px] pl-4 flex-1"
+                              style={{ color: r.logColor }}
+                            >
+                              {traceLogs.find((l) => l.id === (r.ch.logFileId as string))?.tag ?? r.logName}
+                            </span>
+                          )}
+                          <span className="font-mono font-medium text-white/70 w-14 text-right tabular-nums">{r.minStr ?? "---"}</span>
+                          <span className="font-mono font-medium text-white w-14 text-right tabular-nums">{r.valueStr ?? "---"}</span>
+                          <span className="font-mono font-medium text-white/70 w-14 text-right tabular-nums">{r.maxStr ?? "---"}</span>
+                          <span className="font-mono font-medium text-sky-200/90 w-14 text-right tabular-nums">{r.deltaStr ?? "---"}</span>
+                          <span className="text-[9px] text-white/40 w-8 truncate shrink-0">{unitLabel}</span>
+                        </>
+                      );
+                      return (
+                        <div key={name}>
+                          <div className={`flex items-center gap-1.5 text-xs leading-tight ${allHidden ? "opacity-40" : ""}`}>
+                            <input
+                              type="checkbox"
+                              checked={!allHidden}
+                              ref={(el) => { if (el) el.indeterminate = someHidden && !allHidden; }}
+                              onChange={() => onSetChannelsHidden?.(keys, !allHidden)}
+                              className="accent-white/60 cursor-pointer shrink-0"
+                              style={{ width: 10, height: 10 }}
+                            />
+                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: rows[0]?.color, opacity: rows[0]?.opacity ?? 1 }} />
+                            <span className="text-white/70 truncate max-w-[140px] flex-1">{name}</span>
+                            {/* One run: its numbers sit on the name row. */}
+                            {!multiLogTrace && rows[0] && stats(rows[0], false)}
+                          </div>
+                          {multiLogTrace &&
+                            rows.map((r) => (
+                              <div
+                                key={r.chKey}
+                                className={`flex items-center gap-1.5 text-xs leading-tight ${
+                                  r.isChHidden || r.isLogHidden ? "opacity-40" : ""
+                                }`}
+                                onMouseEnter={() => setHoveredChannel(r.chKey)}
+                                onMouseLeave={() => setHoveredChannel(null)}
+                              >
+                                {stats(r, true)}
+                              </div>
+                            ))}
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : multiLogTrace ? (
                   <>
                     <div className="flex items-center gap-1.5 text-[10px] leading-tight pb-0.5 mb-0.5 border-b border-white/10">
                       <span className="shrink-0" style={{ width: 10 }} />
