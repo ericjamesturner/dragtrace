@@ -1106,7 +1106,108 @@ export function TraceContainer({
             {/* Channel rows */}
             {!legendMinimized && (
               <div className="flex flex-col gap-0.5 px-2 py-1">
-                {(() => {
+                {/* Comparing runs: one row per CHANNEL with that channel's
+                    value from each log side by side, rather than repeating
+                    every channel name once per log. Same structure the compact
+                    strip uses, so switching between them changes only where the
+                    legend sits, not how it reads. Range mode keeps the per-log
+                    grouping below, since MIN/AVG/MAX/delta per log won't fit. */}
+                {multiLogTrace && !avgRange ? (
+                  <>
+                    <div className="flex items-center gap-1.5 text-[10px] leading-tight pb-0.5 mb-0.5 border-b border-white/10">
+                      <span className="shrink-0" style={{ width: 10 }} />
+                      <span className="w-2 shrink-0" />
+                      <span className="text-white/40 truncate max-w-[140px] flex-1">Channel</span>
+                      {traceLogs.map((l) => (
+                        <span
+                          key={l.id}
+                          title={l.name}
+                          className="font-bold uppercase tracking-wider w-14 text-right truncate"
+                          style={{ color: l.color }}
+                        >
+                          {l.tag}
+                        </span>
+                      ))}
+                      <span className="w-8 shrink-0" />
+                    </div>
+                    {compactChannels.map(({ name, rows, unitLabel }) => {
+                      const keys = rows.map((r) => r.chKey);
+                      const allHidden = rows.every((r) => r.isChHidden);
+                      const someHidden = rows.some((r) => r.isChHidden);
+                      const dot = rows[0]?.color;
+                      return (
+                        <div key={name} className="flex items-center gap-1.5 text-xs leading-tight">
+                          <input
+                            type="checkbox"
+                            checked={!allHidden}
+                            ref={(el) => { if (el) el.indeterminate = someHidden && !allHidden; }}
+                            onChange={() => onSetChannelsHidden?.(keys, !allHidden)}
+                            className="accent-white/60 cursor-pointer shrink-0"
+                            style={{ width: 10, height: 10 }}
+                          />
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: dot, opacity: rows[0]?.opacity ?? 1 }}
+                          />
+                          <span className={`text-white/70 truncate max-w-[140px] flex-1 ${allHidden ? "opacity-40" : ""}`}>
+                            {name}
+                          </span>
+                          {traceLogs.map((l) => {
+                            const r = rows.find((x) => (x.ch.logFileId as string) === l.id);
+                            if (!r) {
+                              return <span key={l.id} className="w-14 text-right text-white/20 font-mono tabular-nums">—</span>;
+                            }
+                            const isHovered = hoveredChannel === r.chKey;
+                            const isDimmed = hoveredChannel !== null && !isHovered;
+                            const muted = r.isChHidden || r.isLogHidden;
+                            return (
+                              <span
+                                key={l.id}
+                                draggable
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onSetChannelsHidden?.([r.chKey], !r.isChHidden);
+                                }}
+                                onMouseEnter={() => setHoveredChannel(r.chKey)}
+                                onMouseLeave={() => setHoveredChannel(null)}
+                                onDragStart={(e) => {
+                                  e.dataTransfer.setData(
+                                    "text/plain",
+                                    JSON.stringify({
+                                      logFileId: r.ch.logFileId,
+                                      channelName: r.ch.channelName,
+                                      sourceTraceId: trace.id,
+                                    }),
+                                  );
+                                  e.dataTransfer.effectAllowed = "move";
+                                }}
+                                onContextMenu={(e) => {
+                                  e.preventDefault();
+                                  setCmAppearanceOpen(false);
+                                  setContextMenu({
+                                    x: e.clientX,
+                                    y: e.clientY,
+                                    logFileId: r.ch.logFileId,
+                                    channelName: r.ch.channelName,
+                                  });
+                                }}
+                                title={`${l.name} · ${name}${r.isChHidden ? " (hidden)" : ""} — click to ${r.isChHidden ? "show" : "hide"}, drag to move, right-click to style`}
+                                className={`font-mono font-medium w-14 text-right tabular-nums cursor-pointer rounded-sm px-0.5 transition-all ${
+                                  muted ? "line-through decoration-1 opacity-40" : ""
+                                } ${isDimmed ? "opacity-40" : ""} ${isHovered ? "bg-white/15" : ""}`}
+                                style={{ color: l.color }}
+                              >
+                                {r.valueStr ?? "---"}
+                              </span>
+                            );
+                          })}
+                          <span className="text-[9px] text-white/40 w-8 truncate shrink-0">{unitLabel}</span>
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : (
+                  (() => {
                   return legendGroups.map(({ logId, log, isLogHidden: isHidden, multiLog, allLogChKeys, allLogHidden, someLogHidden, rows }) => {
                     return (
                       <div key={logId} className={isHidden ? "opacity-30" : ""}>
@@ -1212,7 +1313,8 @@ export function TraceContainer({
                       </div>
                     );
                   });
-                })()}
+                  })()
+                )}
               </div>
             )}
           </div>
