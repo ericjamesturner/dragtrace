@@ -164,6 +164,11 @@ export interface PageConfig {
   heatmaps?: HeatmapConfig[];
   // Persisted drag-select range for this page (survives reload). Undefined = none.
   selection?: [number, number];
+  // Persisted x-axis zoom for this page. Logs are clipped to a fixed lead-in
+  // before the race, so this window stays meaningful when a different pass is
+  // loaded — "the first three seconds" lands in the same place on every run.
+  // Undefined = fitted to the full range.
+  zoom?: [number, number];
 }
 
 export interface ViewerConfig {
@@ -253,6 +258,7 @@ export type ViewerAction =
   | { type: "updateHeatmap"; heatmapId: string; updates: Partial<Omit<HeatmapConfig, "id">> }
   | { type: "setScatterSuggestions"; suggestions: ScatterSuggestion[]; key: string }
   | { type: "setSelection"; selection: [number, number] | null }
+  | { type: "setZoom"; zoom: [number, number] | null }
   | { type: "setRaceLineStyle"; color?: string; width?: number; dash?: number[] }
   | { type: "purgeFile"; logFileId: Id<"files"> };
 
@@ -639,6 +645,17 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
           if (action.selection) return { ...p, selection: action.selection };
           const { selection: _drop, ...rest } = p;
           return rest;
+        }),
+      };
+    case "setZoom":
+      return {
+        ...state,
+        pages: state.pages.map((p) => {
+          if (p.id !== state.activePageId) return p;
+          if (action.zoom) return { ...p, zoom: action.zoom };
+          const next = { ...p };
+          delete next.zoom;
+          return next;
         }),
       };
     case "setRaceLineStyle":

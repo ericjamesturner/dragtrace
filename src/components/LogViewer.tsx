@@ -671,6 +671,8 @@ function LogViewerReady({
           avgOnSelection={config.avgOnSelection !== false}
           persistedSelection={config.pages.find((p) => p.id === config.activePageId)?.selection ?? null}
           onPersistSelection={(sel) => dispatch({ type: "setSelection", selection: sel })}
+          persistedZoom={config.pages.find((p) => p.id === config.activePageId)?.zoom ?? null}
+          onPersistZoom={(zoom) => dispatch({ type: "setZoom", zoom })}
           timeslipZones={timeslipZones}
           expandedTimeslipIds={config.expandedTimeslipIds ?? []}
           onToggleTimeslipExpand={(id) => dispatch({ type: "toggleTimeslipExpand", id })}

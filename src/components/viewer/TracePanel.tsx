@@ -65,6 +65,8 @@ interface Props {
   onSetChannelsHidden: (traceId: string, keys: string[], hidden: boolean) => void;
   avgOnSelection: boolean;
   persistedSelection?: [number, number] | null;
+  persistedZoom?: [number, number] | null;
+  onPersistZoom?: (zoom: [number, number] | null) => void;
   onPersistSelection?: (sel: [number, number] | null) => void;
   timeslipZones: EvaluatedZone[];
   expandedTimeslipIds: string[];
@@ -128,6 +130,8 @@ export function TracePanel({
   onSetChannelsHidden,
   avgOnSelection,
   persistedSelection,
+  persistedZoom,
+  onPersistZoom,
   onPersistSelection,
   timeslipZones,
   expandedTimeslipIds,
@@ -142,7 +146,7 @@ export function TracePanel({
   onRemoveHeatmap,
   onUpdateHeatmap,
 }: Props) {
-  const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
+  const [zoomRange, setZoomRange] = useState<[number, number] | null>(persistedZoom ?? null);
   const [selection, setSelection] = useState<[number, number] | null>(persistedSelection ?? null);
   const [dragPreview, setDragPreview] = useState<[number, number] | null>(null);
   const [cursorTime, setCursorTime] = useState<number | null>(null);
@@ -321,6 +325,34 @@ export function TracePanel({
     lastSentRef.current = persistedSelection ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePageId]);
+
+  // --- Persist the settled zoom per page, so a window you found is still there
+  // next time rather than needing to be hunted down again. ---
+  const onPersistZoomRef = useRef(onPersistZoom);
+  onPersistZoomRef.current = onPersistZoom;
+  const lastZoomSentRef = useRef<[number, number] | null>(persistedZoom ?? null);
+
+  useEffect(() => {
+    setZoomRange(persistedZoom ?? null);
+    lastZoomSentRef.current = persistedZoom ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePageId]);
+
+  // Wheel-zoom fires continuously, so only the settled value is written —
+  // otherwise every frame would round-trip through the reducer and the save.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      const cur = zoomRange;
+      const last = lastZoomSentRef.current;
+      const same =
+        (cur === null && last === null) ||
+        (cur !== null && last !== null && cur[0] === last[0] && cur[1] === last[1]);
+      if (same) return;
+      lastZoomSentRef.current = cur;
+      onPersistZoomRef.current?.(cur);
+    }, 500);
+    return () => clearTimeout(id);
+  }, [zoomRange]);
 
   // Debounce-persist the settled selection (covers edge-drag, native drag,
   // click). Live edge-drag moves only persist their settled value, not every
