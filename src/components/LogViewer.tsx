@@ -516,11 +516,6 @@ function LogViewerReady({
   return (
     <div className="flex flex-col h-screen">
       <ViewerToolbar
-        logs={logs}
-        alignByRaceTime={config.alignByRaceTime}
-        showAxes={!!config.showAxes}
-        showAxisLabels={!!config.showAxisLabels}
-        unitSystem={units.unitSystem}
         wheelZoomEnabled={config.wheelZoomEnabled ?? true}
         wheelZoomFactor={config.wheelZoomFactor ?? 1.25}
         wheelMode={config.wheelMode ?? "zoom"}
@@ -528,10 +523,6 @@ function LogViewerReady({
         compactLegend={!!config.compactLegend}
         avgOnSelection={config.avgOnSelection !== false}
         showTimeslip={showTimeslip}
-        onToggleAlignment={() => dispatch({ type: "toggleAlignment" })}
-        onToggleAxes={() => dispatch({ type: "toggleAxes" })}
-        onToggleAxisLabels={() => dispatch({ type: "toggleAxisLabels" })}
-        onToggleUnitSystem={() => units.setUserSystem(units.unitSystem === "imperial" ? "metric" : "imperial")}
         onToggleWheelZoom={() => dispatch({ type: "setWheelZoomEnabled", enabled: !(config.wheelZoomEnabled ?? true) })}
         onSetWheelZoomFactor={(f) => dispatch({ type: "setWheelZoomFactor", factor: f })}
         onSetWheelMode={(m) => dispatch({ type: "setWheelMode", mode: m })}
@@ -564,6 +555,7 @@ function LogViewerReady({
         <div className="shrink-0 overflow-hidden" style={{ width: sidebarWidth }}>
           <ViewerSidebar
             logs={logs}
+            unitSystem={units.unitSystem}
             vehicleId={vehicleId}
             eventId={eventId}
             loadedFileIds={fileIds}
@@ -585,8 +577,7 @@ function LogViewerReady({
               dispatch({ type: "toggleMirrorLog", logFileId })
             }
             activeTraceId={activeTraceId}
-            unitSystem={units.unitSystem}
-            unitOverrides={units.resolved}
+                unitOverrides={units.resolved}
             onCycleUnit={(quantitySlug) =>
               units.setVehicleOverrides(
                 cycleUnitFn(quantitySlug, units.unitSystem, units.resolved),
@@ -602,6 +593,10 @@ function LogViewerReady({
         />
 
         <TracePanel
+          logs={logs}
+          showAxes={!!config.showAxes}
+          showAxisLabels={!!config.showAxisLabels}
+          unitSystem={units.unitSystem}
           traces={effectiveTraces}
           pinnedFromOtherIds={pinnedFromOtherIds}
           pages={config.pages}
@@ -611,16 +606,13 @@ function LogViewerReady({
           onRenamePage={(pageId, label) => dispatch({ type: "renamePage", pageId, label })}
           onSwitchPage={(pageId) => dispatch({ type: "switchPage", pageId })}
           onToggleTracePin={(traceId) => dispatch({ type: "toggleTracePin", traceId })}
-          logs={logs}
-          syncKey={sync.key}
+            syncKey={sync.key}
           offsets={alignment.offsets}
           globalRange={alignment.globalRange}
           activeTraceId={activeTraceId}
           hiddenLogIds={config.hiddenLogIds ?? []}
           mirroredLogIds={config.mirroredLogIds ?? []}
-          showAxes={!!config.showAxes}
-          showAxisLabels={!!config.showAxisLabels}
-          onSetActiveTrace={setActiveTraceId}
+              onSetActiveTrace={setActiveTraceId}
           onRemoveTrace={(traceId) => dispatch({ type: "removeTrace", traceId })}
           onRemoveChannel={(traceId, logFileId, channelName) =>
             dispatch({ type: "removeChannel", traceId, logFileId, channelName })
@@ -665,8 +657,7 @@ function LogViewerReady({
           onToggleZone={(traceId, zoneId) =>
             dispatch({ type: "toggleZone", traceId, zoneId })
           }
-          unitSystem={units.unitSystem}
-          unitOverrides={units.resolved}
+            unitOverrides={units.resolved}
           wheelZoomEnabled={config.wheelZoomEnabled ?? true}
           wheelZoomFactor={config.wheelZoomFactor ?? 1.25}
           wheelMode={config.wheelMode ?? "zoom"}

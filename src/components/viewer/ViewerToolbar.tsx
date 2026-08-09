@@ -1,15 +1,8 @@
-import type { LoadedLog } from "@/lib/viewer-types";
-import type { UnitSystem } from "@/lib/units";
 import { Button } from "@/components/ui/button";
-import { ChevronLeftIcon, PlusIcon, AlignCenterHorizontalIcon, RulerIcon, TagIcon, ThermometerIcon, ZoomInIcon, SigmaIcon, FlagIcon, StretchVerticalIcon, ListIcon } from "lucide-react";
+import { ChevronLeftIcon, PlusIcon, ZoomInIcon, SigmaIcon, FlagIcon, StretchVerticalIcon, ListIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 
 interface Props {
-  logs: LoadedLog[];
-  alignByRaceTime: boolean;
-  showAxes: boolean;
-  showAxisLabels: boolean;
-  unitSystem: UnitSystem;
   wheelZoomEnabled: boolean;
   wheelZoomFactor: number;
   wheelMode: "zoom" | "scroll";
@@ -17,10 +10,6 @@ interface Props {
   compactLegend: boolean;
   avgOnSelection: boolean;
   showTimeslip: boolean;
-  onToggleAlignment: () => void;
-  onToggleAxes: () => void;
-  onToggleAxisLabels: () => void;
-  onToggleUnitSystem: () => void;
   onToggleWheelZoom: () => void;
   onSetWheelZoomFactor: (factor: number) => void;
   onSetWheelMode: (mode: "zoom" | "scroll") => void;
@@ -34,9 +23,7 @@ interface Props {
   workspaceMenu?: React.ReactNode;
 }
 
-export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels, unitSystem, wheelZoomEnabled, wheelZoomFactor, wheelMode, fitTraces, compactLegend, avgOnSelection, showTimeslip, onToggleAlignment, onToggleAxes, onToggleAxisLabels, onToggleUnitSystem, onToggleWheelZoom, onSetWheelZoomFactor, onSetWheelMode, onToggleFitTraces, onApplyLayoutPreset, onToggleCompactLegend, onToggleAvgOnSelection, onToggleTimeslip, onAddTrace, onBack, workspaceMenu }: Props) {
-  const hasRaceData = logs.some((l) => l.raceStartTime !== null);
-
+export function ViewerToolbar({ wheelZoomEnabled, wheelZoomFactor, wheelMode, fitTraces, compactLegend, avgOnSelection, showTimeslip, onToggleWheelZoom, onSetWheelZoomFactor, onSetWheelMode, onToggleFitTraces, onApplyLayoutPreset, onToggleCompactLegend, onToggleAvgOnSelection, onToggleTimeslip, onAddTrace, onBack, workspaceMenu }: Props) {
   return (
     <div className="flex items-center gap-3 border-b px-3 py-2 shrink-0 bg-background">
       <Button variant="ghost" size="sm" onClick={onBack}>
@@ -49,50 +36,6 @@ export function ViewerToolbar({ logs, alignByRaceTime, showAxes, showAxisLabels,
       <div className="flex-1" />
 
       <div className="flex items-center gap-1.5">
-        {hasRaceData && (
-          <Tip content="Align logs by race start time">
-            <Button
-              variant={alignByRaceTime ? "default" : "outline"}
-              size="sm"
-              onClick={onToggleAlignment}
-            >
-              <AlignCenterHorizontalIcon className="size-4 mr-1" />
-              Align
-            </Button>
-          </Tip>
-        )}
-        <Tip content="Show Y-axis scales">
-          <Button
-            variant={showAxes ? "default" : "outline"}
-            size="sm"
-            onClick={onToggleAxes}
-          >
-            <RulerIcon className="size-4 mr-1" />
-            Axes
-          </Button>
-        </Tip>
-        {showAxes && (
-          <Tip content="Show axis labels">
-            <Button
-              variant={showAxisLabels ? "default" : "outline"}
-              size="sm"
-              onClick={onToggleAxisLabels}
-            >
-              <TagIcon className="size-4 mr-1" />
-              Labels
-            </Button>
-          </Tip>
-        )}
-        <Tip content={unitSystem === "imperial" ? "Switch to metric units" : "Switch to imperial units"}>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onToggleUnitSystem}
-          >
-            <ThermometerIcon className="size-4 mr-1" />
-            {unitSystem === "imperial" ? "Imperial" : "Metric"}
-          </Button>
-        </Tip>
         <Tip content="Cursor-centered mouse-wheel zoom">
           <Button
             variant={wheelZoomEnabled ? "default" : "outline"}
