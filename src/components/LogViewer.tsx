@@ -437,7 +437,7 @@ function LogViewerReady({
   // Timeslip overlay strips: fetch per-file timeslips and build synthetic zones
   // anchored at each log's detected race-start (+ alignment offset).
   const timeslipsByFile = useTimeslips(fileIds);
-  const showTimeslip = config.showTimeslip !== false; // default shown
+  const showTimeslip = true;
   const timeslipZones = useMemo(
     () => buildTimeslipZones(logs, timeslipsByFile, alignment.offsets, showTimeslip),
     [logs, timeslipsByFile, alignment.offsets, showTimeslip],
@@ -499,10 +499,6 @@ function LogViewerReady({
   return (
     <div className="flex flex-col h-screen">
       <ViewerToolbar
-        avgOnSelection={config.avgOnSelection !== false}
-        showTimeslip={showTimeslip}
-        onToggleAvgOnSelection={() => dispatch({ type: "toggleAvgOnSelection" })}
-        onToggleTimeslip={() => dispatch({ type: "toggleTimeslip" })}
         onAddTrace={() => handleAddTrace()}
         onBack={handleBack}
         workspaceMenu={
@@ -566,6 +562,7 @@ function LogViewerReady({
 
         <TracePanel
           logs={logs}
+          avgOnSelection
           showAxes={!!config.showAxes}
           showAxisLabels={!!config.showAxisLabels}
           unitSystem={units.unitSystem}
@@ -635,8 +632,7 @@ function LogViewerReady({
           onSetChannelsHidden={(traceId, keys, hidden) =>
             dispatch({ type: "setChannelsHidden", traceId, keys, hidden })
           }
-          avgOnSelection={config.avgOnSelection !== false}
-          persistedSelection={config.pages.find((p) => p.id === config.activePageId)?.selection ?? null}
+            persistedSelection={config.pages.find((p) => p.id === config.activePageId)?.selection ?? null}
           onPersistSelection={(sel) => dispatch({ type: "setSelection", selection: sel })}
           persistedZoom={config.pages.find((p) => p.id === config.activePageId)?.zoom ?? null}
           onPersistZoom={(zoom) => dispatch({ type: "setZoom", zoom })}
