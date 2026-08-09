@@ -1641,6 +1641,17 @@ export function TraceContainer({
                       className="h-1.5 w-full cursor-pointer accent-primary"
                     />
                   </div>
+                  <div>
+                    <ColorByEditor
+                      key={cmKey}
+                      ch={cmCh}
+                      pickerLogs={cmLog ? [cmLog] : logs}
+                      selfName={contextMenu.channelName}
+                      onSet={(colorBy, lo, hi, lowColor, highColor) =>
+                        onSetChannelColorBy(contextMenu.logFileId, contextMenu.channelName, colorBy, lo, hi, lowColor, highColor)
+                      }
+                    />
+                  </div>
 
                 </div>
 
@@ -1699,18 +1710,6 @@ export function TraceContainer({
                         </span>
                       )}
                     </div>
-                  </div>
-
-                  <div>
-                    <ColorByEditor
-                      key={cmKey}
-                      ch={cmCh}
-                      pickerLogs={cmLog ? [cmLog] : logs}
-                      selfName={contextMenu.channelName}
-                      onSet={(colorBy, lo, hi, lowColor, highColor) =>
-                        onSetChannelColorBy(contextMenu.logFileId, contextMenu.channelName, colorBy, lo, hi, lowColor, highColor)
-                      }
-                    />
                   </div>
 
                 </div>
