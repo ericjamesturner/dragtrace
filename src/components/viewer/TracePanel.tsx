@@ -49,7 +49,6 @@ interface Props {
   onSetChannelWidth: (traceId: string, logFileId: Id<"files">, channelName: string, width: number) => void;
   onSetChannelDash: (traceId: string, logFileId: Id<"files">, channelName: string, dash: number[] | undefined) => void;
   onSetChannelAxisRange: (traceId: string, logFileId: Id<"files">, channelName: string, axisMin?: number, axisMax?: number) => void;
-  onSetTraceLegendPos: (traceId: string, x: number, y: number) => void;
   onSetChannelColorBy: (traceId: string, logFileId: Id<"files">, channelName: string, colorBy?: string, colorByMin?: number, colorByMax?: number, colorByLowColor?: string, colorByHighColor?: string) => void;
   onAddZone: (traceId: string, zone: HighlightZoneConfig) => void;
   onUpdateZone: (traceId: string, zoneId: string, updates: Partial<Omit<HighlightZoneConfig, "id">>) => void;
@@ -117,7 +116,6 @@ export function TracePanel({
   onSetChannelDash,
   onSetChannelAxisRange,
   onSetChannelColorBy,
-  onSetTraceLegendPos,
   onAddZone,
   onUpdateZone,
   onRemoveZone,
@@ -699,7 +697,6 @@ export function TracePanel({
                 unitOverrides={unitOverrides}
                 groupYRanges={groupYRanges}
                 sharedZones={sharedZones}
-                onSetLegendPos={(x, y) => onSetTraceLegendPos(trace.id, x, y)}
                 onAddZone={(zone) => onAddZone(trace.id, zone)}
                 onUpdateZone={(zoneId, updates) => onUpdateZone(trace.id, zoneId, updates)}
                 onRemoveZone={(zoneId) => onRemoveZone(trace.id, zoneId)}

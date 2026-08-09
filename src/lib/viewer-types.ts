@@ -113,7 +113,7 @@ export interface TraceConfig {
   // Channels unchecked in the floating legend, as `${logFileId}:${channelName}`.
   hiddenChannels?: string[];
   highlightZones?: HighlightZoneConfig[];
-  // Dragged position of the floating channels legend (px within the chart).
+  /** @deprecated The channels panel is docked beside the chart; nothing reads this. */
   legendPos?: { x: number; y: number };
   /**
    * Draw the timeslip band — the 60'/330'/660'/1000'/1320' strip — under this
@@ -267,7 +267,6 @@ export type ViewerAction =
   | { type: "toggleTraceTimeslip"; traceId: string }
   | { type: "setChannelsHidden"; traceId: string; keys: string[]; hidden: boolean }
   | { type: "toggleAvgOnSelection" }
-  | { type: "setTraceLegendPos"; traceId: string; x: number; y: number }
   | { type: "setChannelColorBy"; traceId: string; logFileId: Id<"files">; channelName: string; colorBy: string | undefined; colorByMin?: number; colorByMax?: number; colorByLowColor?: string; colorByHighColor?: string }
   | { type: "toggleTimeslip" }
   | { type: "toggleTimeslipExpand"; id: string }
@@ -561,14 +560,6 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         pages: mapTraceById(state.pages, action.traceId, (t) => ({
           ...t,
           highlightZones: [...(t.highlightZones ?? []), action.zone],
-        })),
-      };
-    case "setTraceLegendPos":
-      return {
-        ...state,
-        pages: mapTraceById(state.pages, action.traceId, (t) => ({
-          ...t,
-          legendPos: { x: action.x, y: action.y },
         })),
       };
     case "updateZone":

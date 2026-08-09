@@ -7,7 +7,7 @@ import { TraceSettingsPanel, ChannelPicker } from "./TraceSettingsPanel";
 import { findValueAtTime, formatValue, formatChannelValue, computeRangeStats } from "@/lib/cursor-utils";
 import { convertForDisplay, convertFromDisplay, getDisplayUnit, getDisplayPrecision, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
-import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, GripHorizontalIcon, GripVerticalIcon, TimerIcon } from "lucide-react";
+import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 
 interface ContextMenuState {
@@ -23,6 +23,9 @@ interface ContextMenuState {
  * being a few px off just nudges where the scroll fallback kicks in.
  */
 export const TRACE_CHROME_PX = 34;
+
+/** Width of the docked channels panel once collapsed to its toggle. */
+const LEGEND_COLLAPSED_W = 22;
 
 const WIDTH_OPTIONS = [1, 1.5, 2.5, 4];
 const STYLE_OPTIONS: { label: string; dash: number[] | undefined }[] = [
@@ -343,7 +346,6 @@ interface Props {
   /** Zones (from any trace) flagged to display on every trace. */
   sharedZones?: HighlightZoneConfig[];
   /** Persist the dragged channels-legend position. */
-  onSetLegendPos?: (x: number, y: number) => void;
   expandedTimeslipIds?: string[];
   onToggleTimeslipExpand?: (id: string) => void;
   // Race-start marker line style + setter (global; persisted in config).
@@ -409,7 +411,6 @@ export function TraceContainer({
   timeslipZones,
   groupYRanges,
   sharedZones,
-  onSetLegendPos,
   expandedTimeslipIds,
   onToggleTimeslipExpand,
   raceLine,
@@ -436,19 +437,7 @@ export function TraceContainer({
     setColorPreview(null);
   }, [contextMenu]);
 
-  // null means "wherever the default corner is" — top right, anchored so it
-  // stays there as the trace is resized. Dragging pins it to a left/top pair.
-  const [legendPos, setLegendPos] = useState<{ x: number; y: number } | null>(
-    trace.legendPos ?? null,
-  );
-  const legendRef = useRef<HTMLDivElement>(null);
-
-  // Follow externally-loaded positions (workspace switch, other session)
-  useEffect(() => {
-    setLegendPos(trace.legendPos ?? null);
-  }, [trace.legendPos?.x, trace.legendPos?.y]); // eslint-disable-line react-hooks/exhaustive-deps
   const [legendMinimized, setLegendMinimized] = useState(false);
-  const legendDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   const chartAreaRef = useRef<HTMLDivElement>(null);
   const [hoveredChannel, setHoveredChannel] = useState<string | null>(null);
   const hiddenChannels = useMemo(
@@ -538,44 +527,6 @@ export function TraceContainer({
     },
     [onToggleTimeslipExpand, onUpdateZone, trace.highlightZones, foreignSharedZones],
   );
-
-  const handleLegendMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    // Undragged legends are anchored to a corner rather than to coordinates,
-    // so the drag starts from where the element actually sits.
-    const el = legendRef.current;
-    const origin = legendPos ?? { x: el?.offsetLeft ?? 8, y: el?.offsetTop ?? 8 };
-    legendDragRef.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      originX: origin.x,
-      originY: origin.y,
-    };
-
-    let lastX = origin.x;
-    let lastY = origin.y;
-    let moved = false;
-    const handleMove = (ev: MouseEvent) => {
-      if (!legendDragRef.current || !chartAreaRef.current) return;
-      const bounds = chartAreaRef.current.getBoundingClientRect();
-      const dx = ev.clientX - legendDragRef.current.startX;
-      const dy = ev.clientY - legendDragRef.current.startY;
-      lastX = Math.max(0, Math.min(bounds.width - 40, legendDragRef.current.originX + dx));
-      lastY = Math.max(0, Math.min(bounds.height - 20, legendDragRef.current.originY + dy));
-      moved = true;
-      setLegendPos({ x: lastX, y: lastY });
-    };
-
-    const handleUp = () => {
-      legendDragRef.current = null;
-      document.removeEventListener("mousemove", handleMove);
-      document.removeEventListener("mouseup", handleUp);
-      if (moved) onSetLegendPos?.(lastX, lastY); // persist to workspace
-    };
-
-    document.addEventListener("mousemove", handleMove);
-    document.addEventListener("mouseup", handleUp);
-  }, [legendPos, onSetLegendPos]);
 
   // Close context menus on click outside or escape
   useEffect(() => {
@@ -718,7 +669,6 @@ export function TraceContainer({
   }, [logsWithChannels, offsets]);
 
   // Chart area width
-  const chartWidth = Math.max(100, width - 8);
 
   // A RANGE selection (not a click/point) drives the AVG readout, when enabled.
   const avgRange: [number, number] | null =
@@ -871,6 +821,18 @@ export function TraceContainer({
     const unique = new Set(tags).size === tags.length;
     return list.map((l, i) => ({ ...l, tag: unique ? tags[i] : l.name }));
   }, [legendGroups]);
+
+  // The channels panel is docked beside the chart rather than floating over
+  // it, so the plot has to give up its width. Sized to the columns it actually
+  // has to show: one value per run normally, four stats when a range is
+  // selected. uPlot needs a number, so this is computed rather than measured.
+  const legendPanelWidth = (() => {
+    if (trace.channels.length === 0 || legendInHeader) return 0;
+    if (legendMinimized) return LEGEND_COLLAPSED_W;
+    const columns = avgRange ? 4 : Math.max(1, traceLogs.length);
+    return Math.min(440, Math.max(200, 170 + columns * 56 + 28));
+  })();
+  const chartWidth = Math.max(100, width - 8 - legendPanelWidth);
 
   const multiLogTrace = traceLogs.length > 1;
 
@@ -1065,13 +1027,14 @@ export function TraceContainer({
         </Tip>
       </div>
 
-      {/* Chart area with legend overlay */}
+      {/* Chart area, with the channels panel docked to its right */}
       {!collapsed && (
       <div
         ref={chartAreaRef}
-        className={`relative ${fitTraces ? "flex-1 min-h-0" : ""}`}
+        className={`relative flex ${fitTraces ? "flex-1 min-h-0" : ""}`}
         style={fitTraces ? undefined : { height: trace.height }}
       >
+        <div className="relative min-w-0 flex-1">
         {logGroups.length > 0 ? (
           <TraceChart
             logGroups={logGroups}
@@ -1120,30 +1083,28 @@ export function TraceContainer({
             Drag channels from the sidebar to add them
           </div>
         )}
+        </div>
 
-        {/* Floating channel legend — suppressed while it lives in the header */}
+        {/* Channels panel — docked to the right of the plot so it never covers
+            a trace. Suppressed while the legend lives in the header. */}
         {trace.channels.length > 0 && !legendInHeader && (
           <div
-            ref={legendRef}
-            className="absolute z-10 rounded border border-white bg-black/60 backdrop-blur-sm select-none overflow-hidden"
-            style={legendPos ? { left: legendPos.x, top: legendPos.y } : { right: 8, top: 8 }}
+            className="shrink-0 select-none overflow-y-auto overflow-x-hidden border-l border-border bg-black/25"
+            style={{ width: legendPanelWidth }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Legend header — drag handle */}
-            <div
-              className="flex items-center gap-1 px-1.5 py-0.5 cursor-move border-b border-white/10"
-              onMouseDown={handleLegendMouseDown}
-            >
-              <GripHorizontalIcon className="size-3 text-white/30" />
-              <span className="text-[10px] text-white/40 flex-1">Channels</span>
-              <button
-                className="text-white/40 hover:text-white/70 cursor-pointer"
-                onClick={() => setLegendMinimized((v) => !v)}
-              >
-                {legendMinimized
-                  ? <ChevronRightIcon className="size-3" />
-                  : <ChevronDownIcon className="size-3" />}
-              </button>
+            <div className="flex items-center gap-1 px-1.5 py-0.5 border-b border-white/10">
+              {!legendMinimized && <span className="text-[10px] text-white/40 flex-1">Channels</span>}
+              <Tip content={legendMinimized ? "Show channels" : "Hide channels"}>
+                <button
+                  className="text-white/40 hover:text-white/70 cursor-pointer"
+                  onClick={() => setLegendMinimized((v) => !v)}
+                >
+                  {legendMinimized
+                    ? <ChevronLeftIcon className="size-3" />
+                    : <ChevronRightIcon className="size-3" />}
+                </button>
+              </Tip>
             </div>
 
             {/* Channel rows */}
