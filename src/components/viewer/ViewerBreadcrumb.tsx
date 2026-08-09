@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -119,7 +119,6 @@ export function ViewerBreadcrumb({
   onOpen,
   onCompare,
   onRemove,
-  onGoToEvent,
 }: {
   vehicleId: Id<"vehicles">;
   eventId: Id<"events">;
@@ -133,28 +132,49 @@ export function ViewerBreadcrumb({
   onCompare: (fileId: Id<"files">) => void;
   /** Take this pass back off the chart. */
   onRemove: (fileId: Id<"files">) => void;
-  /** No pass chosen yet — go to the event's file list. */
-  onGoToEvent: (vehicleId: Id<"vehicles">, eventId: Id<"events">) => void;
 }) {
   const vehicles = useQuery(api.vehicles.list, {});
-  const events = useQuery(api.events.listByVehicle, { vehicleId });
-  const files = useQuery(api.files.listByEvent, { eventId });
+
+  // Which runs the menu is listing, as opposed to which the viewer is "in".
+  // A comparison is often against a weekend you left months ago — or another
+  // car entirely — and going there to fetch it would throw away the chart
+  // you're trying to compare against.
+  const [scopeVehicleId, setScopeVehicleId] = useState(vehicleId);
+  const [scopeEventId, setScopeEventId] = useState(eventId);
+  useEffect(() => {
+    setScopeVehicleId(vehicleId);
+    setScopeEventId(eventId);
+  }, [vehicleId, eventId]);
+
+  const scopeEvents = useQuery(api.events.listByVehicle, { vehicleId: scopeVehicleId });
+  // Events arrive newest first, so a car you've just switched to opens on its
+  // most recent weekend.
+  useEffect(() => {
+    if (!scopeEvents || scopeEvents.length === 0) return;
+    if (scopeEvents.some((e) => e._id === scopeEventId)) return;
+    setScopeEventId(scopeEvents[0]._id);
+  }, [scopeEvents, scopeEventId]);
+
+  const files = useQuery(api.files.listByEvent, { eventId: scopeEventId });
   const fileIds = useMemo(() => (files ?? []).map((f) => f._id), [files]);
   const timeslips = useTimeslips(fileIds);
   const { seriesByFile, spanSeconds } = usePassPreviews(files ?? [], timeslips);
 
-  const vehicle = vehicles?.find((v) => v._id === vehicleId);
-  const event = events?.find((e) => e._id === eventId);
+  const scopeVehicle = vehicles?.find((v) => v._id === scopeVehicleId);
+  const scopeEvent = scopeEvents?.find((e) => e._id === scopeEventId);
+  const elsewhere = scopeEventId !== eventId || scopeVehicleId !== vehicleId;
 
   const loaded = useMemo(() => new Set(loadedFileIds as string[]), [loadedFileIds]);
   const pending = useMemo(() => new Set((pendingFileIds ?? []) as string[]), [pendingFileIds]);
 
   // The first loaded pass names the menu; the rest are counted beside it.
-  const loadedLabel = useMemo(() => {
-    const first = loadedFileIds[0];
-    const file = first ? files?.find((f) => f._id === first) : undefined;
-    return file ? shortPassName(file.fileName) : "Passes";
-  }, [loadedFileIds, files]);
+  // Fetched by id rather than looked up in the list: browsing another event
+  // would otherwise leave the chart you're on unnamed.
+  const firstLoaded = useQuery(
+    api.files.get,
+    loadedFileIds[0] ? { id: loadedFileIds[0] } : "skip",
+  );
+  const loadedLabel = firstLoaded ? shortPassName(firstLoaded.fileName) : "Passes";
 
   // Names are short and they are the label — no reason to clip them.
   const crumb = "h-7 shrink-0 gap-1 whitespace-nowrap px-2 text-sm font-normal";
@@ -165,7 +185,7 @@ export function ViewerBreadcrumb({
         <DropdownMenuTrigger
           render={
             <Button variant="ghost" size="sm" className={crumb}>
-              <span>{vehicle?.name ?? "Vehicle"}</span>
+              <span>{scopeVehicle?.name ?? "Vehicle"}</span>
               <ChevronDownIcon className="size-3.5 opacity-50" />
             </Button>
           }
@@ -178,14 +198,10 @@ export function ViewerBreadcrumb({
           {(vehicles ?? []).map((v) => (
             <DropdownMenuItem
               key={v._id}
-              onClick={() => {
-                if (v._id === vehicleId) return;
-                // A different car means a different set of weekends; its own
-                // event list is the only sensible next question.
-                onGoToEvent(v._id, eventId);
-              }}
+              // Browsing, not going: the chart stays put until you pick a run.
+              onClick={() => setScopeVehicleId(v._id)}
             >
-              {v._id === vehicleId ? (
+              {v._id === scopeVehicleId ? (
                 <CheckIcon className="size-3.5" />
               ) : (
                 <span className="size-3.5" />
@@ -202,7 +218,7 @@ export function ViewerBreadcrumb({
         <DropdownMenuTrigger
           render={
             <Button variant="ghost" size="sm" className={crumb}>
-              <span>{event?.name ?? "Event"}</span>
+              <span>{scopeEvent?.name ?? "Event"}</span>
               <ChevronDownIcon className="size-3.5 opacity-50" />
             </Button>
           }
@@ -212,15 +228,12 @@ export function ViewerBreadcrumb({
             <DropdownMenuLabel>Events</DropdownMenuLabel>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
-          {(events ?? []).map((e) => (
+          {(scopeEvents ?? []).map((e) => (
             <DropdownMenuItem
               key={e._id}
-              onClick={() => {
-                if (e._id === eventId) return;
-                onGoToEvent(vehicleId, e._id);
-              }}
+              onClick={() => setScopeEventId(e._id)}
             >
-              {e._id === eventId ? (
+              {e._id === scopeEventId ? (
                 <CheckIcon className="size-3.5" />
               ) : (
                 <span className="size-3.5" />
@@ -256,13 +269,14 @@ export function ViewerBreadcrumb({
         />
         <DropdownMenuContent align="start" className="w-[44rem] p-0">
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="flex items-baseline justify-between px-3 pt-2.5">
-              <span>Passes in this event</span>
-              <span className="text-xs font-normal tabular-nums text-muted-foreground">
-                {files?.length ?? 0}
-              </span>
-            </DropdownMenuLabel>
+            <DropdownMenuLabel className="px-3 pt-2.5">Passes</DropdownMenuLabel>
           </DropdownMenuGroup>
+
+          <div className="px-3 pb-2 text-xs text-muted-foreground">
+            {elsewhere
+              ? `${scopeEvent?.name ?? "Another event"} — Compare adds to this chart, Open goes there`
+              : `${files?.length ?? 0} in this event`}
+          </div>
 
           {(files?.length ?? 0) > 0 && (
             <div className={`${PASS_ROW} border-b px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground`}>
@@ -318,7 +332,7 @@ export function ViewerBreadcrumb({
                           size="sm"
                           variant="ghost"
                           className="h-6 px-2 text-xs"
-                          onClick={() => onOpen(vehicleId, eventId, file._id)}
+                          onClick={() => onOpen(scopeVehicleId, scopeEventId, file._id)}
                         >
                           Open
                         </Button>

@@ -412,7 +412,6 @@ function LogViewerReady({
             onOpen={(v, e, fileId) => goToViewer(v, e, [fileId])}
             onCompare={handleAddFile}
             onRemove={handleRemoveFile}
-            onGoToEvent={goToFiles}
           />
         }
       />
