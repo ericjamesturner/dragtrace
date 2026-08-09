@@ -341,11 +341,17 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
       };
     case "addTrace": {
       const id = action.id ?? `trace-${++traceCounter}`;
+      const channels = (action.channels ?? []).filter(
+        (c, i, arr) =>
+          arr.findIndex(
+            (o) => o.logFileId === c.logFileId && o.channelName === c.channelName,
+          ) === i,
+      );
       return {
         ...state,
         pages: state.pages.map((p) =>
           p.id === state.activePageId
-            ? { ...p, traces: [...p.traces, { id, channels: action.channels ?? [], height: 200 }] }
+            ? { ...p, traces: [...p.traces, { id, channels, height: 200 }] }
             : p,
         ),
       };
@@ -361,10 +367,17 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
     case "addChannel":
       return {
         ...state,
-        pages: mapTraceById(state.pages, action.traceId, (t) => ({
-          ...t,
-          channels: [...t.channels, action.channel],
-        })),
+        pages: mapTraceById(state.pages, action.traceId, (t) =>
+          // Clicking a channel that's already on this trace shouldn't stack a
+          // second copy of the same line on top of the first.
+          t.channels.some(
+            (c) =>
+              c.logFileId === action.channel.logFileId &&
+              c.channelName === action.channel.channelName,
+          )
+            ? t
+            : { ...t, channels: [...t.channels, action.channel] },
+        ),
       };
     case "removeChannel": {
       const updated = mapTraceById(state.pages, action.traceId, (t) => ({
