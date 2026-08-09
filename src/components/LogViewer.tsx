@@ -161,6 +161,11 @@ function LogViewerReady({
     [vehicleId],
   );
 
+  // Computed before the channel map below, which mirror sync reads to decide
+  // what each log has: a math channel added afterwards would be invisible to it
+  // and never appear on the overlaid log.
+  const math = useMathChannels(vehicleId, logs);
+
   // Build available channels map for mirror sync
   const channelsByLogRef = useRef<Map<string, Set<string>>>(new Map());
   channelsByLogRef.current = useMemo(() => {
@@ -169,7 +174,7 @@ function LogViewerReady({
       map.set(log.fileId, new Set(log.parsed.channelDefs.map((d) => d.name)));
     }
     return map;
-  }, [logs]);
+  }, [logs, math.version]);
 
   // Reducer with mirror sync
   const reducerWithMirror = useCallback(
@@ -217,10 +222,6 @@ function LogViewerReady({
     const have = new Set(logs.map((l) => l.fileId as string));
     return fileIds.filter((id) => !have.has(id as string));
   }, [fileIds, logs]);
-
-  // The user's derived channels, computed into each log so they behave like
-  // any other channel from here on.
-  const math = useMathChannels(vehicleId, logs);
 
   // Compute effective traces
   const effectiveTraces = useMemo(() => getEffectiveTraces(config), [config]);
@@ -411,14 +412,15 @@ function LogViewerReady({
   );
 
   // Re-apply mirror sync when logs load/change
-  const prevLogsLenRef = useRef(0);
+  const prevSyncKeyRef = useRef("");
   useEffect(() => {
-    if (logs.length > 0 && logs.length !== prevLogsLenRef.current && (config.mirroredLogIds?.length ?? 0) > 0) {
+    const key = `${logs.length}:${math.version}`;
+    if (logs.length > 0 && key !== prevSyncKeyRef.current && (config.mirroredLogIds?.length ?? 0) > 0) {
       dispatch({ type: "loadConfig", config });
     }
-    prevLogsLenRef.current = logs.length;
+    prevSyncKeyRef.current = key;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logs.length]);
+  }, [logs.length, math.version]);
 
   // Update URL when fileIds change
   useEffect(() => {
