@@ -411,6 +411,18 @@ function LogViewerReady({
     [removeWorkspaceMut, setActiveWorkspaceId, workspaces, logs],
   );
 
+  // Overlaying a pass is always about comparing the same channels, so every log
+  // after the first mirrors the first rather than carrying its own selection.
+  // Derived from what's loaded — the first log is the source, and if it's
+  // unloaded the next one inherits that role with the channels already on it.
+  useEffect(() => {
+    if (logs.length === 0) return;
+    const want = logs.slice(1).map((l) => l.fileId as string);
+    const have = config.mirroredLogIds ?? [];
+    if (want.length === have.length && want.every((id, i) => have[i] === id)) return;
+    dispatch({ type: "setMirroredLogs", logFileIds: want });
+  }, [logs, config.mirroredLogIds]);
+
   // Re-apply mirror sync when logs load/change
   const prevSyncKeyRef = useRef("");
   useEffect(() => {
@@ -459,8 +471,6 @@ function LogViewerReady({
       if (prev.includes(fileId)) return prev;
       return [...prev, fileId];
     });
-    // Auto-mirror new logs so they show the same channels
-    dispatch({ type: "toggleMirrorLog", logFileId: fileId });
   }, [setFileIds]);
 
   const handleRemoveFile = useCallback((fileId: Id<"files">) => {
@@ -540,7 +550,6 @@ function LogViewerReady({
             pendingFileIds={pendingFileIds}
             traces={effectiveTraces}
             hiddenLogIds={config.hiddenLogIds ?? []}
-            mirroredLogIds={config.mirroredLogIds ?? []}
             onAddFile={handleAddFile}
             onRemoveFile={handleRemoveFile}
             onAddChannel={handleAddChannel}
@@ -550,9 +559,6 @@ function LogViewerReady({
             }
             onToggleLogVisibility={(logFileId) =>
               dispatch({ type: "toggleLogVisibility", logFileId })
-            }
-            onToggleMirrorLog={(logFileId) =>
-              dispatch({ type: "toggleMirrorLog", logFileId })
             }
             activeTraceId={activeTraceId}
                 unitOverrides={units.resolved}

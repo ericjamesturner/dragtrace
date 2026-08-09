@@ -83,14 +83,12 @@ interface Props {
   pendingFileIds?: Id<"files">[];
   traces: TraceConfig[];
   hiddenLogIds: string[];
-  mirroredLogIds: string[];
   onAddFile: (fileId: Id<"files">) => void;
   onRemoveFile: (fileId: Id<"files">) => void;
   onAddChannel: (traceId: string, channel: ChannelOnTrace) => void;
   onAddTraceWithChannel: (channel: ChannelOnTrace) => void;
   onRemoveChannel: (traceId: string, logFileId: Id<"files">, channelName: string) => void;
   onToggleLogVisibility: (logFileId: Id<"files">) => void;
-  onToggleMirrorLog: (logFileId: Id<"files">) => void;
   activeTraceId: string | null;
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
@@ -107,14 +105,12 @@ export function ViewerSidebar({
   loadedFileIds,
   pendingFileIds,
   hiddenLogIds,
-  mirroredLogIds,
   onAddFile,
   onRemoveFile,
   onAddChannel,
   onAddTraceWithChannel,
   onRemoveChannel,
   onToggleLogVisibility,
-  onToggleMirrorLog,
   activeTraceId,
   unitSystem,
   unitOverrides,
@@ -123,7 +119,8 @@ export function ViewerSidebar({
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [hideEmpty, setHideEmpty] = useState(true);
-  const [expandedLogs, setExpandedLogs] = useState<Set<string>>(() => new Set(logs.map((l) => l.fileId)));
+  // Only the run notes hide behind this now — the channel list is shared.
+  const [expandedLogs, setExpandedLogs] = useState<Set<string>>(() => new Set());
   const [tab, setTab] = useState<"channels" | "passes">("channels");
   const [mathDialog, setMathDialog] = useState<{ editing: Doc<"mathChannels"> | null } | null>(null);
   const [isDragTarget, setIsDragTarget] = useState(false);
@@ -167,14 +164,44 @@ export function ViewerSidebar({
   // DB-driven channel grouping (falls back to hardcoded while loading)
   const { tree: masterTree } = useChannelGroups(allDefs, DEFAULT_ECU_TYPE, vehicleId);
 
-  const emptyChannelsByLog = useMemo(() => {
-    const map = new Map<Id<"files">, Set<string>>();
+  // One list for every loaded pass, so "empty" has to mean empty everywhere —
+  // a channel that's flat in one run but alive in the one you're comparing
+  // against is exactly the channel you want to see.
+  const emptyChannels = useMemo(() => {
+    const alive = new Set<string>();
+    const seen = new Set<string>();
     for (const log of logs) {
       const session = log.parsed.sessions[log.activeSessionIndex];
-      if (session) map.set(log.fileId, detectEmptyChannels(log.parsed.channelDefs, session));
+      if (!session) continue;
+      const empty = detectEmptyChannels(log.parsed.channelDefs, session);
+      for (const def of log.parsed.channelDefs) {
+        seen.add(def.name);
+        if (!empty.has(def.name)) alive.add(def.name);
+      }
+    }
+    const result = new Set<string>();
+    for (const name of seen) if (!alive.has(name)) result.add(name);
+    return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logs, mathVersion]);
+
+  // A dead sensor is worth flagging even if only one of the passes saw it.
+  const statusMap = useMemo(() => {
+    const map = new Map<string, ChannelStatus>();
+    for (const log of logs) {
+      const session = log.parsed.sessions[log.activeSessionIndex];
+      if (!session) continue;
+      for (const [name, status] of session.channelStatus) {
+        const prev = map.get(name);
+        if (!prev || status.samples > prev.samples) map.set(name, status);
+      }
     }
     return map;
   }, [logs]);
+
+  // Channels are added against the first log; every other loaded log mirrors
+  // it, so the reducer fans the same channel out to all of them.
+  const sourceFileId = logs[0]?.fileId;
 
   const toggleGroup = useCallback((key: string) => {
     setExpanded((prev) => {
@@ -245,6 +272,14 @@ export function ViewerSidebar({
   );
 
   const isSearching = search.length > 0;
+  const searchLower = search.toLowerCase();
+
+  const tree = useMemo(() => {
+    const names = new Set(allDefs.map((d) => d.name));
+    return masterTree
+      .map((node) => filterGroupNode(node, names, emptyChannels, hideEmpty, searchLower))
+      .filter((n): n is GroupNode => n !== null);
+  }, [masterTree, allDefs, emptyChannels, hideEmpty, searchLower]);
 
   return (
     <div
@@ -301,27 +336,17 @@ export function ViewerSidebar({
           Hide empty channels
         </label>
       </div>
-      <div className="flex-1 overflow-y-auto p-2">
-        {logs.map((log, logIndex) => {
+      {/* The loaded passes and what you can do with them: show/hide on the
+          chart, unload, run notes. The channel list below is shared by all of
+          them, so a channel added from it lands on every pass at once. */}
+      <div className="border-b px-2 py-1.5">
+        {logs.map((log) => {
           const isLogOpen = expandedLogs.has(log.fileId);
-          const emptySet = emptyChannelsByLog.get(log.fileId) ?? new Set<string>();
-          const statusMap =
-            log.parsed.sessions[log.activeSessionIndex]?.channelStatus ??
-            new Map<string, ChannelStatus>();
-
-          const logDefNames = new Set(log.parsed.channelDefs.map((d) => d.name));
-          const searchLower = search.toLowerCase();
-
-          // Filter master tree to channels present in this log
-          const tree = masterTree
-            .map((node) => filterGroupNode(node, logDefNames, emptySet, hideEmpty, searchLower))
-            .filter((n): n is GroupNode => n !== null);
-
           return (
-            <div key={log.fileId} className="mb-2">
-              <div className="flex items-center gap-1.5 px-2 py-1.5 rounded hover:bg-muted group">
+            <div key={log.fileId}>
+              <div className="flex items-center gap-1.5 px-1 py-1 rounded hover:bg-muted group">
                 {logs.length > 1 && (
-                  <Tip content={hiddenLogIds.includes(log.fileId) ? "Show log" : "Hide log"}>
+                  <Tip content={hiddenLogIds.includes(log.fileId) ? "Show on chart" : "Hide from chart"}>
                     <input
                       type="checkbox"
                       checked={!hiddenLogIds.includes(log.fileId)}
@@ -330,19 +355,18 @@ export function ViewerSidebar({
                     />
                   </Tip>
                 )}
-                <button
-                  onClick={() => toggleLog(log.fileId)}
-                  className="flex items-center gap-1.5 flex-1 min-w-0 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer"
-                >
-                  <span className="text-[10px] w-3">{isLogOpen ? "\u25BC" : "\u25B6"}</span>
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: log.logColor }} />
-                  <span className="flex-1 truncate">{log.fileName.replace(/\.[^.]+$/, "")}</span>
-                  <span className="font-normal normal-case tracking-normal text-[11px] opacity-50">
-                    {tree.reduce((sum, n) => sum + countGroupChannels(n), 0)}
-                  </span>
-                </button>
+                <Tip content="Run notes">
+                  <button
+                    onClick={() => toggleLog(log.fileId)}
+                    className="flex items-center gap-1.5 flex-1 min-w-0 text-left text-xs font-semibold cursor-pointer"
+                  >
+                    <span className="text-[9px] w-2.5 opacity-50">{isLogOpen ? "▼" : "▶"}</span>
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: log.logColor }} />
+                    <span className="flex-1 truncate">{log.fileName.replace(/\.[^.]+$/, "")}</span>
+                  </button>
+                </Tip>
                 {logs.length > 1 && (
-                  <Tip content="Remove log">
+                  <Tip content="Unload this pass">
                     <button
                       onClick={() => onRemoveFile(log.fileId)}
                       className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive cursor-pointer p-0.5 shrink-0"
@@ -353,59 +377,42 @@ export function ViewerSidebar({
                 )}
               </div>
               {isLogOpen && <LogNotes fileId={log.fileId} />}
-              {isLogOpen && logs.length > 1 && logIndex > 0 && (
-                <div className="px-2 mb-1">
-                  <label className="flex items-center gap-1.5 w-full px-2 py-1 rounded text-xs text-muted-foreground hover:bg-muted cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={mirroredLogIds.includes(log.fileId)}
-                      onChange={() => onToggleMirrorLog(log.fileId)}
-                      className="rounded"
-                    />
-                    Mirror Channels
-                  </label>
-                </div>
-              )}
-              {/* A mirrored log hides its tree because its channels come from
-                  the log above. With only one log there's nothing to mirror,
-                  and the Mirror checkbox isn't rendered either — so without
-                  this guard a stale flag hides every channel with no way back. */}
-              {isLogOpen && (logs.length === 1 || !mirroredLogIds.includes(log.fileId)) && (
-                <div className="ml-1 border-l-2 pl-0" style={{ borderColor: log.logColor + "30" }}>
-                  {tree.map((node) => (
-                    <SidebarGroupNode
-                      key={`${log.fileId}:${node.tag}`}
-                      node={node}
-                      keyPrefix={`${log.fileId}:`}
-                      isRoot
-                      isSearching={isSearching}
-                      expanded={expanded}
-                      emptySet={emptySet}
-                      statusMap={statusMap}
-                      onNewMathChannel={() => setMathDialog({ editing: null })}
-                      onEditMathChannel={(name) => {
-                        const def = (mathChannels ?? []).find((m) => m.name === name);
-                        if (def) setMathDialog({ editing: def });
-                      }}
-                      renaming={renaming}
-                      onStartRename={setRenaming}
-                      onCommitRename={handleRename}
-                      logFileId={log.fileId}
-                      unitSystem={unitSystem}
-                      unitOverrides={unitOverrides}
-                      activeTraceId={activeTraceId}
-                      onToggleGroup={toggleGroup}
-                      onDragStart={handleDragStart}
-                      onAddChannel={onAddChannel}
-                      onAddTraceWithChannel={onAddTraceWithChannel}
-                      onCycleUnit={onCycleUnit}
-                    />
-                  ))}
-                </div>
-              )}
             </div>
           );
         })}
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-2">
+        {sourceFileId &&
+          tree.map((node) => (
+            <SidebarGroupNode
+              key={node.tag}
+              node={node}
+              keyPrefix=""
+              isRoot
+              isSearching={isSearching}
+              expanded={expanded}
+              emptySet={emptyChannels}
+              statusMap={statusMap}
+              onNewMathChannel={() => setMathDialog({ editing: null })}
+              onEditMathChannel={(name) => {
+                const def = (mathChannels ?? []).find((m) => m.name === name);
+                if (def) setMathDialog({ editing: def });
+              }}
+              renaming={renaming}
+              onStartRename={setRenaming}
+              onCommitRename={handleRename}
+              logFileId={sourceFileId}
+              unitSystem={unitSystem}
+              unitOverrides={unitOverrides}
+              activeTraceId={activeTraceId}
+              onToggleGroup={toggleGroup}
+              onDragStart={handleDragStart}
+              onAddChannel={onAddChannel}
+              onAddTraceWithChannel={onAddTraceWithChannel}
+              onCycleUnit={onCycleUnit}
+            />
+          ))}
       </div>
 
       </>

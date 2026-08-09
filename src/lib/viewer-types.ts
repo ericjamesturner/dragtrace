@@ -224,7 +224,7 @@ export type ViewerAction =
   | { type: "setChannelDash"; traceId: string; logFileId: Id<"files">; channelName: string; dash: number[] | undefined }
   | { type: "setChannelAxisRange"; traceId: string; logFileId: Id<"files">; channelName: string; axisMin?: number; axisMax?: number }
   | { type: "toggleLogVisibility"; logFileId: Id<"files"> }
-  | { type: "toggleMirrorLog"; logFileId: Id<"files"> }
+  | { type: "setMirroredLogs"; logFileIds: string[] }
   | { type: "loadConfig"; config: ViewerConfig }
   | { type: "addPage" }
   | { type: "removePage"; pageId: string }
@@ -498,15 +498,11 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         hiddenLogIds: isHidden ? hidden.filter((h) => h !== id) : [...hidden, id],
       };
     }
-    case "toggleMirrorLog": {
-      const mirrored = state.mirroredLogIds ?? [];
-      const id = action.logFileId as string;
-      const isMirrored = mirrored.includes(id);
-      return {
-        ...state,
-        mirroredLogIds: isMirrored ? mirrored.filter((m) => m !== id) : [...mirrored, id],
-      };
-    }
+    // Every overlaid log follows the first one's channels. The set is derived
+    // from what's loaded rather than chosen per log, so this replaces the list
+    // wholesale instead of toggling one entry.
+    case "setMirroredLogs":
+      return { ...state, mirroredLogIds: action.logFileIds };
     case "setUnitSystem":
       return { ...state, unitSystem: action.system };
     case "cycleUnit": {
