@@ -307,6 +307,23 @@ function LogViewerReady({
     };
   }, [flushSave]);
 
+  // Opening a different pass swaps the loaded logs, but the layout still names
+  // the old one — every channel on every trace is keyed to a file id that is no
+  // longer here, so the charts come up empty. Remap by channel name onto what's
+  // loaded now. Removing a pass is already handled by purgeFile, and adding one
+  // leaves nothing stale, so this only fires on a genuine swap.
+  const loadedLogKey = logs.map((l) => l.fileId as string).join(",");
+  useEffect(() => {
+    const here = new Set(logs.map((l) => l.fileId as string));
+    if (here.size === 0) return;
+    const stale = configRef.current.pages.some((page) =>
+      page.traces.some((t) => t.channels.some((c) => !here.has(c.logFileId as string))),
+    );
+    if (!stale) return;
+    dispatch({ type: "loadConfig", config: remapConfigToFiles(configRef.current, logs) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedLogKey]);
+
   // Overlaying a pass is always about comparing the same channels, so every log
   // after the first mirrors the first rather than carrying its own selection.
   // Derived from what's loaded — the first log is the source, and if it's
