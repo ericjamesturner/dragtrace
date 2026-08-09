@@ -964,6 +964,46 @@ export function TraceContainer({
 
   // Drag the panel's left edge. Every trace reads the same width, so the drag
   // reports live rather than on release and the whole column moves together.
+  // Dragging a channel row already means "move this to another trace". Dropped
+  // on a row of the same trace it means "put it here instead" — the panel's
+  // order is the trace's order, so arranging it in place is the obvious move.
+  const channelDragProps = (channelName: string) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      const ch = trace.channels.find((c) => c.channelName === channelName);
+      if (!ch) return;
+      e.dataTransfer.setData(
+        "text/plain",
+        JSON.stringify({ logFileId: ch.logFileId, channelName, sourceTraceId: trace.id }),
+      );
+      e.dataTransfer.effectAllowed = "move";
+    },
+    onDragOver: (e: React.DragEvent) => e.preventDefault(),
+    onDrop: (e: React.DragEvent) => {
+      const raw = e.dataTransfer.getData("text/plain");
+      if (!raw) return;
+      let parsed: { channelName?: string; sourceTraceId?: string };
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      const moving = parsed.channelName;
+      if (!moving || parsed.sourceTraceId !== trace.id || moving === channelName) return;
+      // Handled here, so the container's drop (which adds channels) sits it out.
+      e.preventDefault();
+      e.stopPropagation();
+      const order: string[] = [];
+      for (const c of trace.channels) {
+        if (!order.includes(c.channelName)) order.push(c.channelName);
+      }
+      const rest = order.filter((n) => n !== moving);
+      const at = rest.indexOf(channelName);
+      rest.splice(at < 0 ? rest.length : at, 0, moving);
+      onSetChannelOrder?.(rest);
+    },
+  });
+
   const handleLegendResize = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -1344,8 +1384,8 @@ export function TraceContainer({
                         </>
                       );
                       return (
-                        <div key={name}>
-                          <div className={`flex items-center gap-1.5 text-xs leading-tight ${allHidden ? "opacity-40" : ""}`}>
+                        <div key={name} {...channelDragProps(name)}>
+                          <div className={`flex cursor-grab items-center gap-1.5 text-xs leading-tight active:cursor-grabbing ${allHidden ? "opacity-40" : ""}`}>
                             <input
                               type="checkbox"
                               checked={!allHidden}
@@ -1387,8 +1427,8 @@ export function TraceContainer({
                       const allHidden = rows.every((r) => r.isChHidden);
                       const someHidden = rows.some((r) => r.isChHidden);
                       return (
-                        <div key={name} className="mt-1 first:mt-0">
-                          <div className="flex items-center gap-1.5 text-xs leading-tight">
+                        <div key={name} className="mt-1 first:mt-0" {...channelDragProps(name)}>
+                          <div className="flex cursor-grab items-center gap-1.5 text-xs leading-tight active:cursor-grabbing">
                             <input
                               type="checkbox"
                               checked={!allHidden}
@@ -1503,8 +1543,10 @@ export function TraceContainer({
                               className={`flex cursor-pointer items-center gap-1.5 text-xs leading-tight transition-opacity ${
                                 isChHidden ? "opacity-30" : isDimmed ? "opacity-40" : ""
                               } ${isHovered ? "bg-white/10 -mx-1 px-1 rounded" : ""} ${indent ? "ml-3" : ""}`}
+                              onDragOver={channelDragProps(ch.channelName).onDragOver}
+                              onDrop={channelDragProps(ch.channelName).onDrop}
                               draggable
-                              title={`${ch.channelName} — click to style, drag to move`}
+                              title={`${ch.channelName} — click to style, drag to reorder or to another trace`}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setContextMenu({ logFileId: ch.logFileId, channelName: ch.channelName });
