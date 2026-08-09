@@ -36,8 +36,9 @@ function etAtMph(et: number | undefined, mph: number | undefined): string {
   return mph === undefined ? et.toFixed(3) : `${et.toFixed(3)}@${mph.toFixed(2)}`;
 }
 
+// Tall enough to read the shape of a pull, not just that there was one.
 const SPARK_W = 640;
-const SPARK_H = 28;
+const SPARK_H = 88;
 
 /**
  * The run's shape under its numbers: engine speed, what the driver asked for,
@@ -65,7 +66,7 @@ function PassSpark({ series, spanSeconds }: { series: RaceSeries | null; spanSec
     <svg
       viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
       preserveAspectRatio="none"
-      className="mt-1 h-7 w-1/2"
+      className="mt-1.5 h-22 w-full"
       aria-hidden
     >
       {launchX !== null && (
@@ -143,7 +144,7 @@ export function ViewerBreadcrumb({
             </Button>
           }
         />
-        <DropdownMenuContent align="start" className="max-h-80 min-w-max overflow-y-auto">
+        <DropdownMenuContent align="start" className="min-w-max">
           <DropdownMenuGroup>
             <DropdownMenuLabel>Vehicles</DropdownMenuLabel>
           </DropdownMenuGroup>
@@ -180,7 +181,7 @@ export function ViewerBreadcrumb({
             </Button>
           }
         />
-        <DropdownMenuContent align="start" className="max-h-80 min-w-max overflow-y-auto">
+        <DropdownMenuContent align="start" className="min-w-max">
           <DropdownMenuGroup>
             <DropdownMenuLabel>Events</DropdownMenuLabel>
           </DropdownMenuGroup>
@@ -225,7 +226,7 @@ export function ViewerBreadcrumb({
             </Button>
           }
         />
-        <DropdownMenuContent align="start" className="max-h-[34rem] w-[44rem] overflow-y-auto p-0">
+        <DropdownMenuContent align="start" className="w-[44rem] p-0">
           <DropdownMenuGroup>
             <DropdownMenuLabel className="flex items-baseline justify-between px-3 pt-2.5">
               <span>Passes in this event</span>
