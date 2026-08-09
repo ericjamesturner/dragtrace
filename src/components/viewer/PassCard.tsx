@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Doc } from "../../../convex/_generated/dataModel";
-import { parsePreview, raceWindow, sparklinePath } from "@/lib/preview";
+import { sparklinePath, type RaceSeries } from "@/lib/preview";
 import { PlusIcon, CheckIcon, LoaderCircleIcon } from "lucide-react";
 
 /**
@@ -30,16 +30,23 @@ export interface PassCardProps {
   isOnlyLoaded?: boolean;
   /** Selected, but its data is still being fetched and parsed. */
   isPending?: boolean;
+  /** The run's shape, parsed once by the list. */
+  series?: RaceSeries | null;
+  /** Time axis shared by every card, so runs are drawn to one scale. */
+  spanSeconds?: number;
+  /** Seconds from the window start to the launch, for the start marker. */
+  leadInSeconds?: number;
   onToggle: () => void;
 }
 
-export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPending, onToggle }: PassCardProps) {
-  const preview = useMemo(() => parsePreview(file.preview), [file.preview]);
+export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPending, series, spanSeconds, leadInSeconds = 1, onToggle }: PassCardProps) {
+  const path = useMemo(
+    () => (series ? sparklinePath(series, spanSeconds ?? series.duration, SPARK_W, SPARK_H) : ""),
+    [series, spanSeconds],
+  );
 
-  const path = useMemo(() => {
-    if (!preview) return "";
-    return sparklinePath(raceWindow(preview), SPARK_W, SPARK_H);
-  }, [preview]);
+  // Where the launch sits on the shared axis — the same x on every card.
+  const launchX = spanSeconds && spanSeconds > 0 ? (leadInSeconds / spanSeconds) * SPARK_W : null;
 
   // A run with no elapsed time recorded didn't finish. That's a fact, not a
   // threshold, so it's the one outcome we're willing to state.
@@ -47,10 +54,7 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
     timeslip && timeslip.et === undefined ? "aborted" : null;
   const style = outcome ? OUTCOME_STYLE[outcome] : null;
 
-  const runLength =
-    preview?.raceStart != null && preview.raceEnd != null
-      ? preview.raceEnd - preview.raceStart
-      : preview?.logDuration ?? null;
+  const runLength = series ? Math.max(0, series.duration - leadInSeconds) : null;
 
   const name = file.fileName.replace(/\.[^.]+$/, "");
 
@@ -94,6 +98,18 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
         className="my-2 h-11 w-full"
         aria-hidden
       >
+        {launchX !== null && path ? (
+          <line
+            x1={launchX}
+            x2={launchX}
+            y1={0}
+            y2={SPARK_H}
+            className="stroke-muted-foreground/30"
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+            strokeDasharray="2 2"
+          />
+        ) : null}
         {path ? (
           <path
             d={path}
