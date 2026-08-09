@@ -86,7 +86,14 @@ export function buildDefaultTraces(logs: LoadedLog[]): TraceConfig[] {
       }
     }
     if (channels.length === 0) continue;
-    traces.push({ id: `trace-default-${traces.length}`, channels, height: 1 });
+    // The timeslip band goes under the top trace only — one place to read the
+    // 60'/330'/660' splits, rather than the same strip repeated down the page.
+    traces.push({
+      id: `trace-default-${traces.length}`,
+      channels,
+      height: 1,
+      showTimeslip: traces.length === 0,
+    });
   }
   return traces;
 }

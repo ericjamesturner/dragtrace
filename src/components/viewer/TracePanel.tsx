@@ -39,6 +39,7 @@ interface Props {
   onSetActiveTrace: (traceId: string) => void;
   onRemoveTrace: (traceId: string) => void;
   onReorderTrace: (traceId: string, beforeTraceId: string) => void;
+  onToggleTraceTimeslip: (traceId: string) => void;
   onRemoveChannel: (traceId: string, logFileId: Id<"files">, channelName: string) => void;
   onAddChannel: (traceId: string, channel: ChannelOnTrace) => void;
   onResizeTrace: (traceId: string, height: number) => void;
@@ -105,6 +106,7 @@ export function TracePanel({
   onSetActiveTrace,
   onRemoveTrace,
   onReorderTrace,
+  onToggleTraceTimeslip,
   onRemoveChannel,
   onAddChannel,
   onResizeTrace,
@@ -647,6 +649,7 @@ export function TracePanel({
                 wheelMode={wheelMode}
                 avgOnSelection={avgOnSelection}
                 onRemoveTrace={() => onRemoveTrace(trace.id)}
+                onToggleTimeslip={() => onToggleTraceTimeslip(trace.id)}
                 onReorderTrace={
                   pinnedFromOtherIds.has(trace.id)
                     ? undefined

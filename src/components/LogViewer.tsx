@@ -648,6 +648,7 @@ function LogViewerReady({
             unitOverrides={units.resolved}
                     onSetTraceHeights={(heights) => dispatch({ type: "setTraceHeights", heights })}
           onToggleTraceCollapsed={(traceId) => dispatch({ type: "toggleTraceCollapsed", traceId })}
+          onToggleTraceTimeslip={(traceId) => dispatch({ type: "toggleTraceTimeslip", traceId })}
           onSetChannelsHidden={(traceId, keys, hidden) =>
             dispatch({ type: "setChannelsHidden", traceId, keys, hidden })
           }

@@ -115,6 +115,13 @@ export interface TraceConfig {
   highlightZones?: HighlightZoneConfig[];
   // Dragged position of the floating channels legend (px within the chart).
   legendPos?: { x: number; y: number };
+  /**
+   * Draw the timeslip band — the 60'/330'/660'/1000'/1320' strip — under this
+   * trace. Off unless asked for: repeating it under every trace ate height and
+   * said the same thing five times. The checkpoint lines are drawn regardless,
+   * so every trace still shows where the markers fall.
+   */
+  showTimeslip?: boolean;
 }
 
 /** Smallest usable trace chart area, in px. Also the floor for a weight. */
@@ -178,6 +185,8 @@ export interface ViewerConfig {
   mirroredLogIds?: string[];
   /** Set once the one-time legend-position reset below has run. */
   legendHomed?: boolean;
+  /** Set once the timeslip band has been narrowed to one trace per page. */
+  timeslipSeeded?: boolean;
   // The x axis is time, and every trace on every page is drawn against the same
   // clock — including a pinned one, which follows you from page to page. So the
   // window is the viewer's, not a page's: switch tabs and you're still looking
@@ -255,6 +264,7 @@ export type ViewerAction =
   | { type: "setCompactLegend"; enabled: boolean }
   | { type: "setTraceHeights"; heights: { traceId: string; height: number }[] }
   | { type: "toggleTraceCollapsed"; traceId: string }
+  | { type: "toggleTraceTimeslip"; traceId: string }
   | { type: "setChannelsHidden"; traceId: string; keys: string[]; hidden: boolean }
   | { type: "toggleAvgOnSelection" }
   | { type: "setTraceLegendPos"; traceId: string; x: number; y: number }
@@ -449,6 +459,14 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         })),
       };
     }
+    case "toggleTraceTimeslip":
+      return {
+        ...state,
+        pages: mapTraceById(state.pages, action.traceId, (t) => ({
+          ...t,
+          showTimeslip: !t.showTimeslip,
+        })),
+      };
     case "toggleTraceCollapsed":
       return {
         ...state,
@@ -926,14 +944,33 @@ function liftTimeWindow(config: ViewerConfig): ViewerConfig {
   };
 }
 
+/**
+ * The band used to be drawn under every trace. Now it's per trace and off by
+ * default, so give each page's first trace the band and leave the rest clear —
+ * which is where someone reading a stacked page looks for it anyway.
+ */
+function seedTimeslipTraces(config: ViewerConfig): ViewerConfig {
+  if (config.timeslipSeeded) return config;
+  return {
+    ...config,
+    timeslipSeeded: true,
+    pages: config.pages.map((page) => ({
+      ...page,
+      traces: page.traces.map((t, i) => ({ ...t, showTimeslip: i === 0 })),
+    })),
+  };
+}
+
 export function migrateConfig(raw: Record<string, unknown>): ViewerConfig {
   if (raw.unitOverrides) {
     raw = { ...raw, unitOverrides: migrateUnitOverrides(raw.unitOverrides) };
   }
   if (raw.pages && Array.isArray(raw.pages)) {
     const config = raw as unknown as ViewerConfig;
-    return liftTimeWindow(
-      homeLegends(applyChannelRenames({ ...config, pages: stripStaleColors(config.pages) })),
+    return seedTimeslipTraces(
+      liftTimeWindow(
+        homeLegends(applyChannelRenames({ ...config, pages: stripStaleColors(config.pages) })),
+      ),
     );
   }
   // Old format: flat traces array

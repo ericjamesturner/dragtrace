@@ -7,7 +7,7 @@ import { TraceSettingsPanel, ChannelPicker } from "./TraceSettingsPanel";
 import { findValueAtTime, formatValue, formatChannelValue, computeRangeStats } from "@/lib/cursor-utils";
 import { convertForDisplay, convertFromDisplay, getDisplayUnit, getDisplayPrecision, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
-import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, GripHorizontalIcon, GripVerticalIcon } from "lucide-react";
+import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, GripHorizontalIcon, GripVerticalIcon, TimerIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 
 interface ContextMenuState {
@@ -298,6 +298,7 @@ interface Props {
   avgOnSelection?: boolean;
   onRemoveTrace: () => void;
   onReorderTrace?: (draggedTraceId: string) => void;
+  onToggleTimeslip?: () => void;
   onRemoveChannel: (logFileId: Id<"files">, channelName: string) => void;
   onAddChannel: (channel: ChannelOnTrace) => void;
   onMoveChannel: (sourceTraceId: string, logFileId: Id<"files">, channelName: string) => void;
@@ -374,6 +375,7 @@ export function TraceContainer({
   avgOnSelection = true,
   onRemoveTrace,
   onReorderTrace,
+  onToggleTimeslip,
   onRemoveChannel,
   onAddChannel,
   onMoveChannel,
@@ -1025,6 +1027,16 @@ export function TraceContainer({
             {traceTitle}
           </span>
         )}
+        {onToggleTimeslip && (timeslipZones?.length ?? 0) > 0 && (
+          <Tip content={trace.showTimeslip ? "Hide the timeslip band" : "Show the timeslip band"}>
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleTimeslip(); }}
+              className={`cursor-pointer ${trace.showTimeslip ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              <TimerIcon className="size-4" />
+            </button>
+          </Tip>
+        )}
         <Tip content={pinned ? "Unpin from all pages" : "Pin across all pages"}>
           <button
             onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
@@ -1088,6 +1100,7 @@ export function TraceContainer({
             wheelMode={wheelMode}
             evaluatedZones={allZones}
             timeslipZones={timeslipZones}
+            showTimeslipBand={trace.showTimeslip ?? false}
             expandedZoneIds={mergedExpanded}
             onToggleZoneExpand={handleToggleZoneExpand}
             onMoveZoneLabel={(zoneId, frac) => onUpdateZone?.(zoneId, { labelYFraction: frac })}

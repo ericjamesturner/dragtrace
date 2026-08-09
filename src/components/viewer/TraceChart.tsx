@@ -144,6 +144,9 @@ interface Props {
   /** Timeslip zones render as their own solid band across the bottom of the
    *  plot (mirroring the OverviewBar strip) — not through the zone plugin. */
   timeslipZones?: EvaluatedZone[];
+  /** Draw that band under this chart. The checkpoint lines are drawn either
+   *  way — they cost no height and locate the markers on every trace. */
+  showTimeslipBand?: boolean;
   expandedZoneIds?: Set<string>;
   onToggleZoneExpand?: (zoneId: string) => void;
   // Persist a dragged zone-label vertical position (0..1 fraction of chart height).
@@ -240,6 +243,7 @@ export function TraceChart({
   wheelMode,
   evaluatedZones,
   timeslipZones,
+  showTimeslipBand,
   expandedZoneIds,
   onToggleZoneExpand,
   onMoveZoneLabel,
@@ -303,6 +307,8 @@ export function TraceChart({
   evaluatedZonesRef.current = evaluatedZones;
   const timeslipZonesRef = useRef(timeslipZones);
   timeslipZonesRef.current = timeslipZones;
+  const showTimeslipBandRef = useRef(showTimeslipBand);
+  showTimeslipBandRef.current = showTimeslipBand;
   const expandedZoneIdsRef = useRef(expandedZoneIds);
   expandedZoneIdsRef.current = expandedZoneIds;
   const onToggleZoneExpandRef = useRef(onToggleZoneExpand);
@@ -1102,7 +1108,7 @@ export function TraceChart({
         draw: [
           (u: uPlot) => {
             const zones = timeslipZonesRef.current;
-            if (!zones || zones.length === 0) return;
+            if (!zones || zones.length === 0 || !showTimeslipBandRef.current) return;
             const ctx = u.ctx;
             const dpr = devicePixelRatio;
             const ROW_H = TIMESLIP_ROW_H * dpr;
@@ -1195,7 +1201,7 @@ export function TraceChart({
         height,
         // Reserve a strip at the bottom for the timeslip band so it never
         // overlays the traces. Zero when there's no timeslip to show.
-        padding: [0, 0, (timeslipZones?.length ?? 0) * TIMESLIP_ROW_H, 0],
+        padding: [0, 0, showTimeslipBand ? (timeslipZones?.length ?? 0) * TIMESLIP_ROW_H : 0, 0],
         legend: { show: false },
         cursor: {
           show: true,
@@ -1589,6 +1595,7 @@ export function TraceChart({
     unitOverrides,
     evaluatedZones,
     timeslipZones,
+    showTimeslipBand,
     expandedZoneIds,
     maxYAxes,
   ]);
