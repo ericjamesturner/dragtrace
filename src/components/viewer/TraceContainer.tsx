@@ -7,7 +7,7 @@ import { TraceSettingsPanel, ChannelPicker } from "./TraceSettingsPanel";
 import { findValueAtTime, formatValue, formatChannelValue, computeRangeStats } from "@/lib/cursor-utils";
 import { convertForDisplay, convertFromDisplay, getDisplayUnit, getDisplayPrecision, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
-import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon } from "lucide-react";
+import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon, MoveHorizontalIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -34,6 +34,9 @@ const LEGEND_MIN_W = 120;
 
 /** Wide enough for MIN/AVG/MAX/Δ columns beside the channel name. */
 const LEGEND_STATS_W = 380;
+
+/** Seconds kept either side of the run when zooming to the pass. */
+const PASS_WINDOW_PAD_S = 1;
 
 const WIDTH_OPTIONS = [1, 1.5, 2.5, 4];
 const STYLE_OPTIONS: { label: string; dash: number[] | undefined }[] = [
@@ -860,6 +863,27 @@ export function TraceContainer({
   // needs the roomy overlay — so a range selection temporarily brings it back.
   const legendInHeader = compactLegend && !avgRange && trace.channels.length > 0;
 
+  // The pass itself — the launch through the finish line, taken from the
+  // timeslip band, with a second either side. The stage and the shutdown are
+  // most of a log and none of the run.
+  const passWindow = useMemo<[number, number] | null>(() => {
+    let start = Infinity;
+    let end = -Infinity;
+    for (const zone of timeslipZones ?? []) {
+      for (const region of zone.regions) {
+        if (region.start < start) start = region.start;
+        if (region.end > end) end = region.end;
+      }
+    }
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+    // Clamped to the log: a run that ends near the end of the recording would
+    // otherwise buy two seconds of blank chart.
+    return [
+      Math.max(globalRange[0], start - PASS_WINDOW_PAD_S),
+      Math.min(globalRange[1], end + PASS_WINDOW_PAD_S),
+    ];
+  }, [timeslipZones, globalRange]);
+
   // For the header strip, collapse the per-log rows into one entry per channel
   // NAME, with that channel's value from each log side by side. Comparing two
   // logs is the whole point of the overlay, and this is both half the width of
@@ -1110,42 +1134,59 @@ export function TraceContainer({
             {traceTitle}
           </span>
         )}
-        {onToggleTimeslip && (timeslipZones?.length ?? 0) > 0 && (
-          <Tip content={trace.showTimeslip ? "Hide the timeslip band" : "Show the timeslip band"}>
+        {/* Actions sit apart from the title and from each other — five
+            small targets in a row need the room. */}
+        <div className="flex shrink-0 items-center gap-3">
+          {passWindow && onZoom && (
+            <Tip content="Zoom to the pass — a second either side of the run">
+              <button
+                onClick={(e) => { e.stopPropagation(); onZoom(passWindow[0], passWindow[1]); }}
+                className="cursor-pointer text-muted-foreground hover:text-foreground"
+              >
+                <MoveHorizontalIcon className="size-4" />
+              </button>
+            </Tip>
+          )}
+          {onToggleTimeslip && (timeslipZones?.length ?? 0) > 0 && (
+            <Tip content={trace.showTimeslip ? "Hide the timeslip band" : "Show the timeslip band"}>
+              <button
+                onClick={(e) => { e.stopPropagation(); onToggleTimeslip(); }}
+                className={`cursor-pointer ${trace.showTimeslip ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                <TimerIcon className="size-4" />
+              </button>
+            </Tip>
+          )}
+          <Tip content={pinned ? "Unpin from all pages" : "Pin across all pages"}>
             <button
-              onClick={(e) => { e.stopPropagation(); onToggleTimeslip(); }}
-              className={`cursor-pointer ${trace.showTimeslip ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
+              className={`cursor-pointer ${pinned ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
             >
-              <TimerIcon className="size-4" />
+              <svg width="14" height="14" viewBox="0 0 16 16" fill={pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.5">
+                <path d="M6 1h4v5l2 2v2H9v5H7v-5H4V8l2-2V1z" />
+              </svg>
             </button>
           </Tip>
-        )}
-        <Tip content={pinned ? "Unpin from all pages" : "Pin across all pages"}>
-          <button
-            onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
-            className={`cursor-pointer ${pinned ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill={pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.5">
-              <path d="M6 1h4v5l2 2v2H9v5H7v-5H4V8l2-2V1z" />
-            </svg>
-          </button>
-        </Tip>
-        <Tip content="Highlight zones">
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="text-muted-foreground hover:text-foreground cursor-pointer"
-          >
-            <SlidersHorizontalIcon className="size-4" />
-          </button>
-        </Tip>
-        <Tip content="Remove trace">
-          <button
-            onClick={onRemoveTrace}
-            className="text-muted-foreground hover:text-destructive cursor-pointer"
-          >
-            <XIcon className="size-4" />
-          </button>
-        </Tip>
+          <Tip content="Highlight zones">
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="text-muted-foreground hover:text-foreground cursor-pointer"
+            >
+              <SlidersHorizontalIcon className="size-4" />
+            </button>
+          </Tip>
+          {/* Removing a trace removes it from every page, so a pinned one takes
+              itself off the page that owns it as well — unpin first. */}
+          <Tip content={pinned ? "Pinned to every page — unpin it to remove" : "Remove trace"}>
+            <button
+              onClick={onRemoveTrace}
+              disabled={pinned}
+              className="text-muted-foreground enabled:cursor-pointer enabled:hover:text-destructive disabled:opacity-30"
+            >
+              <XIcon className="size-4" />
+            </button>
+          </Tip>
+        </div>
       </div>
 
       {/* Chart area, with the channels panel docked to its right */}

@@ -600,13 +600,17 @@ export function TraceChart({
 
     let leftAxisCount = 0;
 
-    // X-axis
+    // X-axis: gridlines only. The seconds ticks said nothing the timeslip band
+    // below them doesn't say better — it marks the run in 60'/330'/660'/1320'
+    // and prints the elapsed time at each — and the cursor gives the exact
+    // time and distance wherever you point.
     const axes: uPlot.Axis[] = [
       {
+        show: false,
         stroke: "#888",
         grid: { stroke: "#333", width: 1 },
         font: "11px ui-monospace, SFMono-Regular, Menlo, monospace",
-        size: showAxes ? Y_AXIS_SIZE : 8,
+        size: 0,
       },
     ];
 
