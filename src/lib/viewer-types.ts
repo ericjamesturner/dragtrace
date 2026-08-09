@@ -198,6 +198,12 @@ export interface ViewerConfig {
   zoom?: [number, number];
   /** Persisted drag-select range. Undefined = nothing selected. */
   selection?: [number, number];
+  // The docked channels panel is one column running down the page, so its
+  // width and its collapsed state belong to the viewer. Per trace they'd give
+  // a ragged right edge and need setting once per trace to fix.
+  // Undefined width = sized to the columns the panel has to show.
+  legendWidth?: number;
+  legendCollapsed?: boolean;
   unitSystem?: UnitSystem;
   unitOverrides?: UnitOverrides;
   // Cursor-centered mouse-wheel zoom (default on; factor default 1.25).
@@ -265,6 +271,8 @@ export type ViewerAction =
   | { type: "setTraceHeights"; heights: { traceId: string; height: number }[] }
   | { type: "toggleTraceCollapsed"; traceId: string }
   | { type: "toggleTraceTimeslip"; traceId: string }
+  | { type: "setLegendWidth"; width: number | undefined }
+  | { type: "toggleLegendCollapsed" }
   | { type: "setChannelsHidden"; traceId: string; keys: string[]; hidden: boolean }
   | { type: "toggleAvgOnSelection" }
   | { type: "setChannelColorBy"; traceId: string; logFileId: Id<"files">; channelName: string; colorBy: string | undefined; colorByMin?: number; colorByMax?: number; colorByLowColor?: string; colorByHighColor?: string }
@@ -458,6 +466,15 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         })),
       };
     }
+    case "setLegendWidth": {
+      if (action.width === undefined) {
+        const { legendWidth: _drop, ...rest } = state;
+        return rest;
+      }
+      return { ...state, legendWidth: action.width };
+    }
+    case "toggleLegendCollapsed":
+      return { ...state, legendCollapsed: !state.legendCollapsed };
     case "toggleTraceTimeslip":
       return {
         ...state,

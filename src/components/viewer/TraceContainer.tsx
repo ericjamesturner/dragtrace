@@ -27,6 +27,9 @@ export const TRACE_CHROME_PX = 34;
 /** Width of the docked channels panel once collapsed to its toggle. */
 const LEGEND_COLLAPSED_W = 22;
 
+/** Narrowest the panel can be dragged before the values stop fitting. */
+const LEGEND_MIN_W = 120;
+
 const WIDTH_OPTIONS = [1, 1.5, 2.5, 4];
 const STYLE_OPTIONS: { label: string; dash: number[] | undefined }[] = [
   { label: "Solid", dash: undefined },
@@ -302,6 +305,11 @@ interface Props {
   onRemoveTrace: () => void;
   onReorderTrace?: (draggedTraceId: string) => void;
   onToggleTimeslip?: () => void;
+  /** Shared across every trace — the panel is one column down the page. */
+  legendWidth?: number;
+  legendCollapsed?: boolean;
+  onSetLegendWidth?: (width: number) => void;
+  onToggleLegendCollapsed?: () => void;
   onRemoveChannel: (logFileId: Id<"files">, channelName: string) => void;
   onAddChannel: (channel: ChannelOnTrace) => void;
   onMoveChannel: (sourceTraceId: string, logFileId: Id<"files">, channelName: string) => void;
@@ -378,6 +386,10 @@ export function TraceContainer({
   onRemoveTrace,
   onReorderTrace,
   onToggleTimeslip,
+  legendWidth,
+  legendCollapsed = false,
+  onSetLegendWidth,
+  onToggleLegendCollapsed,
   onRemoveChannel,
   onAddChannel,
   onMoveChannel,
@@ -437,7 +449,6 @@ export function TraceContainer({
     setColorPreview(null);
   }, [contextMenu]);
 
-  const [legendMinimized, setLegendMinimized] = useState(false);
   const chartAreaRef = useRef<HTMLDivElement>(null);
   const [hoveredChannel, setHoveredChannel] = useState<string | null>(null);
   const hiddenChannels = useMemo(
@@ -828,10 +839,34 @@ export function TraceContainer({
   // selected. uPlot needs a number, so this is computed rather than measured.
   const legendPanelWidth = (() => {
     if (trace.channels.length === 0 || legendInHeader) return 0;
-    if (legendMinimized) return LEGEND_COLLAPSED_W;
+    if (legendCollapsed) return LEGEND_COLLAPSED_W;
+    if (legendWidth !== undefined) return legendWidth;
     const columns = avgRange ? 4 : Math.max(1, traceLogs.length);
     return Math.min(440, Math.max(200, 170 + columns * 56 + 28));
   })();
+
+  // Drag the panel's left edge. Every trace reads the same width, so the drag
+  // reports live rather than on release and the whole column moves together.
+  const handleLegendResize = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startW = legendPanelWidth;
+      const onMove = (ev: MouseEvent) => {
+        onSetLegendWidth?.(
+          Math.min(600, Math.max(LEGEND_MIN_W, startW - (ev.clientX - startX))),
+        );
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [legendPanelWidth, onSetLegendWidth],
+  );
   const chartWidth = Math.max(100, width - 8 - legendPanelWidth);
 
   const multiLogTrace = traceLogs.length > 1;
@@ -1089,18 +1124,25 @@ export function TraceContainer({
             a trace. Suppressed while the legend lives in the header. */}
         {trace.channels.length > 0 && !legendInHeader && (
           <div
-            className="shrink-0 select-none overflow-y-auto overflow-x-hidden border-l border-border bg-black/25"
+            className="relative shrink-0 select-none overflow-y-auto overflow-x-hidden border-l border-border bg-black/25"
             style={{ width: legendPanelWidth }}
             onClick={(e) => e.stopPropagation()}
           >
+            {!legendCollapsed && onSetLegendWidth && (
+              <div
+                className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize hover:bg-primary/40 active:bg-primary/60"
+                onMouseDown={handleLegendResize}
+                title="Drag to resize every channels panel"
+              />
+            )}
             <div className="flex items-center gap-1 px-1.5 py-0.5 border-b border-white/10">
-              {!legendMinimized && <span className="text-[10px] text-white/40 flex-1">Channels</span>}
-              <Tip content={legendMinimized ? "Show channels" : "Hide channels"}>
+              {!legendCollapsed && <span className="text-[10px] text-white/40 flex-1 pl-1">Channels</span>}
+              <Tip content={legendCollapsed ? "Show channels on every trace" : "Hide channels on every trace"}>
                 <button
                   className="text-white/40 hover:text-white/70 cursor-pointer"
-                  onClick={() => setLegendMinimized((v) => !v)}
+                  onClick={() => onToggleLegendCollapsed?.()}
                 >
-                  {legendMinimized
+                  {legendCollapsed
                     ? <ChevronLeftIcon className="size-3" />
                     : <ChevronRightIcon className="size-3" />}
                 </button>
@@ -1108,7 +1150,7 @@ export function TraceContainer({
             </div>
 
             {/* Channel rows */}
-            {!legendMinimized && (
+            {!legendCollapsed && (
               <div className="flex flex-col gap-0.5 px-2 py-1">
                 {/* Comparing runs: one row per CHANNEL with that channel's
                     value from each log side by side, rather than repeating
@@ -1164,7 +1206,7 @@ export function TraceContainer({
                               style={{ width: 10, height: 10 }}
                             />
                             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: rows[0]?.color, opacity: rows[0]?.opacity ?? 1 }} />
-                            <span className="text-white/70 truncate max-w-[140px] flex-1">{name}</span>
+                            <span className="min-w-0 flex-1 truncate text-white/70">{name}</span>
                             {/* One run: its numbers sit on the name row. */}
                             {!multiLogTrace && rows[0] && stats(rows[0], false)}
                           </div>
@@ -1190,7 +1232,7 @@ export function TraceContainer({
                     <div className="flex items-center gap-1.5 text-[10px] leading-tight pb-0.5 mb-0.5 border-b border-white/10">
                       <span className="shrink-0" style={{ width: 10 }} />
                       <span className="w-2 shrink-0" />
-                      <span className="text-white/40 truncate max-w-[140px] flex-1">Channel</span>
+                      <span className="min-w-0 flex-1 truncate text-white/40">Channel</span>
                       {traceLogs.map((l) => (
                         <span
                           key={l.id}
@@ -1222,7 +1264,7 @@ export function TraceContainer({
                             className="w-2 h-2 rounded-full shrink-0"
                             style={{ backgroundColor: dot, opacity: rows[0]?.opacity ?? 1 }}
                           />
-                          <span className={`text-white/70 truncate max-w-[140px] flex-1 ${allHidden ? "opacity-40" : ""}`}>
+                          <span className={`min-w-0 flex-1 truncate text-white/70 ${allHidden ? "opacity-40" : ""}`}>
                             {name}
                           </span>
                           {traceLogs.map((l) => {
@@ -1342,7 +1384,7 @@ export function TraceContainer({
                                 style={{ width: 10, height: 10 }}
                               />
                               <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color, opacity }} />
-                              <span className="text-white/70 truncate max-w-[140px]">
+                              <span className="min-w-0 flex-1 truncate text-white/70">
                                 {ch.channelName}
                               </span>
                               {isAvg ? (

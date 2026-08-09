@@ -40,6 +40,10 @@ interface Props {
   onRemoveTrace: (traceId: string) => void;
   onReorderTrace: (traceId: string, beforeTraceId: string) => void;
   onToggleTraceTimeslip: (traceId: string) => void;
+  legendWidth?: number;
+  legendCollapsed?: boolean;
+  onSetLegendWidth: (width: number) => void;
+  onToggleLegendCollapsed: () => void;
   onRemoveChannel: (traceId: string, logFileId: Id<"files">, channelName: string) => void;
   onAddChannel: (traceId: string, channel: ChannelOnTrace) => void;
   onResizeTrace: (traceId: string, height: number) => void;
@@ -106,6 +110,10 @@ export function TracePanel({
   onRemoveTrace,
   onReorderTrace,
   onToggleTraceTimeslip,
+  legendWidth,
+  legendCollapsed,
+  onSetLegendWidth,
+  onToggleLegendCollapsed,
   onRemoveChannel,
   onAddChannel,
   onResizeTrace,
@@ -648,6 +656,10 @@ export function TracePanel({
                 avgOnSelection={avgOnSelection}
                 onRemoveTrace={() => onRemoveTrace(trace.id)}
                 onToggleTimeslip={() => onToggleTraceTimeslip(trace.id)}
+                legendWidth={legendWidth}
+                legendCollapsed={legendCollapsed}
+                onSetLegendWidth={onSetLegendWidth}
+                onToggleLegendCollapsed={onToggleLegendCollapsed}
                 onReorderTrace={
                   pinnedFromOtherIds.has(trace.id)
                     ? undefined
