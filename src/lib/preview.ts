@@ -27,7 +27,9 @@ export function parsePreview(raw: string | undefined | null): PreviewPayload | n
 /** A run's shape over a real time axis, so cards can share one scale. */
 export interface RaceSeries {
   times: number[];
-  values: (number | null)[];
+  rpm: (number | null)[];
+  tps: (number | null)[] | null;
+  dsRpm: (number | null)[] | null;
   /** Seconds from the start of the window to the end of the run. */
   duration: number;
 }
@@ -41,17 +43,33 @@ export function raceSeries(p: PreviewPayload, leadInSeconds = 1): RaceSeries {
   const start = p.raceStart === null ? p.timestamps[0] ?? 0 : p.raceStart - leadInSeconds;
   const end = p.raceStart === null ? p.logDuration : p.raceEnd ?? p.logDuration;
   const times: number[] = [];
-  const values: (number | null)[] = [];
+  const rpm: (number | null)[] = [];
+  const tps: (number | null)[] = [];
+  const dsRpm: (number | null)[] = [];
   for (let i = 0; i < p.timestamps.length; i++) {
     const t = p.timestamps[i];
     if (t < start || t > end) continue;
     times.push(t - start);
-    values.push(p.rpm[i]);
+    rpm.push(p.rpm[i]);
+    if (p.tps) tps.push(p.tps[i]);
+    if (p.dsRpm) dsRpm.push(p.dsRpm[i]);
   }
   if (times.length < 2) {
-    return { times: p.timestamps.map((t) => t - (p.timestamps[0] ?? 0)), values: p.rpm, duration: p.logDuration };
+    return {
+      times: p.timestamps.map((t) => t - (p.timestamps[0] ?? 0)),
+      rpm: p.rpm,
+      tps: p.tps,
+      dsRpm: p.dsRpm,
+      duration: p.logDuration,
+    };
   }
-  return { times, values, duration: times[times.length - 1] };
+  return {
+    times,
+    rpm,
+    tps: p.tps ? tps : null,
+    dsRpm: p.dsRpm ? dsRpm : null,
+    duration: times[times.length - 1],
+  };
 }
 
 /**
@@ -61,13 +79,14 @@ export function raceSeries(p: PreviewPayload, leadInSeconds = 1): RaceSeries {
  * rather than being bridged, so the shape can't imply data that isn't there.
  */
 export function sparklinePath(
-  series: RaceSeries,
+  times: number[],
+  values: (number | null)[] | null,
   spanSeconds: number,
   width: number,
   height: number,
   pad = 1,
 ): string {
-  const { times, values } = series;
+  if (!values) return "";
   let min = Infinity;
   let max = -Infinity;
   for (const v of values) {
@@ -77,7 +96,7 @@ export function sparklinePath(
   }
   if (!Number.isFinite(min) || !Number.isFinite(max)) return "";
   const span = max - min || 1;
-  const tSpan = spanSeconds > 0 ? spanSeconds : series.duration || 1;
+  const tSpan = spanSeconds > 0 ? spanSeconds : times[times.length - 1] || 1;
   const innerH = height - pad * 2;
 
   let d = "";

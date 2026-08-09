@@ -119,16 +119,21 @@ export function PassList({
         continue;
       }
       const cutoff = LEAD_IN_SECONDS + et + FINISH_TAIL_SECONDS;
-      const times: number[] = [];
-      const values: (number | null)[] = [];
+      let end = series.times.length;
       for (let i = 0; i < series.times.length; i++) {
-        if (series.times[i] > cutoff) break;
-        times.push(series.times[i]);
-        values.push(series.values[i]);
+        if (series.times[i] > cutoff) { end = i; break; }
       }
       out.set(
         fileId,
-        times.length > 1 ? { times, values, duration: times[times.length - 1] } : series,
+        end > 1
+          ? {
+              times: series.times.slice(0, end),
+              rpm: series.rpm.slice(0, end),
+              tps: series.tps ? series.tps.slice(0, end) : null,
+              dsRpm: series.dsRpm ? series.dsRpm.slice(0, end) : null,
+              duration: series.times[end - 1],
+            }
+          : series,
       );
     }
     return out;
@@ -215,7 +220,7 @@ export function PassList({
               </button>
 
               {open && (
-                <div className="mt-1 space-y-2">
+                <div className="mt-1 ml-3 space-y-2 border-l border-border/40 pl-2">
                   {eventFiles.map((file) => {
                     const isLoaded = loaded.has(file._id);
                     return (

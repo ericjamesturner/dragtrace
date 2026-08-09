@@ -40,10 +40,20 @@ export interface PassCardProps {
 }
 
 export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPending, series, spanSeconds, leadInSeconds = 1, onToggle }: PassCardProps) {
-  const path = useMemo(
-    () => (series ? sparklinePath(series, spanSeconds ?? series.duration, SPARK_W, SPARK_H) : ""),
-    [series, spanSeconds],
-  );
+  // Three lines tell you what the run did: engine speed, what the driver asked
+  // for, and what reached the ground. Each is scaled to its own range, since
+  // they share no units — the shapes are the point, not the values.
+  const paths = useMemo(() => {
+    if (!series) return [];
+    const span = spanSeconds ?? series.duration;
+    const draw = (values: (number | null)[] | null) =>
+      sparklinePath(series.times, values, span, SPARK_W, SPARK_H);
+    return [
+      { key: "dsRpm", d: draw(series.dsRpm), className: "stroke-violet-400/70", width: 1 },
+      { key: "tps", d: draw(series.tps), className: "stroke-emerald-400/70", width: 1 },
+      { key: "rpm", d: draw(series.rpm), className: "stroke-sky-400", width: 1.5 },
+    ].filter((p) => p.d);
+  }, [series, spanSeconds]);
 
   // Where the launch sits on the shared axis — the same x on every card.
   const launchX = spanSeconds && spanSeconds > 0 ? (leadInSeconds / spanSeconds) * SPARK_W : null;
@@ -98,7 +108,7 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
         className="my-2 h-11 w-full"
         aria-hidden
       >
-        {launchX !== null && path ? (
+        {launchX !== null && paths.length > 0 ? (
           <line
             x1={launchX}
             x2={launchX}
@@ -110,15 +120,16 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
             strokeDasharray="2 2"
           />
         ) : null}
-        {path ? (
+        {paths.map((p) => (
           <path
-            d={path}
+            key={p.key}
+            d={p.d}
             fill="none"
-            strokeWidth={1.5}
+            strokeWidth={p.width}
             vectorEffect="non-scaling-stroke"
-            className={style?.stroke ?? "stroke-sky-400"}
+            className={p.key === "rpm" ? (style?.stroke ?? p.className) : p.className}
           />
-        ) : null}
+        ))}
       </svg>
 
       <div className="flex items-end gap-2 text-xs text-muted-foreground">
