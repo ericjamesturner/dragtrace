@@ -481,23 +481,6 @@ function LogViewerReady({
     setActiveTraceId(traceId);
   }, []);
 
-  // Layout presets operate on weights, so the absolute numbers don't matter —
-  // only their ratios. Collapsed traces are out of the budget, so skip them.
-  const handleApplyLayoutPreset = useCallback(
-    (preset: "focusTop" | "equal") => {
-      const expanded = effectiveTraces.filter((t) => !t.collapsed);
-      if (expanded.length === 0) return;
-      dispatch({
-        type: "setTraceHeights",
-        heights: expanded.map((t, i) => ({
-          traceId: t.id,
-          height: preset === "focusTop" && i === 0 ? 400 : 200,
-        })),
-      });
-    },
-    [effectiveTraces],
-  );
-
   const handleAddTraceWithChannel = useCallback(
     (channel: ChannelOnTrace) => {
       const id = `trace-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -516,18 +499,9 @@ function LogViewerReady({
   return (
     <div className="flex flex-col h-screen">
       <ViewerToolbar
-        wheelZoomEnabled={config.wheelZoomEnabled ?? true}
-        wheelZoomFactor={config.wheelZoomFactor ?? 1.25}
-        wheelMode={config.wheelMode ?? "zoom"}
-        fitTraces={config.fitTraces !== false}
         compactLegend={!!config.compactLegend}
         avgOnSelection={config.avgOnSelection !== false}
         showTimeslip={showTimeslip}
-        onToggleWheelZoom={() => dispatch({ type: "setWheelZoomEnabled", enabled: !(config.wheelZoomEnabled ?? true) })}
-        onSetWheelZoomFactor={(f) => dispatch({ type: "setWheelZoomFactor", factor: f })}
-        onSetWheelMode={(m) => dispatch({ type: "setWheelMode", mode: m })}
-        onToggleFitTraces={() => dispatch({ type: "setFitTraces", enabled: !(config.fitTraces !== false) })}
-        onApplyLayoutPreset={handleApplyLayoutPreset}
         onToggleCompactLegend={() => dispatch({ type: "setCompactLegend", enabled: !config.compactLegend })}
         onToggleAvgOnSelection={() => dispatch({ type: "toggleAvgOnSelection" })}
         onToggleTimeslip={() => dispatch({ type: "toggleTimeslip" })}
@@ -658,11 +632,7 @@ function LogViewerReady({
             dispatch({ type: "toggleZone", traceId, zoneId })
           }
             unitOverrides={units.resolved}
-          wheelZoomEnabled={config.wheelZoomEnabled ?? true}
-          wheelZoomFactor={config.wheelZoomFactor ?? 1.25}
-          wheelMode={config.wheelMode ?? "zoom"}
-          fitTraces={config.fitTraces !== false}
-          compactLegend={!!config.compactLegend}
+                  compactLegend={!!config.compactLegend}
           onSetTraceHeights={(heights) => dispatch({ type: "setTraceHeights", heights })}
           onToggleTraceCollapsed={(traceId) => dispatch({ type: "toggleTraceCollapsed", traceId })}
           onSetChannelsHidden={(traceId, keys, hidden) =>
