@@ -1145,7 +1145,7 @@ export function TraceContainer({
                           <span className="font-mono font-medium text-white w-14 text-right tabular-nums">{r.valueStr ?? "---"}</span>
                           <span className="font-mono font-medium text-white/70 w-14 text-right tabular-nums">{r.maxStr ?? "---"}</span>
                           <span className="font-mono font-medium text-sky-200/90 w-14 text-right tabular-nums">{r.deltaStr ?? "---"}</span>
-                          <span className="text-[9px] text-white/40 w-8 truncate shrink-0">{unitLabel}</span>
+                          <span className="text-[9px] text-white/40 min-w-8 whitespace-nowrap shrink-0">{unitLabel}</span>
                         </>
                       );
                       return (
@@ -1270,7 +1270,7 @@ export function TraceContainer({
                               </span>
                             );
                           })}
-                          <span className="text-[9px] text-white/40 w-8 truncate shrink-0">{unitLabel}</span>
+                          <span className="text-[9px] text-white/40 min-w-8 whitespace-nowrap shrink-0">{unitLabel}</span>
                         </div>
                       );
                     })}
@@ -1373,7 +1373,7 @@ export function TraceContainer({
                                   {valueStr ?? "---"}
                                 </span>
                               )}
-                              <span className="text-white/50 text-[10px] w-8">
+                              <span className="text-white/50 text-[10px] min-w-8 whitespace-nowrap shrink-0">
                                 {unitLabel || ""}
                               </span>
                             </div>
