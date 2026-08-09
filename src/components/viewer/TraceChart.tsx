@@ -1546,7 +1546,13 @@ export function TraceChart({
     const touches = new Map<number, { x: number; y: number }>();
     let pinch: { dist: number; span: number; anchorVal: number; frac: number } | null = null;
 
+    // uPlot throws away a mousemove that reports no movement — it is guarding
+    // against a stray event Chrome emits on mousedown — and a constructed
+    // MouseEvent reports none by default. So the deltas have to be filled in or
+    // every relayed move is discarded and a drag never grows.
+    let lastRelay: { x: number; y: number } | null = null;
     const asMouse = (type: string, e: PointerEvent) => {
+      const prev = lastRelay ?? { x: e.clientX, y: e.clientY };
       over.dispatchEvent(
         new MouseEvent(type, {
           bubbles: true,
@@ -1554,10 +1560,13 @@ export function TraceChart({
           view: window,
           clientX: e.clientX,
           clientY: e.clientY,
+          movementX: e.clientX - prev.x,
+          movementY: e.clientY - prev.y,
           button: 0,
           buttons: type === "mouseup" ? 0 : 1,
         }),
       );
+      lastRelay = type === "mouseup" ? null : { x: e.clientX, y: e.clientY };
     };
 
     const twoFingerMid = () => {
@@ -1583,6 +1592,11 @@ export function TraceChart({
       e.preventDefault();
       // Capture keeps the gesture alive if the finger leaves the plot.
       try { over.setPointerCapture(e.pointerId); } catch { /* nothing to capture */ }
+      // uPlot anchors a drag wherever it last saw the cursor, which a mouse
+      // establishes by hovering on the way in. A finger arrives with no such
+      // history, so the drag would start from wherever the pointer last was —
+      // prime it with the touch point before the press.
+      asMouse("mousemove", e);
       asMouse("mousedown", e);
     };
 
