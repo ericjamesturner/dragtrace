@@ -9,6 +9,8 @@ export interface ChannelDef {
   enumValues?: Record<number, string>;
   /** Derived math channel (computed client-side, not logged by the ECU). */
   computed?: boolean;
+  /** A math channel the user defined, as opposed to a built-in one. */
+  custom?: boolean;
   // --- Filled in from the ECU definition pack, when one is available ---
   /** The manufacturer's description of this channel, for tooltips. */
   description?: string;

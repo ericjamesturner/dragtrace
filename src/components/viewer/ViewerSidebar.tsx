@@ -3,10 +3,11 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { ChannelDef, ChannelStatus, LogSession } from "@/lib/log-types";
 import type { LoadedLog, TraceConfig, ChannelOnTrace } from "@/lib/viewer-types";
-import type { Id } from "../../../convex/_generated/dataModel";
-import { XIcon } from "lucide-react";
+import type { Doc, Id } from "../../../convex/_generated/dataModel";
+import { XIcon, PlusIcon, PencilIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { PassList } from "./PassList";
+import { MathChannelDialog } from "./MathChannelDialog";
 import { getDisplayUnit, getUnitOptions, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { GROUP_COLORS, type GroupNode, type GroupChannel } from "@/lib/channel-groups";
 import { useChannelGroups } from "@/hooks/useChannelGroups";
@@ -44,7 +45,9 @@ function filterGroupNode(
     .map((child) => filterGroupNode(child, logDefNames, emptySet, hideEmpty, searchLower))
     .filter((c): c is GroupNode => c !== null);
 
-  if (channels.length === 0 && children.length === 0) return null;
+  // Math survives being empty: it's where math channels are created, so
+  // dropping it when there are none leaves no way to make the first.
+  if (channels.length === 0 && children.length === 0 && node.tag !== "Math") return null;
 
   return { tag: node.tag, channels, children };
 }
@@ -73,6 +76,9 @@ interface Props {
   logs: LoadedLog[];
   vehicleId: Id<"vehicles">;
   eventId: Id<"events">;
+  mathVersion?: number;
+  mathErrors?: { name: string; message: string }[];
+  mathChannels?: Doc<"mathChannels">[];
   loadedFileIds: Id<"files">[];
   pendingFileIds?: Id<"files">[];
   traces: TraceConfig[];
@@ -95,6 +101,9 @@ export function ViewerSidebar({
   logs,
   vehicleId,
   eventId,
+  mathVersion,
+  mathErrors,
+  mathChannels,
   loadedFileIds,
   pendingFileIds,
   hiddenLogIds,
@@ -116,6 +125,7 @@ export function ViewerSidebar({
   const [hideEmpty, setHideEmpty] = useState(true);
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(() => new Set(logs.map((l) => l.fileId)));
   const [tab, setTab] = useState<"channels" | "passes">("channels");
+  const [mathDialog, setMathDialog] = useState<{ editing: Doc<"mathChannels"> | null } | null>(null);
   const [isDragTarget, setIsDragTarget] = useState(false);
   const sidebarDragCounter = useRef(0);
 
@@ -151,7 +161,8 @@ export function ViewerSidebar({
       }
     }
     return defs;
-  }, [logs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logs, mathVersion]);
 
   // DB-driven channel grouping (falls back to hardcoded while loading)
   const { tree: masterTree } = useChannelGroups(allDefs, DEFAULT_ECU_TYPE, vehicleId);
@@ -367,6 +378,11 @@ export function ViewerSidebar({
                       expanded={expanded}
                       emptySet={emptySet}
                       statusMap={statusMap}
+                      onNewMathChannel={() => setMathDialog({ editing: null })}
+                      onEditMathChannel={(name) => {
+                        const def = (mathChannels ?? []).find((m) => m.name === name);
+                        if (def) setMathDialog({ editing: def });
+                      }}
                       renaming={renaming}
                       onStartRename={setRenaming}
                       onCommitRename={handleRename}
@@ -389,6 +405,28 @@ export function ViewerSidebar({
       </div>
 
       </>
+      )}
+
+      {(mathErrors?.length ?? 0) > 0 && tab === "channels" && (
+        <div className="border-t px-3 py-2 text-xs text-destructive">
+          {mathErrors!.map((e) => (
+            <div key={e.name} className="truncate" title={`${e.name}: ${e.message}`}>
+              {e.name} couldn't be computed
+            </div>
+          ))}
+        </div>
+      )}
+
+      {mathDialog && (
+        <MathChannelDialog
+          open
+          onOpenChange={(o) => { if (!o) setMathDialog(null); }}
+          vehicleId={vehicleId}
+          channelNames={allDefs.filter((d) => !d.custom).map((d) => d.name)}
+          unitSystem={unitSystem}
+          unitOverrides={unitOverrides}
+          editing={mathDialog.editing}
+        />
       )}
     </div>
   );
@@ -497,6 +535,8 @@ function SidebarGroupNode({
   onAddChannel,
   onAddTraceWithChannel,
   onCycleUnit,
+  onNewMathChannel,
+  onEditMathChannel,
 }: {
   node: GroupNode;
   keyPrefix: string;
@@ -517,6 +557,8 @@ function SidebarGroupNode({
   onAddChannel: (traceId: string, channel: ChannelOnTrace) => void;
   onAddTraceWithChannel: (channel: ChannelOnTrace) => void;
   onCycleUnit?: (quantitySlug: string) => void;
+  onNewMathChannel?: () => void;
+  onEditMathChannel?: (name: string) => void;
 }) {
   const groupKey = `${keyPrefix}${node.tag}`;
   const isOpen = isSearching || expanded.has(groupKey);
@@ -525,17 +567,29 @@ function SidebarGroupNode({
 
   return (
     <div className={isRoot ? "mb-0.5" : "ml-3"}>
-      <button
-        onClick={() => onToggleGroup(groupKey)}
-        className="flex items-center gap-1.5 w-full text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1 rounded hover:bg-muted cursor-pointer"
-      >
-        <span className="text-[10px] w-3">{isOpen ? "\u25BC" : "\u25B6"}</span>
-        {color && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />}
-        <span className="flex-1">{node.tag}</span>
-        <span className="font-normal normal-case tracking-normal text-[11px] opacity-50">
-          {total}
-        </span>
-      </button>
+      <div className="flex items-center gap-1 pr-1">
+        <button
+          onClick={() => onToggleGroup(groupKey)}
+          className="flex items-center gap-1.5 flex-1 min-w-0 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1 rounded hover:bg-muted cursor-pointer"
+        >
+          <span className="text-[10px] w-3">{isOpen ? "\u25BC" : "\u25B6"}</span>
+          {color && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />}
+          <span className="flex-1 truncate">{node.tag}</span>
+          <span className="font-normal normal-case tracking-normal text-[11px] opacity-50">
+            {total}
+          </span>
+        </button>
+        {node.tag === "Math" && onNewMathChannel && (
+          <Tip content="New math channel — describe it and Claude writes the expression">
+            <button
+              onClick={(e) => { e.stopPropagation(); onNewMathChannel(); }}
+              className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
+            >
+              <PlusIcon className="size-3.5" />
+            </button>
+          </Tip>
+        )}
+      </div>
       {isOpen && (
         <div className={isRoot ? "ml-1 border-l-2 pl-0" : ""} style={isRoot && color ? { borderColor: color + "40" } : undefined}>
           {node.channels.map((ch) => (
@@ -547,6 +601,11 @@ function SidebarGroupNode({
               status={statusMap.get(ch.def.name)}
               isRenaming={renaming === ch.def.name}
               onStartRename={() => onStartRename(ch.def.name)}
+              onEditMathChannel={
+                ch.def.custom && onEditMathChannel
+                  ? () => onEditMathChannel(ch.def.name)
+                  : undefined
+              }
               onCommitRename={(name) => onCommitRename(ch.def.name, name)}
               unitSystem={isRoot ? unitSystem : undefined}
               unitOverrides={isRoot ? unitOverrides : undefined}
@@ -570,6 +629,8 @@ function SidebarGroupNode({
               expanded={expanded}
               emptySet={emptySet}
               statusMap={statusMap}
+              onNewMathChannel={onNewMathChannel}
+              onEditMathChannel={onEditMathChannel}
               renaming={renaming}
               onStartRename={onStartRename}
               onCommitRename={onCommitRename}
@@ -612,6 +673,7 @@ function ChannelRow({
   isRenaming,
   onStartRename,
   onCommitRename,
+  onEditMathChannel,
 }: {
   ch: GroupChannel;
   logFileId: Id<"files">;
@@ -621,6 +683,7 @@ function ChannelRow({
   onDragStart: (e: React.DragEvent, logFileId: Id<"files">, channelName: string) => void;
   onClick: () => void;
   onCycleUnit?: (quantitySlug: string) => void;
+  onEditMathChannel?: () => void;
   status?: ChannelStatus;
   isRenaming: boolean;
   onStartRename: () => void;
@@ -669,7 +732,7 @@ function ChannelRow({
                 onStartRename();
               }
         }
-        className={`flex items-center gap-2 px-2 py-1 pl-6 rounded text-sm cursor-pointer select-none ${
+        className={`group flex items-center gap-2 px-2 py-1 pl-6 rounded text-sm cursor-pointer select-none ${
           isEmpty
             ? "opacity-35 text-muted-foreground"
             : "text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -679,6 +742,15 @@ function ChannelRow({
           <span className="shrink-0 font-serif italic text-xs text-lime-400">ƒ</span>
         )}
         <span className="flex-1 truncate">{ch.displayName}</span>
+        {onEditMathChannel && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onEditMathChannel(); }}
+            title="Edit this math channel"
+            className="shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground cursor-pointer"
+          >
+            <PencilIcon className="size-3" />
+          </button>
+        )}
         {displayUnit && (
           canCycle ? (
             <button

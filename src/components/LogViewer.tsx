@@ -8,6 +8,7 @@ import { useTimeslips } from "@/hooks/useTimeslips";
 import { useViewerSync } from "@/hooks/useViewerSync";
 import { useScatterSuggestions } from "@/hooks/useScatterSuggestions";
 import { useUnitPreferences } from "@/hooks/useUnitPreferences";
+import { useMathChannels } from "@/hooks/useMathChannels";
 import { buildDefaultConfig } from "@/lib/default-layout";
 import { cycleUnit as cycleUnitFn } from "@/lib/units";
 import { computeAlignment } from "@/lib/alignment";
@@ -216,6 +217,10 @@ function LogViewerReady({
     const have = new Set(logs.map((l) => l.fileId as string));
     return fileIds.filter((id) => !have.has(id as string));
   }, [fileIds, logs]);
+
+  // The user's derived channels, computed into each log so they behave like
+  // any other channel from here on.
+  const math = useMathChannels(vehicleId, logs);
 
   // Compute effective traces
   const effectiveTraces = useMemo(() => getEffectiveTraces(config), [config]);
@@ -524,6 +529,9 @@ function LogViewerReady({
           <ViewerSidebar
             logs={logs}
             unitSystem={units.unitSystem}
+            mathVersion={math.version}
+            mathErrors={math.errors}
+            mathChannels={math.definitions}
             vehicleId={vehicleId}
             eventId={eventId}
             loadedFileIds={fileIds}

@@ -24,6 +24,20 @@ export default defineSchema({
     unitOverrides: v.optional(v.string()),
   }).index("by_user", ["userId"]),
 
+  // Derived channels the user defined, computed from logged ones at load time.
+  // Scoped per vehicle: an expression referencing this car's channels is
+  // meaningless against a different combo.
+  mathChannels: defineTable({
+    vehicleId: v.id("vehicles"),
+    name: v.string(),
+    expression: v.string(),
+    /** Quantity slug for display units; omitted when the result is unitless. */
+    quantitySlug: v.optional(v.string()),
+    /** The prompt it came from, kept so it can be regenerated or edited. */
+    prompt: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_vehicle", ["vehicleId"]),
+
   events: defineTable({
     userId: v.id("users"),
     vehicleId: v.id("vehicles"),

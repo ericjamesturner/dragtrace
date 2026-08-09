@@ -43,8 +43,9 @@ export function useChannelGroups(
   const computedDefs = useMemo(() => channelDefs.filter((d) => d.computed), [channelDefs]);
 
   const tree = useMemo(() => {
+    // Always present, even empty: it's where math channels are created, and a
+    // group that only appears once you have one leaves no way to make the first.
     const withMathGroup = (roots: GroupNode[]): GroupNode[] => {
-      if (computedDefs.length === 0) return roots;
       return [
         ...roots,
         {

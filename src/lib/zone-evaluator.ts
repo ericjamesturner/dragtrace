@@ -11,15 +11,16 @@ function resolveChannelName(input: string, channelNames: string[]): string | nul
 }
 
 /**
- * Evaluate a zone expression against a log session.
- * Returns a Float64Array where 1 = true, 0 = false, NaN = error.
+ * Evaluate an expression against a log session, returning its value per sample.
+ * A zone wants this coerced to true/false; a math channel wants the number
+ * itself, so the coercion lives with the caller.
  *
  * Supports:
  * - {Channel Name} references
  * - derivative({Channel Name}) for finite differences
  * - Math helpers: abs, sqrt, pow, min, max, log, log10, floor, ceil, round, PI, E
  */
-export function evaluateZoneExpression(
+export function evaluateExpression(
   expression: string,
   session: LogSession,
   convertValue?: (channelName: string, value: number) => number,
@@ -108,13 +109,30 @@ export function evaluateZoneExpression(
 
     try {
       const v = fn(...channelValues, ...derivValues, ...helpers);
-      result[i] = v ? 1 : 0;
+      result[i] = typeof v === "number" ? v : v ? 1 : 0;
     } catch {
       result[i] = NaN;
     }
   }
 
   return result;
+}
+
+/**
+ * Evaluate a zone expression: 1 where the condition holds, 0 where it doesn't,
+ * NaN where it couldn't be evaluated.
+ */
+export function evaluateZoneExpression(
+  expression: string,
+  session: LogSession,
+  convertValue?: (channelName: string, value: number) => number,
+): Float64Array {
+  const raw = evaluateExpression(expression, session, convertValue);
+  const out = new Float64Array(raw.length);
+  for (let i = 0; i < raw.length; i++) {
+    out[i] = Number.isNaN(raw[i]) ? NaN : raw[i] ? 1 : 0;
+  }
+  return out;
 }
 
 /** Validate an expression without computing — returns error message or null */
