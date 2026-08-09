@@ -1247,7 +1247,6 @@ export function TraceContainer({
                       const keys = rows.map((r) => r.chKey);
                       const allHidden = rows.every((r) => r.isChHidden);
                       const someHidden = rows.some((r) => r.isChHidden);
-                      const dot = rows[0]?.color;
                       return (
                         <div key={name} className="mt-1 first:mt-0">
                           <div className="flex items-center gap-1.5 text-xs leading-tight">
@@ -1259,10 +1258,6 @@ export function TraceContainer({
                               className="accent-white/60 cursor-pointer shrink-0"
                               style={{ width: 10, height: 10 }}
                             />
-                            <span
-                              className="w-2 h-2 rounded-full shrink-0"
-                              style={{ backgroundColor: dot, opacity: rows[0]?.opacity ?? 1 }}
-                            />
                             <span className={`min-w-0 flex-1 truncate text-white/70 ${allHidden ? "opacity-40" : ""}`}>
                               {name}
                             </span>
@@ -1273,6 +1268,7 @@ export function TraceContainer({
                             if (!r) {
                               return (
                                 <div key={l.id} className="flex items-center gap-1.5 pl-[22px] text-xs leading-tight">
+                                  <span className="w-2 shrink-0" />
                                   <span className="min-w-0 flex-1 truncate text-white/25">{l.tag}</span>
                                   <span className="font-mono text-white/20 tabular-nums">—</span>
                                 </div>
@@ -1318,10 +1314,13 @@ export function TraceContainer({
                                 } ${isHovered ? "bg-white/10" : ""}`}
                               >
                                 <span
-                                  className={`min-w-0 flex-1 truncate font-semibold uppercase tracking-wider text-[10px] ${
+                                  className="w-2 h-2 rounded-full shrink-0"
+                                  style={{ backgroundColor: r.color, opacity: muted ? 0.35 : r.opacity }}
+                                />
+                                <span
+                                  className={`min-w-0 flex-1 truncate font-semibold uppercase tracking-wider text-[10px] text-white/60 ${
                                     muted ? "opacity-40" : ""
                                   }`}
-                                  style={{ color: l.color }}
                                 >
                                   {l.tag}
                                 </span>
@@ -1329,7 +1328,7 @@ export function TraceContainer({
                                   className={`font-mono font-medium tabular-nums ${
                                     muted ? "line-through decoration-1 opacity-40" : ""
                                   }`}
-                                  style={{ color: l.color }}
+                                  style={{ color: r.color, opacity: muted ? 0.4 : r.opacity }}
                                 >
                                   {r.valueStr ?? "---"}
                                 </span>
