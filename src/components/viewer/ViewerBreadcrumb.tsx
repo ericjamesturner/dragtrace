@@ -13,8 +13,6 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { ChevronDownIcon, ChevronRightIcon, CheckIcon } from "lucide-react";
-import { PassCard } from "./PassCard";
-import { usePassPreviews, LEAD_IN_SECONDS } from "@/hooks/usePassPreviews";
 import { useTimeslips } from "@/hooks/useTimeslips";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -25,6 +23,15 @@ function shortDate(date: string): string {
   const year = new Date().getFullYear();
   const suffix = +m[1] !== year ? ` '${m[1].slice(2)}` : "";
   return `${MONTHS[+m[2] - 1]} ${+m[3]}${suffix}`;
+}
+
+/** Name, then the three numbers off the slip, then the two things you can do. */
+const PASS_ROW = "grid grid-cols-[1fr_4rem_6.5rem_6.5rem_9.5rem] gap-3";
+
+/** ET@MPH the way the timeslip prints it; a run that didn't record one says so. */
+function etAtMph(et: number | undefined, mph: number | undefined): string {
+  if (et === undefined) return "—";
+  return mph === undefined ? et.toFixed(3) : `${et.toFixed(3)}@${mph.toFixed(2)}`;
 }
 
 /**
@@ -55,22 +62,22 @@ export function ViewerBreadcrumb({
   const files = useQuery(api.files.listByEvent, { eventId });
   const fileIds = useMemo(() => (files ?? []).map((f) => f._id), [files]);
   const timeslips = useTimeslips(fileIds);
-  const { seriesByFile, spanSeconds } = usePassPreviews(files ?? [], timeslips);
 
   const vehicle = vehicles?.find((v) => v._id === vehicleId);
   const event = events?.find((e) => e._id === eventId);
 
   const loaded = useMemo(() => new Set(loadedFileIds as string[]), [loadedFileIds]);
 
-  const crumb = "h-7 gap-1 px-2 text-sm font-normal";
+  // Names are short and they are the label — no reason to clip them.
+  const crumb = "h-7 shrink-0 gap-1 whitespace-nowrap px-2 text-sm font-normal";
 
   return (
-    <div className="flex min-w-0 items-center gap-0.5">
+    <div className="flex items-center gap-0.5">
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
             <Button variant="ghost" size="sm" className={crumb}>
-              <span className="max-w-[14ch] truncate">{vehicle?.name ?? "Vehicle"}</span>
+              <span>{vehicle?.name ?? "Vehicle"}</span>
               <ChevronDownIcon className="size-3.5 opacity-50" />
             </Button>
           }
@@ -107,7 +114,7 @@ export function ViewerBreadcrumb({
         <DropdownMenuTrigger
           render={
             <Button variant="ghost" size="sm" className={crumb}>
-              <span className="max-w-[18ch] truncate">{event?.name ?? "Event"}</span>
+              <span>{event?.name ?? "Event"}</span>
               <ChevronDownIcon className="size-3.5 opacity-50" />
             </Button>
           }
@@ -151,36 +158,80 @@ export function ViewerBreadcrumb({
             </Button>
           }
         />
-        <DropdownMenuContent align="start" className="max-h-[32rem] w-[24rem] overflow-y-auto">
+        <DropdownMenuContent align="start" className="max-h-[34rem] w-[44rem] overflow-y-auto p-0">
           <DropdownMenuGroup>
-            <DropdownMenuLabel>Passes in this event</DropdownMenuLabel>
+            <DropdownMenuLabel className="flex items-baseline justify-between px-3 pt-2.5">
+              <span>Passes in this event</span>
+              <span className="text-xs font-normal tabular-nums text-muted-foreground">
+                {files?.length ?? 0}
+              </span>
+            </DropdownMenuLabel>
           </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <div className="space-y-2 p-1">
+
+          {(files?.length ?? 0) > 0 && (
+            <div className={`${PASS_ROW} border-b px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground`}>
+              <span>Run</span>
+              <span className="text-right">60 ft</span>
+              <span className="text-right">1/8</span>
+              <span className="text-right">1/4</span>
+              <span />
+            </div>
+          )}
+
+          <div className="p-1">
             {(files ?? []).map((file) => {
               const isLoaded = loaded.has(file._id as string);
+              const slip = timeslips.get(file._id)?.[0];
               return (
-                <PassCard
+                <div
                   key={file._id}
-                  file={file}
-                  timeslip={timeslips.get(file._id)?.[0]}
-                  loaded={isLoaded}
-                  active={isLoaded}
-                  series={seriesByFile.get(file._id) ?? null}
-                  spanSeconds={spanSeconds}
-                  leadInSeconds={LEAD_IN_SECONDS}
-                  onToggle={() => onCompare(file._id)}
-                  onOpen={() => onOpen(vehicleId, eventId, file._id)}
-                  onCompare={() => onCompare(file._id)}
-                />
+                  className={`${PASS_ROW} group items-center rounded px-2 py-1.5 text-sm ${
+                    isLoaded ? "bg-primary/10" : "hover:bg-muted/60"
+                  }`}
+                >
+                  <span className="min-w-0 truncate" title={file.fileName}>
+                    {isLoaded && (
+                      <span className="mr-1.5 inline-block size-1.5 rounded-full bg-primary align-middle" />
+                    )}
+                    {file.fileName.replace(/\.[^.]+$/, "")}
+                  </span>
+                  <span className="text-right font-mono tabular-nums text-muted-foreground">
+                    {slip?.sixtyFt?.toFixed(3) ?? "—"}
+                  </span>
+                  <span className="text-right font-mono tabular-nums text-muted-foreground">
+                    {etAtMph(slip?.eighthEt, slip?.eighthMph)}
+                  </span>
+                  <span className="text-right font-mono font-medium tabular-nums">
+                    {etAtMph(slip?.et, slip?.mph)}
+                  </span>
+                  <span className="flex items-center justify-end gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => onOpen(vehicleId, eventId, file._id)}
+                    >
+                      Open
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-xs"
+                      disabled={isLoaded}
+                      onClick={() => onCompare(file._id)}
+                    >
+                      {isLoaded ? "Loaded" : "Compare"}
+                    </Button>
+                  </span>
+                </div>
               );
             })}
+            {(files?.length ?? 0) === 0 && (
+              <p className="px-2 py-6 text-center text-sm text-muted-foreground">
+                No passes in this event.
+              </p>
+            )}
           </div>
-          {(files?.length ?? 0) === 0 && (
-            <p className="px-2 py-4 text-center text-sm text-muted-foreground">
-              No passes in this event.
-            </p>
-          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
