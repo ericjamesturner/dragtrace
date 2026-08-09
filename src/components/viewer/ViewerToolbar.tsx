@@ -5,16 +5,20 @@ import { Tip } from "@/components/ui/tooltip";
 interface Props {
   onAddTrace: () => void;
   onBack: () => void;
+  breadcrumb?: React.ReactNode;
   workspaceMenu?: React.ReactNode;
 }
 
-export function ViewerToolbar({ onAddTrace, onBack, workspaceMenu }: Props) {
+export function ViewerToolbar({ onAddTrace, onBack, breadcrumb, workspaceMenu }: Props) {
   return (
     <div className="flex items-center gap-3 border-b px-3 py-2 shrink-0 bg-background">
-      <Button variant="ghost" size="sm" onClick={onBack}>
-        <ChevronLeftIcon className="size-4 mr-1" />
-        Back
-      </Button>
+      <Tip content="Back to the event">
+        <Button variant="ghost" size="icon" className="size-7 shrink-0" onClick={onBack}>
+          <ChevronLeftIcon className="size-4" />
+        </Button>
+      </Tip>
+
+      {breadcrumb}
 
       {workspaceMenu}
 

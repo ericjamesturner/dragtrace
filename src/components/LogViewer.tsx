@@ -24,7 +24,7 @@ import {
   createViewerReducer,
 } from "@/lib/viewer-types";
 import { ViewerToolbar } from "./viewer/ViewerToolbar";
-import { WorkspaceMenu } from "./viewer/WorkspaceMenu";
+import { ViewerBreadcrumb } from "./viewer/ViewerBreadcrumb";
 import { ViewerSidebar } from "./viewer/ViewerSidebar";
 import { TracePanel } from "./viewer/TracePanel";
 
@@ -112,7 +112,6 @@ export default function LogViewer({ vehicleId, eventId, fileIds: initialFileIds 
       logs={logs}
       errors={errors}
       workspace={activeWorkspace}
-      workspaces={workspaces}
     />
   );
 }
@@ -125,7 +124,6 @@ interface ReadyProps {
   logs: LoadedLog[];
   errors: string[];
   workspace: Doc<"workspaces"> | null;
-  workspaces: Doc<"workspaces">[];
 }
 
 function LogViewerReady({
@@ -136,29 +134,13 @@ function LogViewerReady({
   logs,
   errors,
   workspace,
-  workspaces,
 }: ReadyProps) {
-  const { goToFiles } = useNav();
+  const { goToFiles, goToViewer } = useNav();
   const sync = useViewerSync();
 
-  // Active workspace: ref for save callbacks, state for the menu UI
+  // A vehicle has one layout and it saves itself, so this is only ever the id
+  // the auto-save writes back to.
   const workspaceIdRef = useRef<Id<"workspaces"> | null>(workspace?._id ?? null);
-  const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<Id<"workspaces"> | null>(
-    workspace?._id ?? null,
-  );
-  const setActiveWorkspaceId = useCallback(
-    (id: Id<"workspaces"> | null) => {
-      workspaceIdRef.current = id;
-      setActiveWorkspaceIdState(id);
-      try {
-        if (id) localStorage.setItem(`dragtrace:ws:${vehicleId}`, id);
-        else localStorage.removeItem(`dragtrace:ws:${vehicleId}`);
-      } catch {
-        // ignore
-      }
-    },
-    [vehicleId],
-  );
 
   // Computed before the channel map below, which mirror sync reads to decide
   // what each log has: a math channel added afterwards would be invisible to it
@@ -311,11 +293,10 @@ function LogViewerReady({
       vehicleId,
       config: JSON.stringify(configRef.current),
     }).then((id) => {
-      // Adopt the id of a freshly created workspace, unless the user
-      // switched workspaces while the save was in flight.
+      // Adopt the id the first save creates, so the next one updates it in
+      // place instead of making another.
       if (id && workspaceIdRef.current === null) {
         workspaceIdRef.current = id;
-        setActiveWorkspaceIdState(id);
         try {
           localStorage.setItem(`dragtrace:ws:${vehicleId}`, id);
         } catch {
@@ -343,72 +324,6 @@ function LogViewerReady({
       }
     };
   }, [flushSave]);
-
-  // ── Named workspaces (switch / save-as / rename / delete) ──
-  const renameWorkspaceMut = useMutation(api.workspaces.rename);
-  const removeWorkspaceMut = useMutation(api.workspaces.remove);
-
-  const handleSelectWorkspace = useCallback(
-    (ws: Doc<"workspaces">) => {
-      if (ws._id === workspaceIdRef.current) return;
-      flushSave(); // persist current edits into the workspace being left
-      setActiveWorkspaceId(ws._id);
-      try {
-        const parsed = remapConfigToFiles(migrateConfig(JSON.parse(ws.config)), logs);
-        dispatch({ type: "loadConfig", config: parsed });
-      } catch {
-        // unreadable config — keep the current layout
-      }
-    },
-    [flushSave, setActiveWorkspaceId, logs],
-  );
-
-  const handleSaveAsNew = useCallback(
-    (name: string) => {
-      void saveWorkspace({
-        vehicleId,
-        name,
-        config: JSON.stringify(configRef.current),
-      }).then((id) => {
-        if (id) setActiveWorkspaceId(id);
-      });
-    },
-    [saveWorkspace, vehicleId, setActiveWorkspaceId],
-  );
-
-  const handleRenameWorkspace = useCallback(
-    (id: Id<"workspaces">, name: string) => {
-      void renameWorkspaceMut({ id, name });
-    },
-    [renameWorkspaceMut],
-  );
-
-  const handleDeleteWorkspace = useCallback(
-    (id: Id<"workspaces">) => {
-      void removeWorkspaceMut({ id }).then(() => {
-        if (workspaceIdRef.current !== id) return;
-        // Fall back to the most recent remaining workspace (and its layout);
-        // with none left, the next auto-save creates a fresh "Default".
-        const fallback = workspaces
-          .filter((w) => w._id !== id)
-          .sort((a, b) => b.updatedAt - a.updatedAt)[0];
-        if (fallback) {
-          setActiveWorkspaceId(fallback._id);
-          try {
-            dispatch({
-              type: "loadConfig",
-              config: remapConfigToFiles(migrateConfig(JSON.parse(fallback.config)), logs),
-            });
-          } catch {
-            // unreadable config — keep the current layout
-          }
-        } else {
-          setActiveWorkspaceId(null);
-        }
-      });
-    },
-    [removeWorkspaceMut, setActiveWorkspaceId, workspaces, logs],
-  );
 
   // Overlaying a pass is always about comparing the same channels, so every log
   // after the first mirrors the first rather than carrying its own selection.
@@ -517,14 +432,14 @@ function LogViewerReady({
       <ViewerToolbar
         onAddTrace={() => handleAddTrace()}
         onBack={handleBack}
-        workspaceMenu={
-          <WorkspaceMenu
-            workspaces={workspaces}
-            activeId={activeWorkspaceId}
-            onSelect={handleSelectWorkspace}
-            onSaveAsNew={handleSaveAsNew}
-            onRename={handleRenameWorkspace}
-            onDelete={handleDeleteWorkspace}
+        breadcrumb={
+          <ViewerBreadcrumb
+            vehicleId={vehicleId}
+            eventId={eventId}
+            loadedFileIds={fileIds}
+            onOpen={(v, e, fileId) => goToViewer(v, e, [fileId])}
+            onCompare={handleAddFile}
+            onGoToEvent={goToFiles}
           />
         }
       />

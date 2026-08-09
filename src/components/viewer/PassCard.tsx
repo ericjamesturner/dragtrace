@@ -3,6 +3,7 @@ import type { Doc } from "../../../convex/_generated/dataModel";
 import { sparklinePath, type RaceSeries } from "@/lib/preview";
 import { PlusIcon, CheckIcon, LoaderCircleIcon, EyeIcon, EyeOffIcon } from "lucide-react";
 import { LogNotes } from "./LogNotes";
+import { Button } from "@/components/ui/button";
 
 /**
  * A run's outcome in one word. Only `aborted` is derived today — it needs no
@@ -41,9 +42,13 @@ export interface PassCardProps {
   /** Seconds from the window start to the launch, for the start marker. */
   leadInSeconds?: number;
   onToggle: () => void;
+  /** Given instead of the toggle: show this pass alone, or over what's loaded.
+   *  Two verbs beat one checkbox when the card is somewhere you go to choose. */
+  onOpen?: () => void;
+  onCompare?: () => void;
 }
 
-export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPending, series, spanSeconds, chartHidden, onToggleVisibility, leadInSeconds = 1, onToggle }: PassCardProps) {
+export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPending, series, spanSeconds, chartHidden, onToggleVisibility, leadInSeconds = 1, onToggle, onOpen, onCompare }: PassCardProps) {
   // Three lines tell you what the run did: engine speed, what the driver asked
   // for, and what reached the ground. Each is scaled to its own range, since
   // they share no units — the shapes are the point, not the values.
@@ -93,10 +98,10 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
 
   return (
     <div
-      onClick={isOnlyLoaded ? undefined : onToggle}
-      title={isOnlyLoaded ? "The only pass on the chart — add another before removing this one" : undefined}
+      onClick={onOpen ? undefined : isOnlyLoaded ? undefined : onToggle}
+      title={!onOpen && isOnlyLoaded ? "The only pass on the chart — add another before removing this one" : undefined}
       className={`group relative rounded-lg border p-3 transition-colors ${
-        isOnlyLoaded ? "cursor-default" : "cursor-pointer"
+        onOpen || isOnlyLoaded ? "cursor-default" : "cursor-pointer"
       } ${
         active ? "border-primary/60 bg-muted/40" : "border-border hover:bg-muted/30"
       } ${outcome === "aborted" || chartHidden ? "opacity-60" : ""}`}
@@ -162,12 +167,31 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
       {/* Notes are written while you're looking at the run, so they live on the
           loaded pass rather than only on the event dashboard. Clicks stay in the
           field — the card itself unloads the pass. */}
-      {loaded && (
+      {/* Notes belong where you dwell, not in a menu you're passing through. */}
+      {loaded && !onOpen && (
         <div onClick={(e) => e.stopPropagation()} className="mt-2">
           <LogNotes fileId={file._id} />
         </div>
       )}
 
+      {onOpen && onCompare && (
+        <div className="mt-2 flex items-center gap-1.5">
+          <Button size="sm" variant="outline" className="h-7 flex-1 text-xs" onClick={onOpen}>
+            Open
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 flex-1 text-xs"
+            disabled={loaded}
+            onClick={onCompare}
+          >
+            {loaded ? "Loaded" : "Compare"}
+          </Button>
+        </div>
+      )}
+
+      {!onOpen && (
       <button
         onClick={(e) => {
           e.stopPropagation();
@@ -189,6 +213,7 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
       >
         {loaded ? <CheckIcon className="size-3.5" /> : <PlusIcon className="size-3.5" />}
       </button>
+      )}
 
       {loaded && onToggleVisibility && !isOnlyLoaded && (
         <button

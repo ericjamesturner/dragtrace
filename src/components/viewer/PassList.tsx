@@ -4,7 +4,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { useTimeslips } from "@/hooks/useTimeslips";
 import { PassCard } from "./PassCard";
-import { parsePreview, raceSeries, type RaceSeries } from "@/lib/preview";
+import { usePassPreviews } from "@/hooks/usePassPreviews";
 import { ChevronRightIcon } from "lucide-react";
 
 /**
@@ -13,10 +13,6 @@ import { ChevronRightIcon } from "lucide-react";
  * the list is short by default but a comparison against last month is two
  * clicks away rather than a dialog.
  */
-/** Lead-in before the launch, and a little room past the finish line. */
-const LEAD_IN_SECONDS = 1;
-const FINISH_TAIL_SECONDS = 0.5;
-
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** Parse a YYYY-MM-DD date without letting the timezone shift it a day. */
@@ -94,70 +90,11 @@ export function PassList({
       .map((e) => ({ event: e, files: byEvent.get(e._id)! }));
   }, [files, events, query]);
 
-  // Parsed once here rather than per card.
-  const seriesByFile = useMemo(() => {
-    const map = new Map<string, RaceSeries | null>();
-    for (const g of groups) {
-      for (const f of g.files) {
-        const preview = parsePreview(f.preview);
-        map.set(f._id, preview ? raceSeries(preview) : null);
-      }
-    }
-    return map;
-  }, [groups]);
-
   const fileIds = useMemo(() => groups.flatMap((g) => g.files.map((f) => f._id)), [groups]);
   const timeslips = useTimeslips(fileIds);
+  const allFiles = useMemo(() => groups.flatMap((g) => g.files), [groups]);
+  const { seriesByFile: trimmedSeries, spanSeconds } = usePassPreviews(allFiles, timeslips);
 
-  // Each card is trimmed to its own run. The race timer keeps counting past the
-  // stripe, so how much log follows a pass says nothing about the pass — left
-  // alone it makes near-identical runs look wildly different. The elapsed time
-  // off the slip is the only thing that actually marks the finish.
-  const trimmedSeries = useMemo(() => {
-    const out = new Map<string, RaceSeries | null>();
-    for (const [fileId, series] of seriesByFile) {
-      const slip = timeslips.get(fileId as Id<"files">)?.[0];
-      const et = slip?.et ?? slip?.eighthEt;
-      if (!series || et === undefined) {
-        out.set(fileId, series);
-        continue;
-      }
-      const cutoff = LEAD_IN_SECONDS + et + FINISH_TAIL_SECONDS;
-      let end = series.times.length;
-      for (let i = 0; i < series.times.length; i++) {
-        if (series.times[i] > cutoff) { end = i; break; }
-      }
-      out.set(
-        fileId,
-        end > 1
-          ? {
-              times: series.times.slice(0, end),
-              rpm: series.rpm.slice(0, end),
-              tps: series.tps ? series.tps.slice(0, end) : null,
-              dsRpm: series.dsRpm ? series.dsRpm.slice(0, end) : null,
-              duration: series.times[end - 1],
-            }
-          : series,
-      );
-    }
-    return out;
-  }, [seriesByFile, timeslips]);
-
-  // One time axis for every card, so equal time is equal width and the launch
-  // sits at the same place on each.
-  const spanSeconds = useMemo(() => {
-    let longestEt = 0;
-    for (const [, slips] of timeslips) {
-      const t = slips[0];
-      const et = t?.et ?? t?.eighthEt;
-      if (et !== undefined && et > longestEt) longestEt = et;
-    }
-    if (longestEt > 0) return LEAD_IN_SECONDS + longestEt + FINISH_TAIL_SECONDS;
-    // No slips entered yet: fall back to the longest recorded window.
-    let longest = 0;
-    for (const [, s] of seriesByFile) if (s && s.duration > longest) longest = s.duration;
-    return longest || 1;
-  }, [timeslips, seriesByFile]);
   const loaded = useMemo(() => new Set(loadedFileIds), [loadedFileIds]);
   const pending = useMemo(() => new Set(pendingFileIds ?? []), [pendingFileIds]);
 
