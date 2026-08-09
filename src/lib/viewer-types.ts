@@ -162,12 +162,9 @@ export interface PageConfig {
   traces: TraceConfig[];
   scatters?: ScatterConfig[];
   heatmaps?: HeatmapConfig[];
-  // Persisted drag-select range for this page (survives reload). Undefined = none.
+  /** @deprecated Lifted to the viewer; kept so old workspaces can be migrated. */
   selection?: [number, number];
-  // Persisted x-axis zoom for this page. Logs are clipped to a fixed lead-in
-  // before the race, so this window stays meaningful when a different pass is
-  // loaded — "the first three seconds" lands in the same place on every run.
-  // Undefined = fitted to the full range.
+  /** @deprecated Lifted to the viewer; kept so old workspaces can be migrated. */
   zoom?: [number, number];
 }
 
@@ -181,6 +178,17 @@ export interface ViewerConfig {
   mirroredLogIds?: string[];
   /** Set once the one-time legend-position reset below has run. */
   legendHomed?: boolean;
+  // The x axis is time, and every trace on every page is drawn against the same
+  // clock — including a pinned one, which follows you from page to page. So the
+  // window is the viewer's, not a page's: switch tabs and you're still looking
+  // at the same moment of the run.
+  //
+  // Logs are clipped to a fixed lead-in before the race, so a stored window
+  // stays meaningful when a different pass is loaded — "the first three
+  // seconds" lands in the same place on every run. Undefined = fit to all.
+  zoom?: [number, number];
+  /** Persisted drag-select range. Undefined = nothing selected. */
+  selection?: [number, number];
   unitSystem?: UnitSystem;
   unitOverrides?: UnitOverrides;
   // Cursor-centered mouse-wheel zoom (default on; factor default 1.25).
@@ -648,27 +656,16 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
       };
     case "setScatterSuggestions":
       return { ...state, scatterSuggestions: action.suggestions, scatterSuggestionsKey: action.key };
-    case "setSelection":
-      return {
-        ...state,
-        pages: state.pages.map((p) => {
-          if (p.id !== state.activePageId) return p;
-          if (action.selection) return { ...p, selection: action.selection };
-          const { selection: _drop, ...rest } = p;
-          return rest;
-        }),
-      };
-    case "setZoom":
-      return {
-        ...state,
-        pages: state.pages.map((p) => {
-          if (p.id !== state.activePageId) return p;
-          if (action.zoom) return { ...p, zoom: action.zoom };
-          const next = { ...p };
-          delete next.zoom;
-          return next;
-        }),
-      };
+    case "setSelection": {
+      if (action.selection) return { ...state, selection: action.selection };
+      const { selection: _drop, ...rest } = state;
+      return rest;
+    }
+    case "setZoom": {
+      if (action.zoom) return { ...state, zoom: action.zoom };
+      const { zoom: _drop, ...rest } = state;
+      return rest;
+    }
     case "setRaceLineStyle":
       return { ...state, raceLineColor: action.color, raceLineWidth: action.width, raceLineDash: action.dash };
     case "purgeFile": {
@@ -894,13 +891,32 @@ function homeLegends(config: ViewerConfig): ViewerConfig {
   };
 }
 
+/**
+ * The zoom and selection used to live on each page. Lift the active page's
+ * window up so switching tabs stops changing what you're looking at, and clear
+ * the per-page copies so nothing reads them by accident.
+ */
+function liftTimeWindow(config: ViewerConfig): ViewerConfig {
+  const active = config.pages.find((p) => p.id === config.activePageId);
+  const hasPerPage = config.pages.some((p) => p.zoom || p.selection);
+  if (!hasPerPage) return config;
+  return {
+    ...config,
+    zoom: config.zoom ?? active?.zoom,
+    selection: config.selection ?? active?.selection,
+    pages: config.pages.map(({ zoom: _z, selection: _s, ...page }) => page),
+  };
+}
+
 export function migrateConfig(raw: Record<string, unknown>): ViewerConfig {
   if (raw.unitOverrides) {
     raw = { ...raw, unitOverrides: migrateUnitOverrides(raw.unitOverrides) };
   }
   if (raw.pages && Array.isArray(raw.pages)) {
     const config = raw as unknown as ViewerConfig;
-    return homeLegends(applyChannelRenames({ ...config, pages: stripStaleColors(config.pages) }));
+    return liftTimeWindow(
+      homeLegends(applyChannelRenames({ ...config, pages: stripStaleColors(config.pages) })),
+    );
   }
   // Old format: flat traces array
   if (raw.traces && Array.isArray(raw.traces)) {

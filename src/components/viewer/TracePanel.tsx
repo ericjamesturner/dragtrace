@@ -314,20 +314,25 @@ export function TracePanel({
   // Display the live drag preview or committed selection (whichever is active)
   const displaySelection = dragPreview ?? selection;
 
-  // --- Persist the settled drag-selection per page (Convex-backed) ---
+  // The window is the viewer's, not a page's, so these follow whatever is
+  // stored rather than resetting on a tab switch. Keyed by value: a local
+  // change re-arrives 400-500ms later as the same numbers and settles.
+  const selectionKey = persistedSelection ? `${persistedSelection[0]}:${persistedSelection[1]}` : "";
+  const zoomKey = persistedZoom ? `${persistedZoom[0]}:${persistedZoom[1]}` : "";
+
+  // --- Persist the settled drag-selection (Convex-backed) ---
   const onPersistSelectionRef = useRef(onPersistSelection);
   onPersistSelectionRef.current = onPersistSelection;
   const lastSentRef = useRef<[number, number] | null>(persistedSelection ?? null);
 
-  // Restore this page's selection when the active page changes.
   useEffect(() => {
     setSelection(persistedSelection ?? null);
     lastSentRef.current = persistedSelection ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePageId]);
+  }, [selectionKey]);
 
-  // --- Persist the settled zoom per page, so a window you found is still there
-  // next time rather than needing to be hunted down again. ---
+  // --- Persist the settled zoom, so a window you found is still there next
+  // time rather than needing to be hunted down again. ---
   const onPersistZoomRef = useRef(onPersistZoom);
   onPersistZoomRef.current = onPersistZoom;
   const lastZoomSentRef = useRef<[number, number] | null>(persistedZoom ?? null);
@@ -336,7 +341,7 @@ export function TracePanel({
     setZoomRange(persistedZoom ?? null);
     lastZoomSentRef.current = persistedZoom ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePageId]);
+  }, [zoomKey]);
 
   // Wheel-zoom fires continuously, so only the settled value is written —
   // otherwise every frame would round-trip through the reducer and the save.

@@ -648,9 +648,9 @@ function LogViewerReady({
           onSetChannelsHidden={(traceId, keys, hidden) =>
             dispatch({ type: "setChannelsHidden", traceId, keys, hidden })
           }
-            persistedSelection={config.pages.find((p) => p.id === config.activePageId)?.selection ?? null}
+            persistedSelection={config.selection ?? null}
           onPersistSelection={(sel) => dispatch({ type: "setSelection", selection: sel })}
-          persistedZoom={config.pages.find((p) => p.id === config.activePageId)?.zoom ?? null}
+          persistedZoom={config.zoom ?? null}
           onPersistZoom={(zoom) => dispatch({ type: "setZoom", zoom })}
           timeslipZones={timeslipZones}
           expandedTimeslipIds={config.expandedTimeslipIds ?? []}
