@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ChevronDownIcon, ChevronRightIcon, CheckIcon } from "lucide-react";
 import { useTimeslips } from "@/hooks/useTimeslips";
+import { usePassPreviews, LEAD_IN_SECONDS } from "@/hooks/usePassPreviews";
+import { sparklinePath, type RaceSeries } from "@/lib/preview";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -32,6 +34,64 @@ const PASS_ROW = "grid grid-cols-[1fr_4rem_6.5rem_6.5rem_9.5rem] gap-3";
 function etAtMph(et: number | undefined, mph: number | undefined): string {
   if (et === undefined) return "—";
   return mph === undefined ? et.toFixed(3) : `${et.toFixed(3)}@${mph.toFixed(2)}`;
+}
+
+const SPARK_W = 640;
+const SPARK_H = 28;
+
+/**
+ * The run's shape under its numbers: engine speed, what the driver asked for,
+ * and what reached the ground — the same three lines, and the same colours,
+ * the traces use. Drawn to the axis every pass in the event shares, so two
+ * cards are comparable at a glance.
+ */
+function PassSpark({ series, spanSeconds }: { series: RaceSeries | null; spanSeconds: number }) {
+  const paths = useMemo(() => {
+    if (!series) return [];
+    const span = spanSeconds || series.duration;
+    const draw = (values: (number | null)[] | null) =>
+      sparklinePath(series.times, values, span, SPARK_W, SPARK_H);
+    return [
+      { key: "dsRpm", d: draw(series.dsRpm), className: "stroke-blue-500" },
+      { key: "tps", d: draw(series.tps), className: "stroke-green-500" },
+      { key: "rpm", d: draw(series.rpm), className: "stroke-red-500" },
+    ].filter((p) => p.d);
+  }, [series, spanSeconds]);
+
+  if (paths.length === 0) return null;
+  const launchX = spanSeconds > 0 ? (LEAD_IN_SECONDS / spanSeconds) * SPARK_W : null;
+
+  return (
+    <svg
+      viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
+      preserveAspectRatio="none"
+      className="mt-1 h-7 w-1/2"
+      aria-hidden
+    >
+      {launchX !== null && (
+        <line
+          x1={launchX}
+          x2={launchX}
+          y1={0}
+          y2={SPARK_H}
+          className="stroke-muted-foreground/30"
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+          strokeDasharray="2 2"
+        />
+      )}
+      {paths.map((p) => (
+        <path
+          key={p.key}
+          d={p.d}
+          fill="none"
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+          className={p.className}
+        />
+      ))}
+    </svg>
+  );
 }
 
 /**
@@ -62,6 +122,7 @@ export function ViewerBreadcrumb({
   const files = useQuery(api.files.listByEvent, { eventId });
   const fileIds = useMemo(() => (files ?? []).map((f) => f._id), [files]);
   const timeslips = useTimeslips(fileIds);
+  const { seriesByFile, spanSeconds } = usePassPreviews(files ?? [], timeslips);
 
   const vehicle = vehicles?.find((v) => v._id === vehicleId);
   const event = events?.find((e) => e._id === eventId);
@@ -82,7 +143,7 @@ export function ViewerBreadcrumb({
             </Button>
           }
         />
-        <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
+        <DropdownMenuContent align="start" className="max-h-80 min-w-max overflow-y-auto">
           <DropdownMenuGroup>
             <DropdownMenuLabel>Vehicles</DropdownMenuLabel>
           </DropdownMenuGroup>
@@ -102,7 +163,7 @@ export function ViewerBreadcrumb({
               ) : (
                 <span className="size-3.5" />
               )}
-              {v.name}
+              <span className="whitespace-nowrap">{v.name}</span>
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>
@@ -119,7 +180,7 @@ export function ViewerBreadcrumb({
             </Button>
           }
         />
-        <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
+        <DropdownMenuContent align="start" className="max-h-80 min-w-max overflow-y-auto">
           <DropdownMenuGroup>
             <DropdownMenuLabel>Events</DropdownMenuLabel>
           </DropdownMenuGroup>
@@ -137,8 +198,14 @@ export function ViewerBreadcrumb({
               ) : (
                 <span className="size-3.5" />
               )}
-              <span className="flex-1 truncate">{e.name}</span>
-              <span className="text-xs text-muted-foreground">{shortDate(e.date)}</span>
+              <span className="flex-1 whitespace-nowrap">{e.name}</span>
+              {e.bestEt !== undefined && (
+                <span className="pl-6 font-mono text-xs tabular-nums text-foreground/80">
+                  {e.bestEt.toFixed(3)}
+                  {e.bestMph !== undefined ? `@${e.bestMph.toFixed(2)}` : ""}
+                </span>
+              )}
+              <span className="pl-4 text-xs text-muted-foreground">{shortDate(e.date)}</span>
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>
@@ -178,17 +245,18 @@ export function ViewerBreadcrumb({
             </div>
           )}
 
-          <div className="p-1">
+          <div className="space-y-1.5 p-1.5">
             {(files ?? []).map((file) => {
               const isLoaded = loaded.has(file._id as string);
               const slip = timeslips.get(file._id)?.[0];
               return (
                 <div
                   key={file._id}
-                  className={`${PASS_ROW} group items-center rounded px-2 py-1.5 text-sm ${
-                    isLoaded ? "bg-primary/10" : "hover:bg-muted/60"
+                  className={`rounded-md border px-2 py-1.5 transition-colors ${
+                    isLoaded ? "border-primary/50 bg-primary/10" : "hover:bg-muted/50"
                   }`}
                 >
+                  <div className={`${PASS_ROW} items-center text-sm`}>
                   <span className="min-w-0 truncate" title={file.fileName}>
                     {isLoaded && (
                       <span className="mr-1.5 inline-block size-1.5 rounded-full bg-primary align-middle" />
@@ -223,6 +291,11 @@ export function ViewerBreadcrumb({
                       {isLoaded ? "Loaded" : "Compare"}
                     </Button>
                   </span>
+                  </div>
+                  <PassSpark
+                    series={seriesByFile.get(file._id) ?? null}
+                    spanSeconds={spanSeconds}
+                  />
                 </div>
               );
             })}

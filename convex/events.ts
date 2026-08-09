@@ -21,14 +21,24 @@ export const listByVehicle = query({
           .withIndex("by_event", (q) => q.eq("eventId", event._id))
           .collect();
         let timeslipCount = 0;
+        // The weekend's best run, which is how anyone remembers a weekend.
+        let bestEt: number | undefined;
+        let bestMph: number | undefined;
         for (const file of files) {
           const ts = await ctx.db
             .query("timeslips")
             .withIndex("by_file", (q) => q.eq("fileId", file._id))
             .collect();
           timeslipCount += ts.length;
+          for (const slip of ts) {
+            if (slip.et === undefined) continue;
+            if (bestEt === undefined || slip.et < bestEt) {
+              bestEt = slip.et;
+              bestMph = slip.mph;
+            }
+          }
         }
-        return { ...event, fileCount: files.length, timeslipCount };
+        return { ...event, fileCount: files.length, timeslipCount, bestEt, bestMph };
       })
     );
     // Sort by date descending
