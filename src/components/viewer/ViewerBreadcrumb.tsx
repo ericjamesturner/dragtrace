@@ -12,7 +12,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDownIcon, ChevronRightIcon, CheckIcon, LoaderCircleIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, CheckIcon, LoaderCircleIcon, EyeIcon, EyeOffIcon } from "lucide-react";
 import { useTimeslips } from "@/hooks/useTimeslips";
 import { usePassPreviews, LEAD_IN_SECONDS } from "@/hooks/usePassPreviews";
 import { sparklinePath, type RaceSeries } from "@/lib/preview";
@@ -119,6 +119,8 @@ export function ViewerBreadcrumb({
   onOpen,
   onCompare,
   onRemove,
+  hiddenLogIds,
+  onToggleVisibility,
 }: {
   vehicleId: Id<"vehicles">;
   eventId: Id<"events">;
@@ -132,6 +134,9 @@ export function ViewerBreadcrumb({
   onCompare: (fileId: Id<"files">) => void;
   /** Take this pass back off the chart. */
   onRemove: (fileId: Id<"files">) => void;
+  /** Loaded but not drawn — kept out of the way without unloading it. */
+  hiddenLogIds: string[];
+  onToggleVisibility: (fileId: Id<"files">) => void;
 }) {
   const vehicles = useQuery(api.vehicles.list, {});
 
@@ -292,6 +297,7 @@ export function ViewerBreadcrumb({
             {(files ?? []).map((file) => {
               const isLoaded = loaded.has(file._id as string);
               const isPending = pending.has(file._id as string);
+              const isHidden = hiddenLogIds.includes(file._id as string);
               const slip = timeslips.get(file._id)?.[0];
               return (
                 <div
@@ -300,7 +306,9 @@ export function ViewerBreadcrumb({
                     isPending
                       ? "border-sky-500/60 bg-sky-500/5"
                       : isLoaded
-                        ? "border-primary/50 bg-primary/10"
+                        ? isHidden
+                          ? "border-border bg-muted/40 opacity-60"
+                          : "border-primary/50 bg-primary/10"
                         : "hover:bg-muted/50"
                   }`}
                 >
@@ -336,6 +344,17 @@ export function ViewerBreadcrumb({
                         >
                           Open
                         </Button>
+                        {isLoaded && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            title={isHidden ? "Show on the chart" : "Hide from the chart"}
+                            className="h-6 px-2 text-xs"
+                            onClick={() => onToggleVisibility(file._id)}
+                          >
+                            {isHidden ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
+                          </Button>
+                        )}
                         {isLoaded ? (
                           <Button
                             size="sm"

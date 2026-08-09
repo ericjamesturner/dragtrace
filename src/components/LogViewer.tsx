@@ -423,6 +423,10 @@ function LogViewerReady({
             onOpen={(v, e, fileId) => goToViewer(v, e, [fileId])}
             onCompare={handleAddFile}
             onRemove={handleRemoveFile}
+            hiddenLogIds={config.hiddenLogIds ?? []}
+            onToggleVisibility={(logFileId) =>
+              dispatch({ type: "toggleLogVisibility", logFileId })
+            }
           />
         }
       />
