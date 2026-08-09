@@ -9,10 +9,12 @@ import { convertForDisplay, convertFromDisplay, getDisplayUnit, getDisplayPrecis
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-interface ContextMenuState {
-  x: number;
-  y: number;
+/** Which channel's style dialog is open. Opened by clicking its row in the
+ *  channels panel, or its line on the chart. */
+interface ChannelStyleTarget {
   logFileId: Id<"files">;
   channelName: string;
 }
@@ -433,13 +435,12 @@ export function TraceContainer({
   const [dragOver, setDragOver] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Appearance section of the channel context menu (collapsed by default)
-  const [cmAppearanceOpen, setCmAppearanceOpen] = useState(false);
   // Resolved y-range per channel, reported by the chart after auto-scaling —
   // this is what "Auto" actually is right now.
   const [resolvedRanges, setResolvedRanges] = useState<Map<string, [number, number]>>(
     () => new Map(),
   );
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [contextMenu, setContextMenu] = useState<ChannelStyleTarget | null>(null);
   // Race-start marker line right-click menu.
   const [raceMenu, setRaceMenu] = useState<{ x: number; y: number } | null>(null);
   // Live color preview while hovering a swatch in the context menu.
@@ -990,10 +991,7 @@ export function TraceContainer({
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault();
-                        setCmAppearanceOpen(false);
                         setContextMenu({
-                          x: e.clientX,
-                          y: e.clientY,
                           logFileId: r.ch.logFileId,
                           channelName: r.ch.channelName,
                         });
@@ -1112,8 +1110,8 @@ export function TraceContainer({
             expandedZoneIds={mergedExpanded}
             onToggleZoneExpand={handleToggleZoneExpand}
             onMoveZoneLabel={(zoneId, frac) => onUpdateZone?.(zoneId, { labelYFraction: frac })}
-            onChannelContextMenu={(logFileId, channelName, x, y) =>
-              { setCmAppearanceOpen(false); setContextMenu({ x, y, logFileId: logFileId as Id<"files">, channelName }); }
+            onChannelContextMenu={(logFileId, channelName) =>
+              { setContextMenu({ logFileId: logFileId as Id<"files">, channelName }); }
             }
             raceLine={raceLine}
             onRaceLineContextMenu={(x, y) => setRaceMenu({ x, y })}
@@ -1283,7 +1281,7 @@ export function TraceContainer({
                                 draggable
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  onSetChannelsHidden?.([r.chKey], !r.isChHidden);
+                                  setContextMenu({ logFileId: r.ch.logFileId, channelName: r.ch.channelName });
                                 }}
                                 onMouseEnter={() => setHoveredChannel(r.chKey)}
                                 onMouseLeave={() => setHoveredChannel(null)}
@@ -1300,15 +1298,12 @@ export function TraceContainer({
                                 }}
                                 onContextMenu={(e) => {
                                   e.preventDefault();
-                                  setCmAppearanceOpen(false);
                                   setContextMenu({
-                                    x: e.clientX,
-                                    y: e.clientY,
                                     logFileId: r.ch.logFileId,
                                     channelName: r.ch.channelName,
                                   });
                                 }}
-                                title={`${l.name} · ${name}${r.isChHidden ? " (hidden)" : ""} — click to ${r.isChHidden ? "show" : "hide"}, drag to move, right-click to style`}
+                                title={`${l.name} · ${name}${r.isChHidden ? " (hidden)" : ""} — click to style, drag to move`}
                                 className={`flex items-center gap-1.5 pl-[22px] text-xs leading-tight cursor-pointer rounded-sm transition-all ${
                                   isDimmed ? "opacity-40" : ""
                                 } ${isHovered ? "bg-white/10" : ""}`}
@@ -1364,10 +1359,15 @@ export function TraceContainer({
                           return (
                             <div
                               key={chKey}
-                              className={`flex items-center gap-1.5 text-xs leading-tight transition-opacity ${
+                              className={`flex cursor-pointer items-center gap-1.5 text-xs leading-tight transition-opacity ${
                                 isChHidden ? "opacity-30" : isDimmed ? "opacity-40" : ""
                               } ${isHovered ? "bg-white/10 -mx-1 px-1 rounded" : ""} ${indent ? "ml-3" : ""}`}
                               draggable
+                              title={`${ch.channelName} — click to style, drag to move`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setContextMenu({ logFileId: ch.logFileId, channelName: ch.channelName });
+                              }}
                               onMouseEnter={() => setHoveredChannel(chKey)}
                               onMouseLeave={() => setHoveredChannel(null)}
                               onDragStart={(e) => {
@@ -1383,10 +1383,7 @@ export function TraceContainer({
                               }}
                               onContextMenu={(e) => {
                                 e.preventDefault();
-                                setCmAppearanceOpen(false);
                                 setContextMenu({
-                                  x: e.clientX,
-                                  y: e.clientY,
                                   logFileId: ch.logFileId,
                                   channelName: ch.channelName,
                                 });
@@ -1398,6 +1395,7 @@ export function TraceContainer({
                                 onChange={() => {
                                   onSetChannelsHidden?.([chKey], !isChHidden);
                                 }}
+                                onClick={(e) => e.stopPropagation()}
                                 className="accent-white/60 cursor-pointer shrink-0"
                                 style={{ width: 10, height: 10 }}
                               />
@@ -1472,7 +1470,6 @@ export function TraceContainer({
         );
         const curWidth = cmCh?.width ?? 1.5;
         const curDash = cmCh?.dash;
-        const item = "w-full text-left px-3 py-1.5 text-sm hover:bg-muted cursor-pointer flex items-center gap-2";
         const seg = "flex-1 h-6 rounded border flex items-center justify-center cursor-pointer";
         // Data extent of the right-clicked channel, for quick axis actions
         const cmLog = logs.find((l) => l.fileId === contextMenu.logFileId);
@@ -1497,246 +1494,250 @@ export function TraceContainer({
           cmMu ? convertForDisplay(v, cmMu, unitSystem, unitOverrides) : v;
         const cmDisplayUnit = cmMu ? getDisplayUnit(cmMu, unitSystem, unitOverrides) : "";
 
-        // Channel stats scoped to: range selection > zoom window > whole log
-        const cmOffset = cmLog ? offsets.get(cmLog.fileId) ?? 0 : 0;
-        let statScope: [number, number] = globalRange;
-        let statScopeLabel = "whole log";
-        if (selection && selection[0] !== selection[1]) {
-          statScope = selection;
-          statScopeLabel = "selection";
-        } else if (zoomRange) {
-          statScope = zoomRange;
-          statScopeLabel = "in view";
-        }
-        const cmStats =
-          cmLog && !cmDef?.enumValues
-            ? computeRangeStats(cmLog, contextMenu.channelName, statScope, cmOffset)
-            : null;
         const cmResolved = resolvedRanges.get(contextMenu.channelName);
-        const cmRace = raceStartTimes[0];
-        const fmtStatTime = (t: number) =>
-          `${(cmRace ? t - (cmRace.time + cmRace.offset) : t).toFixed(2)}s`;
-        const jumpTo = (t: number) => {
-          onSelection?.(t, t);
-          setContextMenu(null);
-        };
+        // What the line actually looks like right now, for the preview swatch.
+        const cmRow = legendGroups.flatMap((g) => g.rows).find((r) => r.chKey === cmKey);
+        const cmColor = cmRow?.color ?? cmCh?.color ?? "#3b82f6";
+        const cmOpacity = cmCh?.opacity ?? 1;
+        const cmHidden = hiddenChannels.has(cmKey);
+        const cmRunTag = multiLogTrace
+          ? traceLogs.find((l) => l.id === (contextMenu.logFileId as string))
+          : null;
+        const section = "text-[10px] font-semibold uppercase tracking-wider text-muted-foreground";
         return (
-          <div
-            className="fixed z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[270px]"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-3 pt-0.5 pb-1 text-[11px] text-muted-foreground truncate max-w-[250px]">
-              {contextMenu.channelName}
-            </div>
-            {/* Channel stats — min/avg/max over selection > view > log; click min/max to jump */}
-            {cmStats && (
-              <div className="px-3 pb-1.5">
-                <div className="flex items-center justify-between text-[9px] uppercase tracking-wide text-muted-foreground mb-0.5">
-                  <span>Stats{cmDisplayUnit ? ` (${cmDisplayUnit})` : ""}</span>
-                  <span className="normal-case tracking-normal">{statScopeLabel}</span>
-                </div>
-                <div className="grid grid-cols-3 gap-1 text-center">
-                  <button
-                    title="Jump cursor to min"
-                    onClick={() => jumpTo(cmStats.minTime)}
-                    className="rounded border border-border hover:bg-muted px-1 py-0.5 cursor-pointer"
-                  >
-                    <div className="text-[9px] text-muted-foreground">MIN</div>
-                    <div className="font-mono text-sm font-medium">{formatValue(cmToDisplay(cmStats.min))}</div>
-                    <div className="text-[10px] text-muted-foreground font-mono">@ {fmtStatTime(cmStats.minTime)}</div>
-                  </button>
-                  <div className="rounded border border-transparent px-1 py-0.5">
-                    <div className="text-[9px] text-amber-400">AVG</div>
-                    <div className="font-mono text-sm font-medium">{formatValue(cmToDisplay(cmStats.avg))}</div>
-                    <div className="text-[10px] text-transparent select-none">&nbsp;</div>
-                  </div>
-                  <button
-                    title="Jump cursor to max"
-                    onClick={() => jumpTo(cmStats.maxTime)}
-                    className="rounded border border-border hover:bg-muted px-1 py-0.5 cursor-pointer"
-                  >
-                    <div className="text-[9px] text-muted-foreground">MAX</div>
-                    <div className="font-mono text-sm font-medium">{formatValue(cmToDisplay(cmStats.max))}</div>
-                    <div className="text-[10px] text-muted-foreground font-mono">@ {fmtStatTime(cmStats.maxTime)}</div>
-                  </button>
-                </div>
-              </div>
-            )}
-            <div className="border-t border-border my-1" />
-            {/* Axis range — shown and edited in display units, stored raw */}
-            <div className="px-3 py-1">
-              <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
-                <span>Axis{cmDisplayUnit ? ` (${cmDisplayUnit})` : ""}</span>
-                <div className="flex items-center gap-2 normal-case tracking-normal">
-                  {cmExtent && (
-                    <button
-                      className="text-[11px] hover:text-foreground cursor-pointer"
-                      title={`Fit to data (${formatValue(cmToDisplay(cmExtent.min))} – ${formatValue(cmToDisplay(cmExtent.max))})`}
-                      onClick={() => {
-                        const pad = (cmExtent.max - cmExtent.min) * 0.05 || 1;
-                        onSetChannelAxisRange(
-                          contextMenu.logFileId,
-                          contextMenu.channelName,
-                          cmExtent.min - pad,
-                          cmExtent.max + pad,
-                        );
-                      }}
+          <Dialog open onOpenChange={(o) => { if (!o) setContextMenu(null); }}>
+            <DialogContent className="sm:max-w-2xl">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 pr-6">
+                  <span className="truncate">{contextMenu.channelName}</span>
+                  {/* Two runs on one trace means two lines with this name — say
+                      which one is being styled. */}
+                  {cmRunTag && (
+                    <span
+                      title={cmRunTag.name}
+                      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                      style={{ backgroundColor: cmColor + "26", color: cmColor }}
                     >
-                      Fit to data
-                    </button>
+                      {cmRunTag.tag}
+                    </span>
                   )}
-                  {hasManualAxis && (
-                    <button
-                      className="text-[11px] hover:text-foreground cursor-pointer"
-                      title="Reset axis to auto"
-                      onClick={() =>
-                        onSetChannelAxisRange(contextMenu.logFileId, contextMenu.channelName, undefined, undefined)
-                      }
-                    >
-                      Auto
-                    </button>
-                  )}
-                </div>
-              </div>
-              <AxisInputs
-                key={cmKey}
-                minRaw={cmCh?.axisMin}
-                maxRaw={cmCh?.axisMax}
-                minPlaceholder={cmResolved ? formatValue(cmToDisplay(cmResolved[0])) : "Auto"}
-                maxPlaceholder={cmResolved ? formatValue(cmToDisplay(cmResolved[1])) : "Auto"}
-                toDisplay={cmToDisplay}
-                fromDisplay={(v) => (cmMu ? convertFromDisplay(v, cmMu, unitSystem, unitOverrides) : v)}
-                onCommit={(min, max) =>
-                  onSetChannelAxisRange(contextMenu.logFileId, contextMenu.channelName, min, max)
-                }
-              />
-            </div>
-            <div className="border-t border-border my-1" />
-            {/* Appearance — collapsed by default */}
-            <button className={item} onClick={() => setCmAppearanceOpen((v) => !v)}>
-              <span className="flex-1">Appearance</span>
-              {cmAppearanceOpen ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
-            </button>
-            {cmAppearanceOpen && (
-              <>
-                {/* Quick color swatches — hover to preview live on the line, click to set.
-                    Last two: pick ANY color (rainbow), and reset to default. */}
-                <div className="px-3 py-1 flex flex-nowrap items-center gap-1">
-                  {CHART_COLORS.map((c) => (
-                    <button
-                      key={c}
-                      title={c}
-                      onMouseEnter={() => setColorPreview({ key: cmKey, color: c })}
-                      onMouseLeave={() => setColorPreview(null)}
-                      onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c); setColorPreview(null); }}
-                      className="w-4 h-4 rounded-full border border-white/20 cursor-pointer hover:scale-110 transition-transform shrink-0"
-                      style={{ backgroundColor: c }}
-                    />
-                  ))}
-                  {/* Custom color — opens the native picker; previews live as you drag */}
-                  <label
-                    key={cmKey}
-                    title="Custom color…"
-                    className="w-4 h-4 rounded-full border border-white/40 cursor-pointer hover:scale-110 transition-transform shrink-0 relative overflow-hidden block"
-                    style={{ background: "conic-gradient(from 90deg, #ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)" }}
-                  >
-                    <input
-                      type="color"
-                      defaultValue={cmCh?.color ?? "#3b82f6"}
-                      onInput={(e) => setColorPreview({ key: cmKey, color: (e.target as HTMLInputElement).value })}
-                      onChange={(e) => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, (e.target as HTMLInputElement).value); setColorPreview(null); }}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    />
-                  </label>
-                  <button
-                    title="Reset to default color"
-                    onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, undefined); setColorPreview(null); }}
-                    className="w-4 h-4 rounded-full border border-white/30 cursor-pointer text-[9px] leading-none flex items-center justify-center text-muted-foreground hover:text-foreground shrink-0"
-                  >
-                    ↺
-                  </button>
-                </div>
-                {/* Color by channel */}
-                <div className="px-3 py-1">
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Color by channel</div>
-                  <ColorByEditor
-                    key={cmKey}
-                    ch={cmCh}
-                    pickerLogs={cmLog ? [cmLog] : logs}
-                    selfName={contextMenu.channelName}
-                    onSet={(colorBy, lo, hi, lowColor, highColor) =>
-                      onSetChannelColorBy(contextMenu.logFileId, contextMenu.channelName, colorBy, lo, hi, lowColor, highColor)
-                    }
-                  />
-                </div>
-                {/* Line width */}
-                <div className="px-3 py-1">
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Width</div>
-                  <div className="flex gap-1">
-                    {WIDTH_OPTIONS.map((w) => (
-                      <button
-                        key={w}
-                        title={`${w}px`}
-                        onClick={() => onSetChannelWidth(contextMenu.logFileId, contextMenu.channelName, w)}
-                        className={`${seg} ${Math.abs(curWidth - w) < 0.01 ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
-                      >
-                        <div className="w-5 rounded-full bg-foreground/80" style={{ height: w }} />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {/* Line style */}
-                <div className="px-3 py-1">
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Style</div>
-                  <div className="flex gap-1">
-                    {STYLE_OPTIONS.map((s) => {
-                      const active = JSON.stringify(curDash ?? null) === JSON.stringify(s.dash ?? null);
-                      return (
-                        <button
-                          key={s.label}
-                          title={s.label}
-                          onClick={() => onSetChannelDash(contextMenu.logFileId, contextMenu.channelName, s.dash)}
-                          className={`${seg} ${active ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
-                        >
-                          <svg width="30" height="6" viewBox="0 0 30 6" className="text-foreground/80">
-                            <line x1="1" y1="3" x2="29" y2="3" stroke="currentColor" strokeWidth="1.5" strokeDasharray={s.dash ? s.dash.join(",") : undefined} />
-                          </svg>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                {/* Opacity */}
-                <div className="px-3 py-1">
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Opacity</div>
+                </DialogTitle>
+                {(cmDef?.description || cmDisplayUnit) && (
+                  <p className="truncate text-xs text-muted-foreground">
+                    {cmDef?.description}
+                    {cmDef?.description && cmDisplayUnit ? " · " : ""}
+                    {cmDisplayUnit}
+                  </p>
+                )}
+              </DialogHeader>
+
+              <div className="grid gap-5 sm:grid-cols-2">
+                {/* ── Appearance ─────────────────────────────────────────── */}
+                <div className="space-y-3">
                   <div className="flex items-center gap-2">
+                    <span className={section}>Color</span>
+                    <svg width="52" height="8" viewBox="0 0 52 8" className="ml-auto shrink-0">
+                      <line
+                        x1="1" y1="4" x2="51" y2="4"
+                        stroke={cmColor}
+                        strokeOpacity={cmOpacity}
+                        strokeWidth={curWidth}
+                        strokeDasharray={curDash ? curDash.join(",") : undefined}
+                      />
+                    </svg>
+                  </div>
+
+                  {/* Hover a swatch to see it on the line before committing. */}
+                  <div className="flex flex-nowrap items-center gap-1.5">
+                    {CHART_COLORS.map((c) => (
+                      <button
+                        key={c}
+                        title={c}
+                        onMouseEnter={() => setColorPreview({ key: cmKey, color: c })}
+                        onMouseLeave={() => setColorPreview(null)}
+                        onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c); setColorPreview(null); }}
+                        className={`size-5 shrink-0 cursor-pointer rounded-full border transition-transform hover:scale-110 ${
+                          cmCh?.color === c ? "border-foreground" : "border-white/20"
+                        }`}
+                        style={{ backgroundColor: c }}
+                      />
+                    ))}
+                    <label
+                      title="Custom color…"
+                      className="relative block size-5 shrink-0 cursor-pointer overflow-hidden rounded-full border border-white/40 transition-transform hover:scale-110"
+                      style={{ background: "conic-gradient(from 90deg, #ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)" }}
+                    >
+                      <input
+                        type="color"
+                        defaultValue={cmCh?.color ?? cmColor}
+                        onInput={(e) => setColorPreview({ key: cmKey, color: (e.target as HTMLInputElement).value })}
+                        onChange={(e) => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, (e.target as HTMLInputElement).value); setColorPreview(null); }}
+                        className="absolute inset-0 size-full cursor-pointer opacity-0"
+                      />
+                    </label>
+                    <button
+                      title="Back to the automatic color"
+                      onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, undefined); setColorPreview(null); }}
+                      className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full border border-white/30 text-[10px] leading-none text-muted-foreground hover:text-foreground"
+                    >
+                      ↺
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div className={`${section} mb-1`}>Width</div>
+                      <div className="flex gap-1">
+                        {WIDTH_OPTIONS.map((w) => (
+                          <button
+                            key={w}
+                            title={`${w}px`}
+                            onClick={() => onSetChannelWidth(contextMenu.logFileId, contextMenu.channelName, w)}
+                            className={`${seg} h-7 ${Math.abs(curWidth - w) < 0.01 ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
+                          >
+                            <div className="w-5 rounded-full bg-foreground/80" style={{ height: w }} />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div className={`${section} mb-1`}>Style</div>
+                      <div className="flex gap-1">
+                        {STYLE_OPTIONS.map((s) => {
+                          const active = JSON.stringify(curDash ?? null) === JSON.stringify(s.dash ?? null);
+                          return (
+                            <button
+                              key={s.label}
+                              title={s.label}
+                              onClick={() => onSetChannelDash(contextMenu.logFileId, contextMenu.channelName, s.dash)}
+                              className={`${seg} h-7 ${active ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
+                            >
+                              <svg width="30" height="6" viewBox="0 0 30 6" className="text-foreground/80">
+                                <line x1="1" y1="3" x2="29" y2="3" stroke="currentColor" strokeWidth="1.5" strokeDasharray={s.dash ? s.dash.join(",") : undefined} />
+                              </svg>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className={`${section} mb-1 flex items-center justify-between`}>
+                      <span>Opacity</span>
+                      <span className="font-mono normal-case tracking-normal">
+                        {Math.round(cmOpacity * 100)}%
+                      </span>
+                    </div>
                     <input
                       type="range"
                       min={0.1}
                       max={1}
                       step={0.05}
-                      value={cmCh?.opacity ?? 1}
+                      value={cmOpacity}
                       onChange={(e) =>
                         onSetChannelOpacity(contextMenu.logFileId, contextMenu.channelName, parseFloat(e.target.value))
                       }
-                      className="flex-1 h-1.5 accent-primary cursor-pointer"
+                      className="h-1.5 w-full cursor-pointer accent-primary"
                     />
-                    <span className="text-xs text-muted-foreground w-8 text-right font-mono">
-                      {Math.round((cmCh?.opacity ?? 1) * 100)}%
-                    </span>
                   </div>
+
                 </div>
-              </>
-            )}
-            <div className="border-t border-border my-1" />
-            <button
-              className={`${item} text-destructive`}
-              onClick={() => { onRemoveChannel(contextMenu.logFileId, contextMenu.channelName); setContextMenu(null); }}
-            >
-              Remove channel
-            </button>
-          </div>
+
+                {/* ── Axis + stats ───────────────────────────────────────── */}
+                <div className="space-y-4">
+                  <div>
+                    <div className={`${section} mb-1 flex items-center justify-between`}>
+                      <span>Axis{cmDisplayUnit ? ` (${cmDisplayUnit})` : ""}</span>
+                      <span className="font-normal normal-case tracking-normal text-muted-foreground/70">
+                        {hasManualAxis ? "manual" : "auto"}
+                      </span>
+                    </div>
+                    <AxisInputs
+                      key={cmKey}
+                      minRaw={cmCh?.axisMin}
+                      maxRaw={cmCh?.axisMax}
+                      minPlaceholder={cmResolved ? formatValue(cmToDisplay(cmResolved[0])) : "Auto"}
+                      maxPlaceholder={cmResolved ? formatValue(cmToDisplay(cmResolved[1])) : "Auto"}
+                      toDisplay={cmToDisplay}
+                      fromDisplay={(v) => (cmMu ? convertFromDisplay(v, cmMu, unitSystem, unitOverrides) : v)}
+                      onCommit={(min, max) =>
+                        onSetChannelAxisRange(contextMenu.logFileId, contextMenu.channelName, min, max)
+                      }
+                    />
+                    <div className="mt-1.5 flex items-center gap-2">
+                      {cmExtent && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const pad = (cmExtent.max - cmExtent.min) * 0.05 || 1;
+                            onSetChannelAxisRange(
+                              contextMenu.logFileId,
+                              contextMenu.channelName,
+                              cmExtent.min - pad,
+                              cmExtent.max + pad,
+                            );
+                          }}
+                        >
+                          Fit to data
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!hasManualAxis}
+                        onClick={() =>
+                          onSetChannelAxisRange(contextMenu.logFileId, contextMenu.channelName, undefined, undefined)
+                        }
+                      >
+                        Auto
+                      </Button>
+                      {cmExtent && (
+                        <span className="ml-auto font-mono text-[11px] text-muted-foreground">
+                          data {formatValue(cmToDisplay(cmExtent.min))} – {formatValue(cmToDisplay(cmExtent.max))}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <ColorByEditor
+                      key={cmKey}
+                      ch={cmCh}
+                      pickerLogs={cmLog ? [cmLog] : logs}
+                      selfName={contextMenu.channelName}
+                      onSet={(colorBy, lo, hi, lowColor, highColor) =>
+                        onSetChannelColorBy(contextMenu.logFileId, contextMenu.channelName, colorBy, lo, hi, lowColor, highColor)
+                      }
+                    />
+                  </div>
+
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 border-t pt-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => { onRemoveChannel(contextMenu.logFileId, contextMenu.channelName); setContextMenu(null); }}
+                >
+                  Remove from trace
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onSetChannelsHidden?.([cmKey], !cmHidden)}
+                >
+                  {cmHidden ? "Show line" : "Hide line"}
+                </Button>
+                <Button size="sm" className="ml-auto" onClick={() => setContextMenu(null)}>
+                  Done
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         );
       })()}
 
