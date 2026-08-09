@@ -57,12 +57,16 @@ export function PassList({
   onRemoveFile: (fileId: Id<"files">) => void;
 }) {
   const [search, setSearch] = useState("");
+  // Passes from another car can be pulled onto the same chart. Defaults to the
+  // one you're in, which is the comparison people want almost every time.
+  const [scopeVehicleId, setScopeVehicleId] = useState<Id<"vehicles">>(vehicleId);
   // Only what the user has explicitly toggled; everything else is derived, so
   // groups don't need resetting when the data changes underneath them.
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
 
-  const files = useQuery(api.files.listByVehicle, { vehicleId });
-  const events = useQuery(api.events.listByVehicle, { vehicleId });
+  const vehicles = useQuery(api.vehicles.list, {});
+  const files = useQuery(api.files.listByVehicle, { vehicleId: scopeVehicleId });
+  const events = useQuery(api.events.listByVehicle, { vehicleId: scopeVehicleId });
 
   const query = search.trim().toLowerCase();
 
@@ -88,12 +92,30 @@ export function PassList({
 
   // Open the event being viewed; failing that the most recent one. A search
   // opens everything it matched, since a hit inside a folded group is invisible.
-  const defaultOpenId = groups.some((g) => g.event._id === eventId)
-    ? eventId
-    : groups[0]?.event._id;
+  const defaultOpenId =
+    scopeVehicleId === vehicleId && groups.some((g) => g.event._id === eventId)
+      ? eventId
+      : groups[0]?.event._id;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {(vehicles?.length ?? 0) > 1 && (
+        <div className="px-2 pb-2">
+          <select
+            value={scopeVehicleId}
+            onChange={(e) => setScopeVehicleId(e.target.value as Id<"vehicles">)}
+            className="w-full cursor-pointer rounded-md border bg-background px-2 py-1.5 text-sm"
+          >
+            {(vehicles ?? []).map((v) => (
+              <option key={v._id} value={v._id}>
+                {v.name}
+                {v._id === vehicleId ? " (this car)" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div className="px-2 pb-2">
         <input
           value={search}

@@ -4,9 +4,8 @@ import { api } from "../../../convex/_generated/api";
 import type { ChannelDef, ChannelStatus, LogSession } from "@/lib/log-types";
 import type { LoadedLog, TraceConfig, ChannelOnTrace } from "@/lib/viewer-types";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { PlusIcon, XIcon } from "lucide-react";
+import { XIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
-import { AddLogModal } from "./AddLogModal";
 import { PassList } from "./PassList";
 import { getDisplayUnit, getUnitOptions, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { GROUP_COLORS, type GroupNode, type GroupChannel } from "@/lib/channel-groups";
@@ -112,7 +111,6 @@ export function ViewerSidebar({
   unitOverrides,
   onCycleUnit,
 }: Props) {
-  const [addLogOpen, setAddLogOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [hideEmpty, setHideEmpty] = useState(true);
@@ -390,27 +388,8 @@ export function ViewerSidebar({
         })}
       </div>
 
-      {/* Add Log button */}
-      <div className="border-t p-3">
-        <button
-          onClick={() => setAddLogOpen(true)}
-          className="flex items-center gap-1.5 w-full px-3 py-2 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer"
-        >
-          <PlusIcon className="size-4" />
-          Add Log
-        </button>
-      </div>
-
       </>
       )}
-
-      <AddLogModal
-        open={addLogOpen}
-        onOpenChange={setAddLogOpen}
-        currentVehicleId={vehicleId}
-        loadedFileIds={loadedFileIds}
-        onAddFile={onAddFile}
-      />
     </div>
   );
 }
