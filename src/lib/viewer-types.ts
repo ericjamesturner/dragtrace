@@ -238,6 +238,7 @@ export type ViewerAction =
   | { type: "addTrace"; id?: string; channels?: ChannelOnTrace[] }
   | { type: "removeTrace"; traceId: string }
   | { type: "reorderTrace"; traceId: string; beforeTraceId: string }
+  | { type: "setTraceChannelOrder"; traceId: string; channelNames: string[] }
   | { type: "addChannel"; traceId: string; channel: ChannelOnTrace }
   | { type: "removeChannel"; traceId: string; logFileId: Id<"files">; channelName: string }
   | { type: "setTraceHeight"; traceId: string; height: number }
@@ -438,6 +439,23 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
       return {
         ...state,
         pages: state.pages.map((p) => (p.id === page.id ? { ...p, traces } : p)),
+      };
+    }
+    // The order channels sit in on a trace is their draw order and the order
+    // the panel lists them, so it's worth being able to say. Given by name:
+    // every run's copy of a channel moves together.
+    case "setTraceChannelOrder": {
+      const rank = new Map(action.channelNames.map((n, i) => [n, i]));
+      const at = (name: string) => rank.get(name) ?? Number.MAX_SAFE_INTEGER;
+      return {
+        ...state,
+        pages: mapTraceById(state.pages, action.traceId, (t) => ({
+          ...t,
+          channels: t.channels
+            .map((c, i) => ({ c, i }))
+            .sort((a, b) => at(a.c.channelName) - at(b.c.channelName) || a.i - b.i)
+            .map(({ c }) => c),
+        })),
       };
     }
     case "setTraceHeight":

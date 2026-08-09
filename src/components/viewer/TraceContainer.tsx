@@ -4,6 +4,7 @@ import { resolveChannelStyle, CHART_COLORS, MIN_TRACE_HEIGHT } from "@/lib/viewe
 import type { Id } from "../../../convex/_generated/dataModel";
 import { TraceChart } from "./TraceChart";
 import { TraceSettingsPanel, ChannelPicker } from "./TraceSettingsPanel";
+import { TraceChannelsDialog } from "./TraceChannelsDialog";
 import { findValueAtTime, formatValue, formatChannelValue, computeRangeStats } from "@/lib/cursor-utils";
 import { convertForDisplay, convertFromDisplay, getDisplayUnit, getDisplayPrecision, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
@@ -372,6 +373,7 @@ interface Props {
   avgOnSelection?: boolean;
   onRemoveTrace: () => void;
   onReorderTrace?: (draggedTraceId: string) => void;
+  onSetChannelOrder?: (channelNames: string[]) => void;
   onToggleTimeslip?: () => void;
   /** Shared across every trace — the panel is one column down the page. */
   legendWidth?: number;
@@ -453,6 +455,7 @@ export function TraceContainer({
   avgOnSelection = true,
   onRemoveTrace,
   onReorderTrace,
+  onSetChannelOrder,
   onToggleTimeslip,
   legendWidth,
   legendCollapsed = false,
@@ -508,6 +511,7 @@ export function TraceContainer({
   );
   const [contextMenu, setContextMenu] = useState<ChannelStyleTarget | null>(null);
   const [customColorOpen, setCustomColorOpen] = useState(false);
+  const [channelsDialogOpen, setChannelsDialogOpen] = useState(false);
   // Race-start marker line right-click menu.
   const [raceMenu, setRaceMenu] = useState<{ x: number; y: number } | null>(null);
   // Live color preview while hovering a swatch in the context menu.
@@ -1251,7 +1255,7 @@ export function TraceContainer({
             a trace. Suppressed while the legend lives in the header. */}
         {trace.channels.length > 0 && !legendInHeader && (
           <div
-            className="relative shrink-0 select-none overflow-y-auto overflow-x-hidden border-l border-border bg-black/25"
+            className="relative flex shrink-0 flex-col select-none overflow-hidden border-l border-border bg-black/25"
             style={{ width: legendPanelWidth }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1262,7 +1266,7 @@ export function TraceContainer({
                 title="Drag to resize every channels panel"
               />
             )}
-            <div className="flex items-center gap-1 px-1.5 py-0.5 border-b border-white/10">
+            <div className="flex shrink-0 items-center gap-1 px-1.5 py-0.5 border-b border-white/10">
               {!legendCollapsed && (
                 <span className="flex-1 truncate pl-1 text-[10px] text-white/40">
                   Channels{avgRange ? ` · ${statsScopeLabel}` : ""}
@@ -1282,7 +1286,7 @@ export function TraceContainer({
 
             {/* Channel rows */}
             {!legendCollapsed && (
-              <div className="flex flex-col gap-0.5 px-2 py-1">
+              <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-1">
                 {/* Comparing runs: one row per CHANNEL with that channel's
                     value from each log side by side, rather than repeating
                     every channel name once per log. Same structure the compact
@@ -1555,6 +1559,18 @@ export function TraceContainer({
                   })()
                 )}
               </div>
+            )}
+
+            {/* Building a trace is a different job from reading one, so it gets
+                a door of its own rather than one-channel-at-a-time from the
+                sidebar. */}
+            {!legendCollapsed && (
+              <button
+                onClick={() => setChannelsDialogOpen(true)}
+                className="shrink-0 cursor-pointer border-t border-white/10 bg-black/30 px-2 py-1 text-xs text-white/50 hover:bg-white/10 hover:text-white/80"
+              >
+                Channels…
+              </button>
             )}
           </div>
         )}
@@ -1876,6 +1892,28 @@ export function TraceContainer({
           </Dialog>
         );
       })()}
+
+      <TraceChannelsDialog
+        open={channelsDialogOpen}
+        onOpenChange={setChannelsDialogOpen}
+        logs={logs}
+        traceChannels={trace.channels}
+        onAdd={(names) => {
+          // Added against the first log; the others mirror it.
+          const source = logs[0];
+          if (!source) return;
+          for (const channelName of names) {
+            onAddChannel({ logFileId: source.fileId, channelName });
+          }
+        }}
+        onRemove={(names) => {
+          const gone = new Set(names);
+          for (const ch of trace.channels) {
+            if (gone.has(ch.channelName)) onRemoveChannel(ch.logFileId, ch.channelName);
+          }
+        }}
+        onReorder={(channelNames) => onSetChannelOrder?.(channelNames)}
+      />
 
       {/* Race-start marker line styling menu (right-click the race line) */}
       {raceMenu && (() => {

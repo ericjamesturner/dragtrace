@@ -39,6 +39,7 @@ interface Props {
   onSetActiveTrace: (traceId: string) => void;
   onRemoveTrace: (traceId: string) => void;
   onReorderTrace: (traceId: string, beforeTraceId: string) => void;
+  onSetTraceChannelOrder: (traceId: string, channelNames: string[]) => void;
   onToggleTraceTimeslip: (traceId: string) => void;
   legendWidth?: number;
   legendCollapsed?: boolean;
@@ -109,6 +110,7 @@ export function TracePanel({
   onSetActiveTrace,
   onRemoveTrace,
   onReorderTrace,
+  onSetTraceChannelOrder,
   onToggleTraceTimeslip,
   legendWidth,
   legendCollapsed,
@@ -659,6 +661,7 @@ export function TracePanel({
                 avgOnSelection={avgOnSelection}
                 onRemoveTrace={() => onRemoveTrace(trace.id)}
                 onToggleTimeslip={() => onToggleTraceTimeslip(trace.id)}
+                onSetChannelOrder={(names) => onSetTraceChannelOrder(trace.id, names)}
                 legendWidth={legendWidth}
                 legendCollapsed={legendCollapsed}
                 onSetLegendWidth={onSetLegendWidth}

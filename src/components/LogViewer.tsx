@@ -646,6 +646,9 @@ function LogViewerReady({
                     onSetTraceHeights={(heights) => dispatch({ type: "setTraceHeights", heights })}
           onToggleTraceCollapsed={(traceId) => dispatch({ type: "toggleTraceCollapsed", traceId })}
           onToggleTraceTimeslip={(traceId) => dispatch({ type: "toggleTraceTimeslip", traceId })}
+          onSetTraceChannelOrder={(traceId, channelNames) =>
+            dispatch({ type: "setTraceChannelOrder", traceId, channelNames })
+          }
           legendWidth={config.legendWidth}
           legendCollapsed={config.legendCollapsed}
           onSetLegendWidth={(width) => dispatch({ type: "setLegendWidth", width })}
