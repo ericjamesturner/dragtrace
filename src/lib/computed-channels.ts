@@ -1,8 +1,8 @@
 import type { ParsedLog, ChannelDef } from "./log-types";
 
 const BANK_CHANNELS: { name: string; cylinders: number[] }[] = [
-  { name: "Bank 1 Average", cylinders: [1, 3, 5, 7] },
-  { name: "Bank 2 Average", cylinders: [2, 4, 6, 8] },
+  { name: "Bank 1 Lambda Average", cylinders: [1, 3, 5, 7] },
+  { name: "Bank 2 Lambda Average", cylinders: [2, 4, 6, 8] },
 ];
 
 /**

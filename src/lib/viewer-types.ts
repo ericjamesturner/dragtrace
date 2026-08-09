@@ -780,13 +780,85 @@ function migrateUnitOverrides(raw: unknown): UnitOverrides | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/**
+ * Computed channels renamed after the fact. Saved workspaces reference channels
+ * by name, so without this a rename silently drops them from every trace they
+ * were on — and the debounced save then makes that permanent.
+ */
+const RENAMED_CHANNELS: Record<string, string> = {
+  "Bank 1 Average": "Bank 1 Lambda Average",
+  "Bank 2 Average": "Bank 2 Lambda Average",
+};
+
+/** Rewrite every place a config refers to a channel by name. */
+function applyChannelRenames(config: ViewerConfig): ViewerConfig {
+  const rename = (name: string) => RENAMED_CHANNELS[name] ?? name;
+  const touched = (name: string | undefined) => name !== undefined && name in RENAMED_CHANNELS;
+
+  return {
+    ...config,
+    pages: config.pages.map((page) => ({
+      ...page,
+      traces: page.traces.map((t) => ({
+        ...t,
+        channels: t.channels.map((c) =>
+          touched(c.channelName) || touched(c.colorBy)
+            ? { ...c, channelName: rename(c.channelName), ...(c.colorBy ? { colorBy: rename(c.colorBy) } : {}) }
+            : c,
+        ),
+        // Keys embed the channel name, so they have to follow it.
+        ...(t.hiddenChannels
+          ? {
+              hiddenChannels: t.hiddenChannels.map((k) => {
+                const i = k.indexOf(":");
+                return i < 0 ? k : `${k.slice(0, i)}:${rename(k.slice(i + 1))}`;
+              }),
+            }
+          : {}),
+        // Zone expressions reference channels as {Name}.
+        ...(t.highlightZones
+          ? {
+              highlightZones: t.highlightZones.map((z) => {
+                let expression = z.expression;
+                for (const [from, to] of Object.entries(RENAMED_CHANNELS)) {
+                  expression = expression.split(`{${from}}`).join(`{${to}}`);
+                }
+                return expression === z.expression ? z : { ...z, expression };
+              }),
+            }
+          : {}),
+      })),
+      ...(page.scatters
+        ? {
+            scatters: page.scatters.map((s) => ({
+              ...s,
+              xChannel: rename(s.xChannel),
+              yChannel: rename(s.yChannel),
+              ...(s.colorChannel ? { colorChannel: rename(s.colorChannel) } : {}),
+            })),
+          }
+        : {}),
+      ...(page.heatmaps
+        ? {
+            heatmaps: page.heatmaps.map((h) => ({
+              ...h,
+              xChannel: rename(h.xChannel),
+              yChannel: rename(h.yChannel),
+              valueChannel: rename(h.valueChannel),
+            })),
+          }
+        : {}),
+    })),
+  };
+}
+
 export function migrateConfig(raw: Record<string, unknown>): ViewerConfig {
   if (raw.unitOverrides) {
     raw = { ...raw, unitOverrides: migrateUnitOverrides(raw.unitOverrides) };
   }
   if (raw.pages && Array.isArray(raw.pages)) {
     const config = raw as unknown as ViewerConfig;
-    return { ...config, pages: stripStaleColors(config.pages) };
+    return applyChannelRenames({ ...config, pages: stripStaleColors(config.pages) });
   }
   // Old format: flat traces array
   if (raw.traces && Array.isArray(raw.traces)) {
