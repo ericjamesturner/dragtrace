@@ -20,7 +20,7 @@ export function Preferences() {
   const activeVehicle = vehicles?.find((v) => v._id === scope);
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-dvh flex-col">
       <div className="flex items-center gap-3 border-b px-4 py-3">
         <Button variant="ghost" size="icon-sm" onClick={goToVehicles}>
           <ArrowLeftIcon />

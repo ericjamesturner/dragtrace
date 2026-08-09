@@ -211,18 +211,26 @@ export function OverviewBar({
     [fullMin, fullMax, fullSpan, clientXToTime]
   );
 
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLElement>) => {
       e.preventDefault();
-      const { onMove, onEnd } = startDrag(e.clientX, e.currentTarget as HTMLElement);
-      const handleMove = (ev: MouseEvent) => onMove(ev.clientX);
-      const handleUp = (ev: MouseEvent) => {
-        onEnd(ev.clientX);
-        document.removeEventListener("mousemove", handleMove);
-        document.removeEventListener("mouseup", handleUp);
+      const target = e.currentTarget;
+      const { onMove, onEnd } = startDrag(e.clientX, target);
+      // Capture keeps the drag alive past the handle's own bounds.
+      try { target.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+      const handleMove = (ev: PointerEvent) => {
+        if (ev.pointerId === e.pointerId) onMove(ev.clientX);
       };
-      document.addEventListener("mousemove", handleMove);
-      document.addEventListener("mouseup", handleUp);
+      const handleUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== e.pointerId) return;
+        onEnd(ev.clientX);
+        target.removeEventListener("pointermove", handleMove);
+        target.removeEventListener("pointerup", handleUp);
+        target.removeEventListener("pointercancel", handleUp);
+      };
+      target.addEventListener("pointermove", handleMove);
+      target.addEventListener("pointerup", handleUp);
+      target.addEventListener("pointercancel", handleUp);
     },
     [startDrag]
   );
@@ -325,8 +333,8 @@ export function OverviewBar({
       )}
       <div
         className="relative"
-        style={{ height: OVERVIEW_HEIGHT, cursor }}
-        onMouseDown={handleMouseDown}
+        style={{ height: OVERVIEW_HEIGHT, cursor, touchAction: "none" }}
+        onPointerDown={handlePointerDown}
         onMouseMove={(e) => setCursor(getCursor(e))}
       >
         <div ref={containerRef} className="pointer-events-none" />

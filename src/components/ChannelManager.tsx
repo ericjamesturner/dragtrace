@@ -301,7 +301,7 @@ export function ChannelManager() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center text-muted-foreground">
+      <div className="flex h-dvh items-center justify-center text-muted-foreground">
         Loading channel data...
       </div>
     );
@@ -309,7 +309,7 @@ export function ChannelManager() {
 
   if ((categories ?? []).length === 0) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-dvh items-center justify-center">
         <div className="text-center space-y-4">
           <p className="text-muted-foreground">No channel categories yet.</p>
           <p className="text-sm text-muted-foreground">
@@ -327,7 +327,7 @@ export function ChannelManager() {
   const rootCats = childrenOf.get(null) ?? [];
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col h-dvh">
       <div className="flex items-center gap-2 border-b px-4 py-3 shrink-0">
         <Button variant="ghost" size="icon-sm" onClick={goToVehicles}>
           <ArrowLeftIcon className="size-4" />

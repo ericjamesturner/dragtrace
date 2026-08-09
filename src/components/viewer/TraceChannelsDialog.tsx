@@ -395,8 +395,8 @@ export function TraceChannelsDialog({
               Math channel
             </Button>
             <p className="text-[11px] text-muted-foreground">
-              Double-click or drag to move a channel across; drag within the
-              right list to reorder it.
+              Double-click or drag to move a channel across. Reorder with the
+              arrows, or by dragging within the right list.
             </p>
           </div>
           <Button size="sm" onClick={() => onOpenChange(false)}>

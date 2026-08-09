@@ -69,23 +69,29 @@ export function HeatmapContainer({
   );
 
   const handleResizeStart = useCallback(
-    (e: React.MouseEvent) => {
+    (e: React.PointerEvent<HTMLElement>) => {
       e.preventDefault();
       e.stopPropagation();
       resizeRef.current = { startY: e.clientY, startH: heatmap.height };
       setResizing(true);
-      const handleMove = (ev: MouseEvent) => {
-        if (!resizeRef.current) return;
+      const target = e.currentTarget;
+      // Capture keeps the drag alive past the handle's own bounds.
+      try { target.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+      const handleMove = (ev: PointerEvent) => {
+        if (!resizeRef.current || ev.pointerId !== e.pointerId) return;
         onUpdate({ height: Math.max(150, resizeRef.current.startH + ev.clientY - resizeRef.current.startY) });
       };
-      const handleUp = () => {
+      const handleUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== e.pointerId) return;
         resizeRef.current = null;
         setResizing(false);
-        document.removeEventListener("mousemove", handleMove);
-        document.removeEventListener("mouseup", handleUp);
+        target.removeEventListener("pointermove", handleMove);
+        target.removeEventListener("pointerup", handleUp);
+        target.removeEventListener("pointercancel", handleUp);
       };
-      document.addEventListener("mousemove", handleMove);
-      document.addEventListener("mouseup", handleUp);
+      target.addEventListener("pointermove", handleMove);
+      target.addEventListener("pointerup", handleUp);
+      target.addEventListener("pointercancel", handleUp);
     },
     [heatmap.height, onUpdate],
   );
@@ -229,7 +235,8 @@ export function HeatmapContainer({
         highlightCells={highlightCells}
       />
       <div
-        onMouseDown={handleResizeStart}
+        onPointerDown={handleResizeStart}
+        style={{ touchAction: "none" }}
         className="h-1.5 cursor-ns-resize group flex items-center justify-center relative"
       >
         <div className="w-12 h-0.5 rounded-full bg-border group-hover:bg-primary transition-colors" />

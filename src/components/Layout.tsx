@@ -175,7 +175,7 @@ export function Layout() {
   if (nav.view === "viewer") {
     return (
       <NavContext value={contextValue}>
-        <Suspense fallback={<div className="flex h-screen items-center justify-center text-muted-foreground">Loading viewer...</div>}>
+        <Suspense fallback={<div className="flex h-dvh items-center justify-center text-muted-foreground">Loading viewer...</div>}>
           <LogViewer
             vehicleId={nav.vehicleId}
             eventId={nav.eventId}
@@ -188,7 +188,7 @@ export function Layout() {
 
   return (
     <NavContext value={contextValue}>
-      <div className="flex h-screen">
+      <div className="flex h-dvh">
         {/* Desktop sidebar */}
         <aside className="hidden w-64 shrink-0 border-r bg-muted/30 md:flex md:flex-col">
           <div className="flex items-center justify-between border-b px-4 py-3">

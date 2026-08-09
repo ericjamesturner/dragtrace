@@ -88,7 +88,7 @@ export default function LogViewer({ vehicleId, eventId, fileIds: initialFileIds 
 
   if (loading || workspacesLoading) {
     return (
-      <div className="flex h-screen items-center justify-center text-muted-foreground">
+      <div className="flex h-dvh items-center justify-center text-muted-foreground">
         <div className="text-center">
           <div className="text-sm">Loading log file{fileIds.length > 1 ? "s" : ""}...</div>
         </div>
@@ -98,7 +98,7 @@ export default function LogViewer({ vehicleId, eventId, fileIds: initialFileIds 
 
   if (logs.length === 0) {
     return (
-      <div className="flex h-screen items-center justify-center text-muted-foreground">
+      <div className="flex h-dvh items-center justify-center text-muted-foreground">
         <div className="text-center">
           <div className="text-sm mb-2">No valid Haltech logs found</div>
           {errors.map((e, i) => (
@@ -427,7 +427,7 @@ function LogViewerReady({
   }, [effectiveTraces, activeTraceId]);
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col h-dvh">
       <ViewerToolbar
         onAddTrace={() => handleAddTrace()}
         onBack={handleBack}

@@ -706,29 +706,39 @@ export function TraceContainer({
     [trace.id, trace.channels, onAddChannel, onMoveChannel, onReorderTrace]
   );
 
-  const handleResizeMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+  // Pointer rather than mouse events throughout: one code path covers a mouse,
+  // a finger and a pencil, and capture keeps the drag alive when it wanders off
+  // the handle.
+  const handleResizePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLElement>) => {
       e.preventDefault();
       const startY = e.clientY;
       const startHeight = trace.height;
+      const target = e.currentTarget;
+      // Capture keeps the drag alive past the handle's own bounds.
+      try { target.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
 
       // Fit mode: the handle is a splitter between this trace and the one
       // below, so the parent redistributes the pair's weight. Otherwise it's
       // the plain absolute-px resize.
-      const handleMove = (ev: MouseEvent) => {
+      const handleMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== e.pointerId) return;
         const delta = ev.clientY - startY;
         if (fitTraces) onSplitterDrag?.(delta, false);
         else onResizeHeight(Math.max(MIN_TRACE_HEIGHT, startHeight + delta));
       };
 
-      const handleUp = (ev: MouseEvent) => {
+      const handleUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== e.pointerId) return;
         if (fitTraces) onSplitterDrag?.(ev.clientY - startY, true);
-        document.removeEventListener("mousemove", handleMove);
-        document.removeEventListener("mouseup", handleUp);
+        target.removeEventListener("pointermove", handleMove);
+        target.removeEventListener("pointerup", handleUp);
+        target.removeEventListener("pointercancel", handleUp);
       };
 
-      document.addEventListener("mousemove", handleMove);
-      document.addEventListener("mouseup", handleUp);
+      target.addEventListener("pointermove", handleMove);
+      target.addEventListener("pointerup", handleUp);
+      target.addEventListener("pointercancel", handleUp);
     },
     [trace.height, onResizeHeight, fitTraces, onSplitterDrag]
   );
@@ -1036,22 +1046,29 @@ export function TraceContainer({
   });
 
   const handleLegendResize = useCallback(
-    (e: React.MouseEvent) => {
+    (e: React.PointerEvent<HTMLElement>) => {
       e.preventDefault();
       e.stopPropagation();
       const startX = e.clientX;
       const startW = legendPanelWidth;
-      const onMove = (ev: MouseEvent) => {
+      const target = e.currentTarget;
+      // Capture keeps the drag alive past the handle's own bounds.
+      try { target.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+      const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== e.pointerId) return;
         onSetLegendWidth?.(
           Math.min(600, Math.max(LEGEND_MIN_W, startW - (ev.clientX - startX))),
         );
       };
-      const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== e.pointerId) return;
+        target.removeEventListener("pointermove", onMove);
+        target.removeEventListener("pointerup", onUp);
+        target.removeEventListener("pointercancel", onUp);
       };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      target.addEventListener("pointermove", onMove);
+      target.addEventListener("pointerup", onUp);
+      target.addEventListener("pointercancel", onUp);
     },
     [legendPanelWidth, onSetLegendWidth],
   );
@@ -1330,7 +1347,8 @@ export function TraceContainer({
             {!legendCollapsed && onSetLegendWidth && (
               <div
                 className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize hover:bg-primary/40 active:bg-primary/60"
-                onMouseDown={handleLegendResize}
+                onPointerDown={handleLegendResize}
+                style={{ touchAction: "none" }}
                 title="Drag to resize every channels panel"
               />
             )}
@@ -1652,7 +1670,8 @@ export function TraceContainer({
       {!collapsed && !(fitTraces && isLastExpanded) && (
         <div
           className="h-1.5 shrink-0 cursor-ns-resize hover:bg-primary/20 transition-colors"
-          onMouseDown={handleResizeMouseDown}
+          onPointerDown={handleResizePointerDown}
+          style={{ touchAction: "none" }}
         />
       )}
 

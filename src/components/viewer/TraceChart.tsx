@@ -1537,6 +1537,99 @@ export function TraceChart({
     };
     over.addEventListener("wheel", onWheel, { passive: false });
 
+    // --- Touch and pencil ---
+    // uPlot speaks mouse and nothing else, and so does everything built on top
+    // of it here — drag-select, the selection-edge grab, zone labels. Rather
+    // than teach each of them a second input language, translate: a finger
+    // becomes the mouse. One finger scrubs the cursor and drags a range exactly
+    // as a pointer does; two pinch the time axis, standing in for the wheel.
+    const touches = new Map<number, { x: number; y: number }>();
+    let pinch: { dist: number; span: number; anchorVal: number; frac: number } | null = null;
+
+    const asMouse = (type: string, e: PointerEvent) => {
+      over.dispatchEvent(
+        new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          button: 0,
+          buttons: type === "mouseup" ? 0 : 1,
+        }),
+      );
+    };
+
+    const twoFingerMid = () => {
+      const [a, b] = [...touches.values()];
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, dist: Math.hypot(a.x - b.x, a.y - b.y) };
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType === "mouse") return; // a real mouse already works
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size === 2) {
+        // A second finger turns a drag into a pinch, so end the drag first or
+        // uPlot is left holding a selection that never finishes.
+        asMouse("mouseup", e);
+        const rect = over.getBoundingClientRect();
+        const mid = twoFingerMid();
+        const [lo, hi] = currentRangeRef.current;
+        const frac = Math.max(0, Math.min(1, (mid.x - rect.left) / rect.width));
+        pinch = { dist: mid.dist, span: hi - lo, anchorVal: lo + frac * (hi - lo), frac };
+        return;
+      }
+      if (touches.size > 2) return;
+      e.preventDefault();
+      // Capture keeps the gesture alive if the finger leaves the plot.
+      try { over.setPointerCapture(e.pointerId); } catch { /* nothing to capture */ }
+      asMouse("mousedown", e);
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.pointerType === "mouse" || !touches.has(e.pointerId)) return;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && touches.size === 2) {
+        e.preventDefault();
+        const { dist } = twoFingerMid();
+        if (dist <= 0) return;
+        const span = Math.max(1e-6, pinch.span * (pinch.dist / dist));
+        // Keep the point you pinched on under your fingers.
+        const lo = pinch.anchorVal - pinch.frac * span;
+        const next = clampWheelRange(lo, lo + span, globalRangeRef.current);
+        if (next === null) {
+          currentRangeRef.current = globalRangeRef.current;
+          onResetZoomRef.current?.();
+        } else {
+          currentRangeRef.current = next;
+          onZoomRef.current?.(next[0], next[1]);
+        }
+        return;
+      }
+      if (touches.size > 1) return;
+      e.preventDefault();
+      asMouse("mousemove", e);
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.pointerType === "mouse") return;
+      touches.delete(e.pointerId);
+      if (pinch) {
+        if (touches.size < 2) pinch = null;
+        return;
+      }
+      asMouse("mouseup", e);
+    };
+
+    // The browser would otherwise claim the gesture for scrolling or its own
+    // zoom before we ever see a move.
+    const priorTouchAction = over.style.touchAction;
+    over.style.touchAction = "none";
+    over.addEventListener("pointerdown", onPointerDown);
+    over.addEventListener("pointermove", onPointerMove);
+    over.addEventListener("pointerup", onPointerUp);
+    over.addEventListener("pointercancel", onPointerUp);
+
     // --- Right-click the race-start marker -> style it ---
     // Right-clicking a trace used to guess which line you meant and open its
     // style dialog. Nobody aims at a line by right-clicking it, and it fired on
@@ -1561,6 +1654,11 @@ export function TraceChart({
       over.removeEventListener("mousedown", onMouseDown);
       over.removeEventListener("mouseup", onMouseUp);
       over.removeEventListener("contextmenu", onContextMenuChart);
+      over.removeEventListener("pointerdown", onPointerDown);
+      over.removeEventListener("pointermove", onPointerMove);
+      over.removeEventListener("pointerup", onPointerUp);
+      over.removeEventListener("pointercancel", onPointerUp);
+      over.style.touchAction = priorTouchAction;
       root.removeEventListener("mousedown", edgeDown, true);
       over.removeEventListener("mousemove", edgeCursor);
       document.removeEventListener("mousemove", edgeMove);
