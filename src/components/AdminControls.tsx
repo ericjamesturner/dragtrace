@@ -66,7 +66,11 @@ export function ImpersonationBanner() {
   };
 
   return (
-    <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2">
+    // Every corner of the viewer is occupied — the overview bar spans the
+    // bottom, the readouts sit above it — so on a touch screen this pill lands
+    // on something you need. Impersonating is done from a desk anyway, so it
+    // simply isn't there when the pointer is a finger.
+    <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 pointer-coarse:hidden">
       <div className="flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-950/90 px-4 py-1.5 text-xs text-amber-300 shadow-lg backdrop-blur">
         <EyeIcon className="size-3.5" />
         <span>
