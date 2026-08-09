@@ -48,10 +48,12 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
     const span = spanSeconds ?? series.duration;
     const draw = (values: (number | null)[] | null) =>
       sparklinePath(series.times, values, span, SPARK_W, SPARK_H);
+    // The same colours these channels get on a trace, so a card and a chart
+    // agree about which line is which.
     return [
-      { key: "dsRpm", d: draw(series.dsRpm), className: "stroke-violet-400/70", width: 1 },
-      { key: "tps", d: draw(series.tps), className: "stroke-emerald-400/70", width: 1 },
-      { key: "rpm", d: draw(series.rpm), className: "stroke-sky-400", width: 1.5 },
+      { key: "dsRpm", d: draw(series.dsRpm), className: "stroke-blue-500", width: 1 },
+      { key: "tps", d: draw(series.tps), className: "stroke-green-500", width: 1 },
+      { key: "rpm", d: draw(series.rpm), className: "stroke-red-500", width: 1.5 },
     ].filter((p) => p.d);
   }, [series, spanSeconds]);
 
