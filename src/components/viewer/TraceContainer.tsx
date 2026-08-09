@@ -432,13 +432,16 @@ export function TraceContainer({
     setColorPreview(null);
   }, [contextMenu]);
 
-  const [legendPos, setLegendPos] = useState<{ x: number; y: number }>(
-    trace.legendPos ?? { x: 8, y: 8 },
+  // null means "wherever the default corner is" — top right, anchored so it
+  // stays there as the trace is resized. Dragging pins it to a left/top pair.
+  const [legendPos, setLegendPos] = useState<{ x: number; y: number } | null>(
+    trace.legendPos ?? null,
   );
+  const legendRef = useRef<HTMLDivElement>(null);
 
   // Follow externally-loaded positions (workspace switch, other session)
   useEffect(() => {
-    setLegendPos(trace.legendPos ?? { x: 8, y: 8 });
+    setLegendPos(trace.legendPos ?? null);
   }, [trace.legendPos?.x, trace.legendPos?.y]); // eslint-disable-line react-hooks/exhaustive-deps
   const [legendMinimized, setLegendMinimized] = useState(false);
   const legendDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
@@ -534,15 +537,19 @@ export function TraceContainer({
 
   const handleLegendMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    // Undragged legends are anchored to a corner rather than to coordinates,
+    // so the drag starts from where the element actually sits.
+    const el = legendRef.current;
+    const origin = legendPos ?? { x: el?.offsetLeft ?? 8, y: el?.offsetTop ?? 8 };
     legendDragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
-      originX: legendPos.x,
-      originY: legendPos.y,
+      originX: origin.x,
+      originY: origin.y,
     };
 
-    let lastX = legendPos.x;
-    let lastY = legendPos.y;
+    let lastX = origin.x;
+    let lastY = origin.y;
     let moved = false;
     const handleMove = (ev: MouseEvent) => {
       if (!legendDragRef.current || !chartAreaRef.current) return;
@@ -1082,8 +1089,9 @@ export function TraceContainer({
         {/* Floating channel legend — suppressed while it lives in the header */}
         {trace.channels.length > 0 && !legendInHeader && (
           <div
-            className="absolute z-10 rounded bg-black/60 backdrop-blur-sm select-none overflow-hidden"
-            style={{ left: legendPos.x, top: legendPos.y }}
+            ref={legendRef}
+            className="absolute z-10 rounded border border-white bg-black/60 backdrop-blur-sm select-none overflow-hidden"
+            style={legendPos ? { left: legendPos.x, top: legendPos.y } : { right: 8, top: 8 }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Legend header — drag handle */}

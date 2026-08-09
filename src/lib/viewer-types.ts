@@ -179,6 +179,8 @@ export interface ViewerConfig {
   showAxisLabels?: boolean;
   hiddenLogIds?: string[];
   mirroredLogIds?: string[];
+  /** Set once the one-time legend-position reset below has run. */
+  legendHomed?: boolean;
   unitSystem?: UnitSystem;
   unitOverrides?: UnitOverrides;
   // Cursor-centered mouse-wheel zoom (default on; factor default 1.25).
@@ -874,13 +876,31 @@ function applyChannelRenames(config: ViewerConfig): ViewerConfig {
   };
 }
 
+/**
+ * Legends used to open in the top left, so saved workspaces carry positions
+ * that were chosen to dodge that corner. The default is the top right now, and
+ * a stored position outranks it — so clear them once and let people drag again
+ * from somewhere sensible.
+ */
+function homeLegends(config: ViewerConfig): ViewerConfig {
+  if (config.legendHomed) return config;
+  return {
+    ...config,
+    legendHomed: true,
+    pages: config.pages.map((page) => ({
+      ...page,
+      traces: page.traces.map(({ legendPos: _drop, ...t }) => t),
+    })),
+  };
+}
+
 export function migrateConfig(raw: Record<string, unknown>): ViewerConfig {
   if (raw.unitOverrides) {
     raw = { ...raw, unitOverrides: migrateUnitOverrides(raw.unitOverrides) };
   }
   if (raw.pages && Array.isArray(raw.pages)) {
     const config = raw as unknown as ViewerConfig;
-    return applyChannelRenames({ ...config, pages: stripStaleColors(config.pages) });
+    return homeLegends(applyChannelRenames({ ...config, pages: stripStaleColors(config.pages) }));
   }
   // Old format: flat traces array
   if (raw.traces && Array.isArray(raw.traces)) {
