@@ -48,6 +48,66 @@ const RACE_STYLE_OPTIONS: { label: string; dash: number[] }[] = [
 ];
 
 /** Inline axis min/max editor for the channel context menu (display units). */
+/**
+ * Rows of every hue at three lightnesses, plus a hex box. This replaces
+ * `<input type="color">`: the native picker opens its own OS-level window,
+ * which the dialog reads as an outside interaction and closes behind it —
+ * leaving the picker floating somewhere unrelated to the control.
+ */
+const CUSTOM_COLORS = [
+  "#fca5a5", "#fdba74", "#fde047", "#86efac", "#67e8f9", "#93c5fd", "#c4b5fd", "#f9a8d4",
+  "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899",
+  "#991b1b", "#9a3412", "#854d0e", "#166534", "#155e75", "#1e40af", "#5b21b6", "#9d174d",
+  "#ffffff", "#d4d4d8", "#a1a1aa", "#71717a", "#52525b", "#3f3f46", "#27272a", "#000000",
+];
+
+function HexInput({
+  value,
+  onPreview,
+  onCommit,
+}: {
+  value: string;
+  onPreview: (color: string | null) => void;
+  onCommit: (color: string) => void;
+}) {
+  const [text, setText] = useState(value);
+  const normalise = (raw: string) => {
+    const hex = raw.trim().replace(/^#/, "");
+    if (/^[0-9a-f]{6}$/i.test(hex)) return `#${hex.toLowerCase()}`;
+    if (/^[0-9a-f]{3}$/i.test(hex)) {
+      return `#${hex.toLowerCase().split("").map((c) => c + c).join("")}`;
+    }
+    return null;
+  };
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-xs text-muted-foreground">Hex</span>
+      <input
+        value={text}
+        spellCheck={false}
+        placeholder="#3b82f6"
+        onChange={(e) => {
+          setText(e.target.value);
+          onPreview(normalise(e.target.value));
+        }}
+        onBlur={() => {
+          const c = normalise(text);
+          if (c) onCommit(c);
+          else setText(value);
+          onPreview(null);
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          const c = normalise(text);
+          if (c) onCommit(c);
+          onPreview(null);
+        }}
+        className="w-24 rounded border bg-background px-1.5 py-0.5 font-mono text-xs outline-none focus:border-primary"
+      />
+    </div>
+  );
+}
+
 function AxisInputs({
   minRaw,
   maxRaw,
@@ -441,6 +501,7 @@ export function TraceContainer({
     () => new Map(),
   );
   const [contextMenu, setContextMenu] = useState<ChannelStyleTarget | null>(null);
+  const [customColorOpen, setCustomColorOpen] = useState(false);
   // Race-start marker line right-click menu.
   const [raceMenu, setRaceMenu] = useState<{ x: number; y: number } | null>(null);
   // Live color preview while hovering a swatch in the context menu.
@@ -540,10 +601,13 @@ export function TraceContainer({
     [onToggleTimeslipExpand, onUpdateZone, trace.highlightZones, foreignSharedZones],
   );
 
-  // Close context menus on click outside or escape
+  // The race-line menu is still a popover pinned to the pointer, so it closes
+  // on any click or Escape. The channel style dialog is not — it dismisses
+  // itself, and this listener would shut it the moment you touched a control
+  // inside it.
   useEffect(() => {
-    if (!contextMenu && !raceMenu) return;
-    const close = () => { setContextMenu(null); setRaceMenu(null); };
+    if (!raceMenu) return;
+    const close = () => setRaceMenu(null);
     const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
     window.addEventListener("click", close);
     window.addEventListener("keydown", handleKey);
@@ -551,7 +615,7 @@ export function TraceContainer({
       window.removeEventListener("click", close);
       window.removeEventListener("keydown", handleKey);
     };
-  }, [contextMenu, raceMenu]);
+  }, [raceMenu]);
 
   // Group channels by log file
   const channelsByLog = new Map<Id<"files">, ChannelOnTrace[]>();
@@ -1505,7 +1569,7 @@ export function TraceContainer({
           : null;
         const section = "text-[10px] font-semibold uppercase tracking-wider text-muted-foreground";
         return (
-          <Dialog open onOpenChange={(o) => { if (!o) setContextMenu(null); }}>
+          <Dialog open onOpenChange={(o) => { if (!o) { setContextMenu(null); setCustomColorOpen(false); } }}>
             <DialogContent className="sm:max-w-2xl">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2 pr-6">
@@ -1562,19 +1626,14 @@ export function TraceContainer({
                         style={{ backgroundColor: c }}
                       />
                     ))}
-                    <label
-                      title="Custom color…"
-                      className="relative block size-5 shrink-0 cursor-pointer overflow-hidden rounded-full border border-white/40 transition-transform hover:scale-110"
+                    <button
+                      title="More colors"
+                      onClick={() => setCustomColorOpen((v) => !v)}
+                      className={`size-5 shrink-0 cursor-pointer rounded-full border transition-transform hover:scale-110 ${
+                        customColorOpen ? "border-foreground" : "border-white/40"
+                      }`}
                       style={{ background: "conic-gradient(from 90deg, #ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)" }}
-                    >
-                      <input
-                        type="color"
-                        defaultValue={cmCh?.color ?? cmColor}
-                        onInput={(e) => setColorPreview({ key: cmKey, color: (e.target as HTMLInputElement).value })}
-                        onChange={(e) => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, (e.target as HTMLInputElement).value); setColorPreview(null); }}
-                        className="absolute inset-0 size-full cursor-pointer opacity-0"
-                      />
-                    </label>
+                    />
                     <button
                       title="Back to the automatic color"
                       onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, undefined); setColorPreview(null); }}
@@ -1583,6 +1642,32 @@ export function TraceContainer({
                       ↺
                     </button>
                   </div>
+
+                  {customColorOpen && (
+                    <div className="space-y-2 rounded-md border bg-muted/30 p-2">
+                      <div className="grid grid-cols-8 gap-1.5">
+                        {CUSTOM_COLORS.map((c) => (
+                          <button
+                            key={c}
+                            title={c}
+                            onMouseEnter={() => setColorPreview({ key: cmKey, color: c })}
+                            onMouseLeave={() => setColorPreview(null)}
+                            onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c); setColorPreview(null); }}
+                            className={`size-5 cursor-pointer rounded border transition-transform hover:scale-110 ${
+                              cmCh?.color === c ? "border-foreground" : "border-white/10"
+                            }`}
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                      </div>
+                      <HexInput
+                        key={cmKey}
+                        value={cmCh?.color ?? cmColor}
+                        onPreview={(c) => setColorPreview(c ? { key: cmKey, color: c } : null)}
+                        onCommit={(c) => onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c)}
+                      />
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -1731,7 +1816,7 @@ export function TraceContainer({
                 >
                   {cmHidden ? "Show line" : "Hide line"}
                 </Button>
-                <Button size="sm" className="ml-auto" onClick={() => setContextMenu(null)}>
+                <Button size="sm" className="ml-auto" onClick={() => { setContextMenu(null); setCustomColorOpen(false); }}>
                   Done
                 </Button>
               </div>
