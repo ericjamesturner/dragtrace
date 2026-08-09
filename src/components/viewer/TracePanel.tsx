@@ -386,7 +386,7 @@ export function TracePanel({
     return () => clearTimeout(id);
   }, [selection]);
 
-  // Keyboard: Escape clears selection then zoom, Up zooms in / to selection, Down zooms out
+  // Keyboard: Escape drops the marker, Up zooms in / to selection, Down zooms out
   const zoomRangeRef = useRef(zoomRange);
   zoomRangeRef.current = zoomRange;
   const selectionRef = useRef(selection);
@@ -397,19 +397,22 @@ export function TracePanel({
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
       if (e.key === "Escape") {
-        if (selectionRef.current) {
-          setSelection(null);
-        } else {
-          setZoomRange(null);
-        }
+        // Only the marker. Escape used to fall through to clearing the zoom,
+        // which threw away a window you'd hunted down to get rid of a cursor
+        // you'd parked by accident. "Show All" resets the view.
+        setSelection(null);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        if (selectionRef.current) {
-          setZoomRange(selectionRef.current);
+        const sel = selectionRef.current;
+        if (sel && sel[0] !== sel[1]) {
+          setZoomRange(sel);
           setSelection(null);
         } else {
+          // A marker has no width to zoom to, so zoom around it instead —
+          // zooming *to* it collapsed the view to a single instant with no way
+          // back but Show All.
           const range = zoomRangeRef.current ?? globalRange;
-          const center = (range[0] + range[1]) / 2;
+          const center = sel ? sel[0] : (range[0] + range[1]) / 2;
           const quarterSpan = (range[1] - range[0]) / 4;
           setZoomRange([
             Math.max(globalRange[0], center - quarterSpan),
