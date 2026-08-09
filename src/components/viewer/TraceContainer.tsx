@@ -32,6 +32,9 @@ const LEGEND_COLLAPSED_W = 22;
 /** Narrowest the panel can be dragged before the values stop fitting. */
 const LEGEND_MIN_W = 120;
 
+/** Wide enough for MIN/AVG/MAX/Δ columns beside the channel name. */
+const LEGEND_STATS_W = 380;
+
 const WIDTH_OPTIONS = [1, 1.5, 2.5, 4];
 const STYLE_OPTIONS: { label: string; dash: number[] | undefined }[] = [
   { label: "Solid", dash: undefined },
@@ -746,9 +749,21 @@ export function TraceContainer({
 
   // Chart area width
 
-  // A RANGE selection (not a click/point) drives the AVG readout, when enabled.
+  // The panel is only as wide as it's been dragged, and the stat columns need
+  // room. Below that it stays a plain value readout.
+  const panelWidthSetting = legendCollapsed ? LEGEND_COLLAPSED_W : legendWidth;
+  const statsFitPanel = (panelWidthSetting ?? 0) >= LEGEND_STATS_W;
+
+  // What the stats describe: a drag-selected range if there is one, otherwise
+  // whatever's on screen. Null when there's nowhere to put the numbers.
   const avgRange: [number, number] | null =
-    avgOnSelection && selection && selection[0] !== selection[1] ? selection : null;
+    avgOnSelection && selection && selection[0] !== selection[1]
+      ? selection
+      : statsFitPanel
+        ? (zoomRange ?? globalRange)
+        : null;
+  const statsScopeLabel =
+    selection && selection[0] !== selection[1] ? "selection" : zoomRange ? "in view" : "whole run";
 
   // Everything both legend renderers need, computed once. The floating overlay
   // and the compact header strip show the same numbers; only the layout differs.
@@ -778,35 +793,19 @@ export function TraceContainer({
         const isChHidden = hiddenChannels.has(chKey);
         const resolved = resolveChannelStyle(ch, chIdx, log?.logIndex ?? 0);
 
+        // The value under the cursor and the stats over the scope are separate
+        // readings — one answers "what is it right now", the others "what did it
+        // do". The panel shows both side by side when it's wide enough.
         let valueStr: string | null = null;
+        let avgStr: string | null = null;
         let minStr: string | null = null;
         let maxStr: string | null = null;
-        let deltaStr: string | null = null;
+        let minTime: number | null = null;
+        let maxTime: number | null = null;
         let unitLabel = "";
-        let isAvg = false;
         const def = log?.parsed.channelDefs.find((d) => d.name === ch.channelName);
-        if (avgRange && log && !isLogHidden && !isChHidden && !def?.enumValues) {
-          const offset = offsets.get(log.fileId) ?? 0;
-          const stats = computeRangeStats(log, ch.channelName, avgRange, offset);
-          if (stats !== null) {
-            const mu = def?.quantitySlug ?? "";
-            const conv = (v: number) =>
-              mu ? convertForDisplay(v, mu, unitSystem, unitOverrides) : v;
-            valueStr = formatValue(conv(stats.avg));
-            minStr = formatValue(conv(stats.min));
-            maxStr = formatValue(conv(stats.max));
-            unitLabel = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
-            isAvg = true;
-            // Start -> end change over the selection, in display units
-            // (convert endpoints first: some conversions have offsets).
-            const startV = findValueAtTime(log, ch.channelName, Math.min(avgRange[0], avgRange[1]), offset);
-            const endV = findValueAtTime(log, ch.channelName, Math.max(avgRange[0], avgRange[1]), offset);
-            if (startV !== null && endV !== null) {
-              const d = conv(endV) - conv(startV);
-              deltaStr = `${d >= 0 ? "+" : ""}${formatValue(d)}`;
-            }
-          }
-        } else if (cursorTime !== null && log && !isLogHidden && !isChHidden) {
+        const visible = !!log && !isLogHidden && !isChHidden;
+        if (cursorTime !== null && log && visible) {
           const offset = offsets.get(log.fileId) ?? 0;
           const val = findValueAtTime(log, ch.channelName, cursorTime, offset);
           if (val !== null) {
@@ -824,6 +823,21 @@ export function TraceContainer({
             }
           }
         }
+        if (avgRange && log && visible && !def?.enumValues) {
+          const offset = offsets.get(log.fileId) ?? 0;
+          const stats = computeRangeStats(log, ch.channelName, avgRange, offset);
+          if (stats !== null) {
+            const mu = def?.quantitySlug ?? "";
+            const conv = (v: number) =>
+              mu ? convertForDisplay(v, mu, unitSystem, unitOverrides) : v;
+            avgStr = formatValue(conv(stats.avg));
+            minStr = formatValue(conv(stats.min));
+            maxStr = formatValue(conv(stats.max));
+            minTime = stats.minTime;
+            maxTime = stats.maxTime;
+            if (!unitLabel) unitLabel = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
+          }
+        }
 
         return {
           chKey, ch, indent: multiLog, isLogHidden, isChHidden,
@@ -831,7 +845,7 @@ export function TraceContainer({
           logColor: log?.logColor ?? "#3b82f6",
           logIndex: log?.logIndex ?? 0,
           color: resolved.color, opacity: resolved.opacity,
-          valueStr, minStr, maxStr, deltaStr, unitLabel, isAvg,
+          valueStr, avgStr, minStr, maxStr, minTime, maxTime, unitLabel,
         };
       });
 
@@ -1208,7 +1222,11 @@ export function TraceContainer({
               />
             )}
             <div className="flex items-center gap-1 px-1.5 py-0.5 border-b border-white/10">
-              {!legendCollapsed && <span className="text-[10px] text-white/40 flex-1 pl-1">Channels</span>}
+              {!legendCollapsed && (
+                <span className="flex-1 truncate pl-1 text-[10px] text-white/40">
+                  Channels{avgRange ? ` · ${statsScopeLabel}` : ""}
+                </span>
+              )}
               <Tip content={legendCollapsed ? "Show channels on every trace" : "Hide channels on every trace"}>
                 <button
                   className="text-white/40 hover:text-white/70 cursor-pointer"
@@ -1239,10 +1257,10 @@ export function TraceContainer({
                       <span className="flex-1 text-white/40 uppercase tracking-wider">
                         {multiLogTrace ? "Channel / run" : "Channel"}
                       </span>
+                      <span className="w-14 text-right text-white">NOW</span>
                       <span className="w-14 text-right text-white/40">MIN</span>
-                      <span className="w-14 text-right text-amber-400">AVG</span>
                       <span className="w-14 text-right text-white/40">MAX</span>
-                      <span className="w-14 text-right text-sky-400">Δ</span>
+                      <span className="w-14 text-right text-amber-400">AVG</span>
                       <span className="w-8 shrink-0" />
                     </div>
                     {compactChannels.map(({ name, rows, unitLabel }) => {
@@ -1259,10 +1277,24 @@ export function TraceContainer({
                               {traceLogs.find((l) => l.id === (r.ch.logFileId as string))?.tag ?? r.logName}
                             </span>
                           )}
-                          <span className="font-mono font-medium text-white/70 w-14 text-right tabular-nums">{r.minStr ?? "---"}</span>
                           <span className="font-mono font-medium text-white w-14 text-right tabular-nums">{r.valueStr ?? "---"}</span>
-                          <span className="font-mono font-medium text-white/70 w-14 text-right tabular-nums">{r.maxStr ?? "---"}</span>
-                          <span className="font-mono font-medium text-sky-200/90 w-14 text-right tabular-nums">{r.deltaStr ?? "---"}</span>
+                          <button
+                            title={r.minTime !== null ? "Put the cursor where this run hit its minimum" : undefined}
+                            disabled={r.minTime === null}
+                            onClick={(e) => { e.stopPropagation(); if (r.minTime !== null) onSelection?.(r.minTime, r.minTime); }}
+                            className="w-14 rounded-sm text-right font-mono font-medium tabular-nums text-white/70 enabled:cursor-pointer enabled:hover:bg-white/15"
+                          >
+                            {r.minStr ?? "---"}
+                          </button>
+                          <button
+                            title={r.maxTime !== null ? "Put the cursor where this run hit its maximum" : undefined}
+                            disabled={r.maxTime === null}
+                            onClick={(e) => { e.stopPropagation(); if (r.maxTime !== null) onSelection?.(r.maxTime, r.maxTime); }}
+                            className="w-14 rounded-sm text-right font-mono font-medium tabular-nums text-white/70 enabled:cursor-pointer enabled:hover:bg-white/15"
+                          >
+                            {r.maxStr ?? "---"}
+                          </button>
+                          <span className="font-mono font-medium text-amber-200/90 w-14 text-right tabular-nums">{r.avgStr ?? "---"}</span>
                           <span className="text-[9px] text-white/40 min-w-8 whitespace-nowrap shrink-0">{unitLabel}</span>
                         </>
                       );
@@ -1417,7 +1449,7 @@ export function TraceContainer({
                             {log.fileName.replace(/\.[^.]+$/, "")}
                           </div>
                         )}
-                        {rows.map(({ chKey, ch, indent, isChHidden, color, opacity, valueStr, minStr, maxStr, deltaStr, unitLabel, isAvg }) => {
+                        {rows.map(({ chKey, ch, indent, isChHidden, color, opacity, valueStr, unitLabel }) => {
                           const isHovered = hoveredChannel === chKey;
                           const isDimmed = hoveredChannel !== null && !isHovered;
                           return (
@@ -1467,38 +1499,9 @@ export function TraceContainer({
                               <span className="min-w-0 flex-1 truncate text-white/70">
                                 {ch.channelName}
                               </span>
-                              {isAvg ? (
-                                <>
-                                  <span className="text-[9px] font-semibold text-white/40 ml-auto self-center shrink-0">
-                                    MIN
-                                  </span>
-                                  <span className="font-mono font-medium text-white/70 w-14 text-right tabular-nums">
-                                    {minStr ?? "---"}
-                                  </span>
-                                  <span className="text-[9px] font-semibold text-amber-400 pl-1 self-center shrink-0">
-                                    AVG
-                                  </span>
-                                  <span className="font-mono font-medium text-white w-14 text-right tabular-nums">
-                                    {valueStr ?? "---"}
-                                  </span>
-                                  <span className="text-[9px] font-semibold text-white/40 pl-1 self-center shrink-0">
-                                    MAX
-                                  </span>
-                                  <span className="font-mono font-medium text-white/70 w-14 text-right tabular-nums">
-                                    {maxStr ?? "---"}
-                                  </span>
-                                  <span className="text-[9px] font-semibold text-sky-400 pl-1 self-center shrink-0">
-                                    Δ
-                                  </span>
-                                  <span className="font-mono font-medium text-sky-200/90 w-14 text-right tabular-nums">
-                                    {deltaStr ?? "---"}
-                                  </span>
-                                </>
-                              ) : (
-                                <span className="font-mono font-medium text-white ml-auto pl-2 w-16 text-right tabular-nums">
-                                  {valueStr ?? "---"}
-                                </span>
-                              )}
+                              <span className="font-mono font-medium text-white ml-auto pl-2 w-16 text-right tabular-nums">
+                                {valueStr ?? "---"}
+                              </span>
                               <span className="text-white/50 text-[10px] min-w-8 whitespace-nowrap shrink-0">
                                 {unitLabel || ""}
                               </span>
