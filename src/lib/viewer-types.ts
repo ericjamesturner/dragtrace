@@ -222,6 +222,7 @@ export interface ViewerConfig {
 export type ViewerAction =
   | { type: "addTrace"; id?: string; channels?: ChannelOnTrace[] }
   | { type: "removeTrace"; traceId: string }
+  | { type: "reorderTrace"; traceId: string; beforeTraceId: string }
   | { type: "addChannel"; traceId: string; channel: ChannelOnTrace }
   | { type: "removeChannel"; traceId: string; logFileId: Id<"files">; channelName: string }
   | { type: "setTraceHeight"; traceId: string; height: number }
@@ -403,6 +404,23 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
           ...p,
           traces: p.traces.filter((t) => t.channels.length > 0),
         })),
+      };
+    }
+    // Drop a trace onto another to take its place. Only the active page's own
+    // traces move: one pinned in from elsewhere belongs to the page that owns
+    // it, and reordering it here would silently reshuffle that page.
+    case "reorderTrace": {
+      const page = state.pages.find((p) => p.id === state.activePageId);
+      if (!page) return state;
+      const from = page.traces.findIndex((t) => t.id === action.traceId);
+      const to = page.traces.findIndex((t) => t.id === action.beforeTraceId);
+      if (from < 0 || to < 0 || from === to) return state;
+      const traces = [...page.traces];
+      const [moved] = traces.splice(from, 1);
+      traces.splice(to, 0, moved);
+      return {
+        ...state,
+        pages: state.pages.map((p) => (p.id === page.id ? { ...p, traces } : p)),
       };
     }
     case "setTraceHeight":

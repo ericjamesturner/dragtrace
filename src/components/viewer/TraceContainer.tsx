@@ -7,7 +7,7 @@ import { TraceSettingsPanel, ChannelPicker } from "./TraceSettingsPanel";
 import { findValueAtTime, formatValue, formatChannelValue, computeRangeStats } from "@/lib/cursor-utils";
 import { convertForDisplay, convertFromDisplay, getDisplayUnit, getDisplayPrecision, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
-import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, GripHorizontalIcon } from "lucide-react";
+import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, GripHorizontalIcon, GripVerticalIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 
 interface ContextMenuState {
@@ -297,6 +297,7 @@ interface Props {
   wheelMode?: "zoom" | "scroll";
   avgOnSelection?: boolean;
   onRemoveTrace: () => void;
+  onReorderTrace?: (draggedTraceId: string) => void;
   onRemoveChannel: (logFileId: Id<"files">, channelName: string) => void;
   onAddChannel: (channel: ChannelOnTrace) => void;
   onMoveChannel: (sourceTraceId: string, logFileId: Id<"files">, channelName: string) => void;
@@ -372,6 +373,7 @@ export function TraceContainer({
   wheelMode,
   avgOnSelection = true,
   onRemoveTrace,
+  onReorderTrace,
   onRemoveChannel,
   onAddChannel,
   onMoveChannel,
@@ -605,10 +607,15 @@ export function TraceContainer({
       if (!raw) return;
       try {
         const parsed = JSON.parse(raw) as {
-          logFileId: Id<"files">;
-          channelName: string;
+          logFileId?: Id<"files">;
+          channelName?: string;
           sourceTraceId?: string;
+          dragTraceId?: string;
         };
+        if (parsed.dragTraceId) {
+          if (parsed.dragTraceId !== trace.id) onReorderTrace?.(parsed.dragTraceId);
+          return;
+        }
         if (parsed.logFileId && parsed.channelName) {
           // If moving from another trace, remove from source first
           if (parsed.sourceTraceId && parsed.sourceTraceId !== trace.id) {
@@ -626,7 +633,7 @@ export function TraceContainer({
         // Not valid JSON — ignore
       }
     },
-    [trace.id, trace.channels, onAddChannel, onMoveChannel]
+    [trace.id, trace.channels, onAddChannel, onMoveChannel, onReorderTrace]
   );
 
   const handleResizeMouseDown = useCallback(
@@ -887,6 +894,21 @@ export function TraceContainer({
     >
       {/* Header — collapse toggle, channel summary, action buttons */}
       <div className="sticky top-0 z-20 flex items-center gap-1.5 px-2 py-1 border-b bg-muted rounded-t-lg shrink-0">
+        {onReorderTrace && (
+          <Tip content="Drag to reorder">
+            <span
+              draggable
+              onDragStart={(e) => {
+                e.stopPropagation();
+                e.dataTransfer.setData("text/plain", JSON.stringify({ dragTraceId: trace.id }));
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-foreground shrink-0"
+            >
+              <GripVerticalIcon className="size-4" />
+            </span>
+          </Tip>
+        )}
         <Tip content={collapsed ? "Expand trace" : "Collapse trace"}>
           <button
             onClick={(e) => { e.stopPropagation(); onToggleCollapsed?.(); }}

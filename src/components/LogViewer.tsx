@@ -599,6 +599,9 @@ function LogViewerReady({
           mirroredLogIds={config.mirroredLogIds ?? []}
               onSetActiveTrace={setActiveTraceId}
           onRemoveTrace={(traceId) => dispatch({ type: "removeTrace", traceId })}
+          onReorderTrace={(traceId, beforeTraceId) =>
+            dispatch({ type: "reorderTrace", traceId, beforeTraceId })
+          }
           onRemoveChannel={(traceId, logFileId, channelName) =>
             dispatch({ type: "removeChannel", traceId, logFileId, channelName })
           }
