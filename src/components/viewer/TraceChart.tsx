@@ -560,9 +560,28 @@ export function TraceChart({
           }
         }
       }
+      // A little air above and below so a line resting at its extreme isn't
+      // drawn along the frame — but never past what the channel can actually
+      // read. Throttle that reaches 100% should say 100, not 105: a padded
+      // bound reads as a real value and there's no such thing as -5% throttle.
       const pad = (autoMax - autoMin) * 0.05 || 1;
-      const lo = manualMin ?? (autoMin - pad);
-      const hi = manualMax ?? (autoMax + pad);
+      const bounds = ((channelsInScale.get(scaleId) ?? [])
+        .map((c) => displayRangeByChannel.get(c))
+        .filter(Boolean) as [number, number][])
+        .reduce<[number, number] | null>(
+          (acc, r) => (acc ? [Math.min(acc[0], r[0]), Math.max(acc[1], r[1])] : r),
+          null,
+        );
+      let paddedMin = autoMin - pad;
+      let paddedMax = autoMax + pad;
+      if (bounds) {
+        // Only clamp on a side the data stays inside — a channel reading past
+        // its declared range still gets drawn in full.
+        if (autoMin >= bounds[0]) paddedMin = Math.max(paddedMin, bounds[0]);
+        if (autoMax <= bounds[1]) paddedMax = Math.min(paddedMax, bounds[1]);
+      }
+      const lo = manualMin ?? paddedMin;
+      const hi = manualMax ?? paddedMax;
       scaleRangeByKey.set(scaleKey, [lo, hi]);
       scales[scaleKey] = { range: () => [lo, hi] };
     }

@@ -1767,12 +1767,20 @@ export function TraceContainer({
                           size="sm"
                           variant="outline"
                           onClick={() => {
+                            // Same rule the automatic range uses: pad for
+                            // legibility, but not past what the channel reads.
                             const pad = (cmExtent.max - cmExtent.min) * 0.05 || 1;
+                            const lo = cmDef && Number.isFinite(cmDef.displayMin) && cmExtent.min >= cmDef.displayMin
+                              ? Math.max(cmExtent.min - pad, cmDef.displayMin)
+                              : cmExtent.min - pad;
+                            const hi = cmDef && Number.isFinite(cmDef.displayMax) && cmExtent.max <= cmDef.displayMax
+                              ? Math.min(cmExtent.max + pad, cmDef.displayMax)
+                              : cmExtent.max + pad;
                             onSetChannelAxisRange(
                               contextMenu.logFileId,
                               contextMenu.channelName,
-                              cmExtent.min - pad,
-                              cmExtent.max + pad,
+                              lo,
+                              hi,
                             );
                           }}
                         >
