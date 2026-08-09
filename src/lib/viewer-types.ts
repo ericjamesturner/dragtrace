@@ -675,10 +675,23 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
       return { ...state, raceLineColor: action.color, raceLineWidth: action.width, raceLineDash: action.dash };
     case "purgeFile": {
       const fid = action.logFileId as string;
+      // Mirroring is defined against another log. Removing one can leave the
+      // survivor flagged as mirroring something that's gone, so drop the flag
+      // for any log that no longer has channels of its own to mirror from.
+      const remainingMirrored = (state.mirroredLogIds ?? []).filter((id) => id !== fid);
+      const stillHasSource = state.pages.some((p) =>
+        p.traces.some((t) =>
+          t.channels.some(
+            (c) =>
+              (c.logFileId as string) !== fid &&
+              !remainingMirrored.includes(c.logFileId as string),
+          ),
+        ),
+      );
       return {
         ...state,
         hiddenLogIds: state.hiddenLogIds?.filter((id) => id !== fid),
-        mirroredLogIds: state.mirroredLogIds?.filter((id) => id !== fid),
+        mirroredLogIds: stillHasSource ? remainingMirrored : [],
         pages: state.pages.map((page) => ({
           ...page,
           // Traces emptied by removing a log are kept, not deleted: their

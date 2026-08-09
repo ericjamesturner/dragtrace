@@ -366,7 +366,11 @@ export function ViewerSidebar({
                   </label>
                 </div>
               )}
-              {isLogOpen && !mirroredLogIds.includes(log.fileId) && (
+              {/* A mirrored log hides its tree because its channels come from
+                  the log above. With only one log there's nothing to mirror,
+                  and the Mirror checkbox isn't rendered either — so without
+                  this guard a stale flag hides every channel with no way back. */}
+              {isLogOpen && (logs.length === 1 || !mirroredLogIds.includes(log.fileId)) && (
                 <div className="ml-1 border-l-2 pl-0" style={{ borderColor: log.logColor + "30" }}>
                   {tree.map((node) => (
                     <SidebarGroupNode
