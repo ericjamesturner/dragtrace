@@ -527,6 +527,7 @@ function LogViewerReady({
                     onSetTraceHeights={(heights) => dispatch({ type: "setTraceHeights", heights })}
           onToggleTraceCollapsed={(traceId) => dispatch({ type: "toggleTraceCollapsed", traceId })}
           onToggleTraceTimeslip={(traceId) => dispatch({ type: "toggleTraceTimeslip", traceId })}
+          onToggleTraceZones={(traceId) => dispatch({ type: "toggleTraceZones", traceId })}
           pickChannelsFor={pickChannelsFor}
           vehicleId={vehicleId}
           mathChannels={math.definitions}

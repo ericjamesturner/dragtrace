@@ -8,7 +8,7 @@ import { TraceChannelsDialog } from "./TraceChannelsDialog";
 import { findValueAtTime, formatValue, formatChannelValue, computeRangeStats, statusNote } from "@/lib/cursor-utils";
 import { convertForDisplay, convertFromDisplay, getDisplayUnit, getDisplayPrecision, getUnitOptions, resolveUnitKey, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
-import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon, MoveHorizontalIcon } from "lucide-react";
+import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon, MoveHorizontalIcon, HighlighterIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
@@ -28,7 +28,7 @@ interface ChannelStyleTarget {
  * set the flex min-height so the *chart* can still reach MIN_TRACE_HEIGHT;
  * being a few px off just nudges where the scroll fallback kicks in.
  */
-export const TRACE_CHROME_PX = 34;
+export const TRACE_CHROME_PX = 40;
 
 /** Width of the docked channels panel once collapsed to its toggle. */
 const LEGEND_COLLAPSED_W = 22;
@@ -41,6 +41,14 @@ const LEGEND_STATS_W = 380;
 
 /** Seconds kept either side of the run when zooming to the pass. */
 const PASS_WINDOW_PAD_S = 0.5;
+
+/** Trace-header switch: an icon and its name, lit when the overlay is drawn. */
+const HDR_PILL =
+  "flex h-6 shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-md px-2 text-[11px] leading-none transition-colors";
+/** Icon-only version of the same control, square. */
+const HDR_ICON = "flex size-6 shrink-0 items-center justify-center rounded-md";
+const HDR_PILL_ON = "bg-primary/15 text-primary";
+const HDR_PILL_OFF = "text-muted-foreground hover:bg-foreground/10 hover:text-foreground";
 
 const WIDTH_OPTIONS = [1, 1.5, 2.5, 4];
 const STYLE_OPTIONS: { label: string; dash: number[] | undefined }[] = [
@@ -398,6 +406,7 @@ interface Props {
   mathVersion: number;
   onSetUnit: (quantitySlug: string, unitKey: string) => void;
   onToggleTimeslip?: () => void;
+  onToggleZones?: () => void;
   /** Shared across every trace — the panel is one column down the page. */
   legendWidth?: number;
   legendCollapsed?: boolean;
@@ -485,6 +494,7 @@ export function TraceContainer({
   mathVersion,
   onSetUnit,
   onToggleTimeslip,
+  onToggleZones,
   legendWidth,
   legendCollapsed = false,
   onSetLegendWidth,
@@ -632,6 +642,17 @@ export function TraceContainer({
   const allZones = useMemo(
     () => [...evaluatedZones, ...evaluatedSharedZones],
     [evaluatedZones, evaluatedSharedZones],
+  );
+  // Zones have always been drawn, so an old trace with no answer still draws
+  // them. Switched off, the trace keeps its zones — it just stops painting.
+  const showZones = trace.showZones !== false;
+  const shownZones = useMemo(() => (showZones ? allZones : []), [showZones, allZones]);
+  // A zone only paints where its condition came true, so a zone with regions is
+  // a zone that caught something on this run. That is the number worth putting
+  // in front of you — not how many zones you have written.
+  const firingZoneCount = useMemo(
+    () => allZones.filter((z) => z.regions.length > 0).length,
+    [allZones],
   );
   const mergedExpanded = useMemo(
     () =>
@@ -1032,6 +1053,28 @@ export function TraceContainer({
   // Dragging a channel row already means "move this to another trace". Dropped
   // on a row of the same trace it means "put it here instead" — the panel's
   // order is the trace's order, so arranging it in place is the obvious move.
+  /**
+   * Write the colour each channel has right now onto any channel that was
+   * never given one.
+   *
+   * An automatic colour comes from the channel's place in the list. So moving
+   * a row, or taking one out, hands that colour to whatever ends up in the
+   * slot — the channel you dragged arrives wearing the colour of the one it
+   * displaced. Pinning first makes the colours travel with the channels.
+   */
+  const pinAutoColors = useCallback(() => {
+    for (const [logId, chans] of channelsByLog) {
+      const logIndex = logs.find((l) => l.fileId === logId)?.logIndex ?? 0;
+      chans.forEach((ch, i) => {
+        if (ch.color) return;
+        onSetChannelColor(ch.logFileId, ch.channelName, resolveChannelStyle(ch, i, logIndex).color);
+      });
+    }
+    // channelsByLog is rebuilt every render from trace.channels, which is the
+    // dependency that actually matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trace.channels, logs, onSetChannelColor]);
+
   const channelDragProps = (channelName: string) => ({
     draggable: true,
     onDragStart: (e: React.DragEvent) => {
@@ -1065,6 +1108,7 @@ export function TraceContainer({
       const rest = order.filter((n) => n !== moving);
       const at = rest.indexOf(channelName);
       rest.splice(at < 0 ? rest.length : at, 0, moving);
+      pinAutoColors();
       onSetChannelOrder?.(rest);
     },
   });
@@ -1254,45 +1298,93 @@ export function TraceContainer({
         ) : (
           <span className="flex-1" />
         )}
-        {/* Actions sit apart from the title and from each other — five
-            small targets in a row need the room. */}
-        <div className="flex shrink-0 items-center gap-3">
+        {/* Three groups, left to right: act on the view, switch an overlay on
+            or off, act on the trace itself. The header is nearly all empty
+            space, so the overlay switches are spelled out — an unlabelled row
+            of five icons made you learn them.
+
+            The pin sits with the ✕ because both are about the trace's place in
+            the workspace, not about what it draws. */}
+        <div className="flex shrink-0 items-center gap-2">
           {passWindow && onZoom && (
-            <Tip content="Zoom to the pass — half a second either side of the run">
-              <button
-                onClick={(e) => { e.stopPropagation(); onZoom(passWindow[0], passWindow[1]); }}
-                className="cursor-pointer text-muted-foreground hover:text-foreground"
-              >
-                <MoveHorizontalIcon className="size-4" />
-              </button>
-            </Tip>
+            <>
+              <Tip content="Zoom to the pass — half a second either side of the run">
+                <button
+                  onClick={(e) => { e.stopPropagation(); onZoom(passWindow[0], passWindow[1]); }}
+                  className={`${HDR_PILL} ${HDR_PILL_OFF}`}
+                >
+                  <MoveHorizontalIcon className="size-3.5 shrink-0" />
+                  Fit to pass
+                </button>
+              </Tip>
+              <span className="h-4 w-px shrink-0 bg-border" />
+            </>
           )}
+
           {onToggleTimeslip && (timeslipZones?.length ?? 0) > 0 && (
-            <Tip content={trace.showTimeslip ? "Hide the timeslip band" : "Show the timeslip band"}>
+            <Tip content={trace.showTimeslip ? "Stop drawing the timeslip band under this trace" : "Draw the timeslip band under this trace"}>
               <button
                 onClick={(e) => { e.stopPropagation(); onToggleTimeslip(); }}
-                className={`cursor-pointer ${trace.showTimeslip ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                className={`${HDR_PILL} ${trace.showTimeslip ? HDR_PILL_ON : HDR_PILL_OFF}`}
+                aria-pressed={!!trace.showTimeslip}
               >
-                <TimerIcon className="size-4" />
+                <TimerIcon className="size-3.5 shrink-0" />
+                Timeslip
               </button>
             </Tip>
           )}
+
+          {/* Only offered once there is something to draw, the same rule the
+              timeslip switch follows. The gear beside it is how you get the
+              first one. */}
+          {onToggleZones && allZones.length > 0 && (
+            <Tip
+              content={
+                (firingZoneCount > 0
+                  ? `${firingZoneCount} zone${firingZoneCount === 1 ? "" : "s"} caught something on this run. `
+                  : "No zone caught anything on this run. ") +
+                (showZones ? "Stop drawing them." : "Draw them.")
+              }
+            >
+              <button
+                onClick={(e) => { e.stopPropagation(); onToggleZones(); }}
+                className={`${HDR_PILL} ${showZones ? HDR_PILL_ON : HDR_PILL_OFF}`}
+                aria-pressed={showZones}
+              >
+                <HighlighterIcon className="size-3.5 shrink-0" />
+                Zones
+                {/* The count stays red with the drawing switched off. Switching
+                    the paint off does not make the problem go away, and losing
+                    the warning is the last thing you want. */}
+                {firingZoneCount > 0 && (
+                  <span className="ml-0.5 rounded-full bg-destructive/25 px-1.5 font-mono text-[10px] font-semibold text-destructive">
+                    {firingZoneCount}
+                  </span>
+                )}
+              </button>
+            </Tip>
+          )}
+
+          <Tip content={allZones.length > 0 ? "Edit the highlight zones" : "Add a highlight zone"}>
+            <button
+              onClick={(e) => { e.stopPropagation(); setSettingsOpen(true); }}
+              className={`${HDR_ICON} cursor-pointer text-muted-foreground hover:bg-foreground/10 hover:text-foreground`}
+            >
+              <SlidersHorizontalIcon className="size-3.5" />
+            </button>
+          </Tip>
+
+          <span className="h-4 w-px shrink-0 bg-border" />
+
           <Tip content={pinned ? "Unpin from all pages" : "Pin across all pages"}>
             <button
               onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
-              className={`cursor-pointer ${pinned ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+              aria-pressed={pinned}
+              className={`${HDR_ICON} cursor-pointer ${pinned ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-foreground/10 hover:text-foreground"}`}
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill={pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.5">
                 <path d="M6 1h4v5l2 2v2H9v5H7v-5H4V8l2-2V1z" />
               </svg>
-            </button>
-          </Tip>
-          <Tip content="Highlight zones">
-            <button
-              onClick={() => setSettingsOpen(true)}
-              className="text-muted-foreground hover:text-foreground cursor-pointer"
-            >
-              <SlidersHorizontalIcon className="size-4" />
             </button>
           </Tip>
           {/* Removing a trace removes it from every page, so a pinned one takes
@@ -1301,9 +1393,9 @@ export function TraceContainer({
             <button
               onClick={onRemoveTrace}
               disabled={pinned}
-              className="text-muted-foreground enabled:cursor-pointer enabled:hover:text-destructive disabled:opacity-30"
+              className={`${HDR_ICON} text-muted-foreground enabled:cursor-pointer enabled:hover:bg-destructive/15 enabled:hover:text-destructive disabled:opacity-30`}
             >
-              <XIcon className="size-4" />
+              <XIcon className="size-3.5" />
             </button>
           </Tip>
         </div>
@@ -1343,7 +1435,7 @@ export function TraceContainer({
             wheelZoomEnabled={wheelZoomEnabled}
             wheelZoomFactor={wheelZoomFactor}
             wheelMode={wheelMode}
-            evaluatedZones={allZones}
+            evaluatedZones={shownZones}
             timeslipZones={timeslipZones}
             showTimeslipBand={trace.showTimeslip ?? false}
             expandedZoneIds={mergedExpanded}
@@ -1699,6 +1791,7 @@ export function TraceContainer({
                   if (parsed.sourceTraceId && parsed.sourceTraceId !== trace.id) {
                     onMoveChannel(parsed.sourceTraceId, parsed.logFileId, parsed.channelName);
                   } else {
+                    pinAutoColors();
                     onRemoveChannel(parsed.logFileId, parsed.channelName);
                   }
                 }}
@@ -2133,7 +2226,7 @@ export function TraceContainer({
                   variant="ghost"
                   size="sm"
                   className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => { onRemoveChannel(contextMenu.logFileId, contextMenu.channelName); setContextMenu(null); }}
+                  onClick={() => { pinAutoColors(); onRemoveChannel(contextMenu.logFileId, contextMenu.channelName); setContextMenu(null); }}
                 >
                   Remove from trace
                 </Button>
@@ -2160,12 +2253,13 @@ export function TraceContainer({
           }
         }}
         onRemove={(names) => {
+          pinAutoColors();
           const gone = new Set(names);
           for (const ch of trace.channels) {
             if (gone.has(ch.channelName)) onRemoveChannel(ch.logFileId, ch.channelName);
           }
         }}
-        onReorder={(channelNames) => onSetChannelOrder?.(channelNames)}
+        onReorder={(channelNames) => { pinAutoColors(); onSetChannelOrder?.(channelNames); }}
         vehicleId={vehicleId}
         mathChannels={mathChannels}
         mathVersion={mathVersion}

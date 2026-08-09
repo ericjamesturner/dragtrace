@@ -47,6 +47,7 @@ interface Props {
   mathVersion: number;
   onSetUnit: (quantitySlug: string, unitKey: string) => void;
   onToggleTraceTimeslip: (traceId: string) => void;
+  onToggleTraceZones: (traceId: string) => void;
   legendWidth?: number;
   legendCollapsed?: boolean;
   onSetLegendWidth: (width: number) => void;
@@ -123,6 +124,7 @@ export function TracePanel({
   mathVersion,
   onSetUnit,
   onToggleTraceTimeslip,
+  onToggleTraceZones,
   legendWidth,
   legendCollapsed,
   onSetLegendWidth,
@@ -672,6 +674,7 @@ export function TracePanel({
                 avgOnSelection={avgOnSelection}
                 onRemoveTrace={() => onRemoveTrace(trace.id)}
                 onToggleTimeslip={() => onToggleTraceTimeslip(trace.id)}
+                onToggleZones={() => onToggleTraceZones(trace.id)}
                 onSetChannelOrder={(names) => onSetTraceChannelOrder(trace.id, names)}
                 autoOpenChannels={pickChannelsFor === trace.id}
                 vehicleId={vehicleId}

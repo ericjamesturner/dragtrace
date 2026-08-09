@@ -122,6 +122,11 @@ export interface TraceConfig {
    * so every trace still shows where the markers fall.
    */
   showTimeslip?: boolean;
+  /**
+   * Draw the highlight zones on this trace. Undefined means yes — zones have
+   * always been drawn, so an old config keeps doing what it did.
+   */
+  showZones?: boolean;
 }
 
 /** Smallest usable trace chart area, in px. Also the floor for a weight. */
@@ -272,6 +277,7 @@ export type ViewerAction =
   | { type: "setTraceHeights"; heights: { traceId: string; height: number }[] }
   | { type: "toggleTraceCollapsed"; traceId: string }
   | { type: "toggleTraceTimeslip"; traceId: string }
+  | { type: "toggleTraceZones"; traceId: string }
   | { type: "setLegendWidth"; width: number | undefined }
   | { type: "toggleLegendCollapsed" }
   | { type: "setChannelsHidden"; traceId: string; keys: string[]; hidden: boolean }
@@ -499,6 +505,14 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         pages: mapTraceById(state.pages, action.traceId, (t) => ({
           ...t,
           showTimeslip: !t.showTimeslip,
+        })),
+      };
+    case "toggleTraceZones":
+      return {
+        ...state,
+        pages: mapTraceById(state.pages, action.traceId, (t) => ({
+          ...t,
+          showZones: t.showZones === false,
         })),
       };
     case "toggleTraceCollapsed":
