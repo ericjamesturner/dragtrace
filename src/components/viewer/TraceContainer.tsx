@@ -1110,8 +1110,8 @@ export function TraceContainer({
           </span>
         ) : legendInHeader && !collapsed ? (
           // Compact legend: one scrollable line of channel chips. Same
-          // interactions as the overlay rows — toggle, hover-to-highlight,
-          // drag to another trace, right-click to style.
+          // interactions as the panel rows — toggle, hover-to-highlight,
+          // drag to another trace.
           <div className="flex-1 min-w-0 flex items-center overflow-x-auto whitespace-nowrap">
             {/* Colour key: which run is which. Same colours the sidebar shows
                 against each log, and the same order the values appear in. */}
@@ -1175,7 +1175,7 @@ export function TraceContainer({
                       }}
                       title={`${r.logName ? `${r.logName} · ` : ""}${name}${
                         r.isChHidden ? " (hidden)" : ""
-                      } — click to ${r.isChHidden ? "show" : "hide"}, drag to move, right-click to style`}
+                      } — click to ${r.isChHidden ? "show" : "hide"}, drag to move`}
                       data-log={r.logName}
                       className={`font-mono text-[13px] font-semibold tabular-nums text-right min-w-[4ch] cursor-pointer rounded-sm px-0.5 transition-all ${
                         muted ? "line-through decoration-1" : ""
@@ -1304,9 +1304,6 @@ export function TraceContainer({
             expandedZoneIds={mergedExpanded}
             onToggleZoneExpand={handleToggleZoneExpand}
             onMoveZoneLabel={(zoneId, frac) => onUpdateZone?.(zoneId, { labelYFraction: frac })}
-            onChannelContextMenu={(logFileId, channelName) =>
-              { setContextMenu({ logFileId: logFileId as Id<"files">, channelName }); }
-            }
             raceLine={raceLine}
             onRaceLineContextMenu={(x, y) => setRaceMenu({ x, y })}
             isTopTrace={isTopTrace}
@@ -1659,7 +1656,7 @@ export function TraceContainer({
         />
       )}
 
-      {/* Context menu (channel row right-click OR chart line right-click) */}
+      {/* Channel style dialog, opened from a row in the panel. */}
       {contextMenu && (() => {
         const cmKey = `${contextMenu.logFileId}:${contextMenu.channelName}`;
         const cmCh = trace.channels.find(
@@ -1668,7 +1665,7 @@ export function TraceContainer({
         const curWidth = cmCh?.width ?? 1.5;
         const curDash = cmCh?.dash;
         const seg = "flex-1 h-6 rounded border flex items-center justify-center cursor-pointer";
-        // Data extent of the right-clicked channel, for quick axis actions
+        // Data extent of the channel, for quick axis actions
         const cmLog = logs.find((l) => l.fileId === contextMenu.logFileId);
         const cmSession = cmLog?.parsed.sessions[cmLog.activeSessionIndex];
         const cmData = cmSession?.channels.get(contextMenu.channelName);

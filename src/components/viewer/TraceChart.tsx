@@ -152,7 +152,6 @@ interface Props {
   // Persist a dragged zone-label vertical position (0..1 fraction of chart height).
   onMoveZoneLabel?: (zoneId: string, fraction: number) => void;
   // Right-click a line: opens that channel's context menu (nearest series hit-test).
-  onChannelContextMenu?: (logFileId: string, channelName: string, clientX: number, clientY: number) => void;
   // Race-start marker line style + right-click handler.
   raceLine?: { color?: string; width?: number; dash?: number[] };
   onRaceLineContextMenu?: (clientX: number, clientY: number) => void;
@@ -247,7 +246,6 @@ export function TraceChart({
   expandedZoneIds,
   onToggleZoneExpand,
   onMoveZoneLabel,
-  onChannelContextMenu,
   raceLine,
   onRaceLineContextMenu,
   isTopTrace,
@@ -279,8 +277,6 @@ export function TraceChart({
   onCursorRef.current = onCursorTime;
   const onResolvedScaleRangesRef = useRef(onResolvedScaleRanges);
   onResolvedScaleRangesRef.current = onResolvedScaleRanges;
-  const onChannelContextMenuRef = useRef(onChannelContextMenu);
-  onChannelContextMenuRef.current = onChannelContextMenu;
   const onRaceLineContextMenuRef = useRef(onRaceLineContextMenu);
   onRaceLineContextMenuRef.current = onRaceLineContextMenu;
   const selectionRef = useRef(selection);
@@ -1541,46 +1537,23 @@ export function TraceChart({
     };
     over.addEventListener("wheel", onWheel, { passive: false });
 
-    // --- Right-click a line -> open that channel's context menu ---
-    // Hit-test: at the cursor x, find the series whose value is nearest (in
-    // pixels) to the cursor y, map its series key back to {logFileId, channel}.
+    // --- Right-click the race-start marker -> style it ---
+    // Right-clicking a trace used to guess which line you meant and open its
+    // style dialog. Nobody aims at a line by right-clicking it, and it fired on
+    // any right-click anywhere on the chart. The panel beside the trace names
+    // its channels; click one there.
     const onContextMenuChart = (e: MouseEvent) => {
-      if (!onChannelContextMenuRef.current && !onRaceLineContextMenuRef.current) return;
+      if (!onRaceLineContextMenuRef.current || raceStartTimes.length === 0) return;
       const rect = over.getBoundingClientRect();
       const cssX = e.clientX - rect.left;
-      const cssY = e.clientY - rect.top;
-      // Race-start marker line takes priority when the cursor is near it (x).
-      if (onRaceLineContextMenuRef.current && raceStartTimes.length > 0) {
-        for (const rs of raceStartTimes) {
-          const mx = plot.valToPos(rs.time + rs.offset, "x", false); // CSS px
-          if (Math.abs(cssX - mx) <= 6) {
-            e.preventDefault();
-            onRaceLineContextMenuRef.current(e.clientX, e.clientY);
-            return;
-          }
+      for (const rs of raceStartTimes) {
+        const mx = plot.valToPos(rs.time + rs.offset, "x", false); // CSS px
+        if (Math.abs(cssX - mx) <= 6) {
+          e.preventDefault();
+          onRaceLineContextMenuRef.current(e.clientX, e.clientY);
+          return;
         }
       }
-      if (!onChannelContextMenuRef.current) return;
-      e.preventDefault();
-      const xVal = plot.posToVal(cssX, "x");
-      let idx = Math.round((xVal - gridTs[0]) / step);
-      idx = Math.max(0, Math.min(gridTs.length - 1, idx));
-      let bestI = -1;
-      let bestDist = Infinity;
-      for (let i = 0; i < seriesMeta.length; i++) {
-        const v = seriesData[i][idx];
-        if (v == null || v !== v) continue;
-        const scaleKey = plot.series[i + 1]?.scale;
-        if (!scaleKey) continue;
-        const yPix = plot.valToPos(v, scaleKey, false);
-        const d = Math.abs(yPix - cssY);
-        if (d < bestDist) { bestDist = d; bestI = i; }
-      }
-      if (bestI < 0) return;
-      const key = seriesMeta[bestI].key; // "logFileId:channelName"
-      const sep = key.indexOf(":");
-      if (sep < 0) return;
-      onChannelContextMenuRef.current(key.slice(0, sep), key.slice(sep + 1), e.clientX, e.clientY);
     };
     over.addEventListener("contextmenu", onContextMenuChart);
 
