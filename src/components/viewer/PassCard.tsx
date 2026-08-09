@@ -54,11 +54,22 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
 
   const name = file.fileName.replace(/\.[^.]+$/, "");
 
+  // ET@MPH, the way a timeslip prints it, so a card reads the way the paper in
+  // your hand does. Speed is omitted rather than faked when the slip didn't
+  // record it.
+  const etAtMph = (et: number, mph?: number) =>
+    mph === undefined ? et.toFixed(3) : `${et.toFixed(3)}@${mph.toFixed(2)}`;
+
   const stats: { label: string; value: string }[] = [];
   if (timeslip?.sixtyFt !== undefined) stats.push({ label: "60ft", value: timeslip.sixtyFt.toFixed(3) });
-  if (timeslip?.eighthEt !== undefined) stats.push({ label: "1/8", value: timeslip.eighthEt.toFixed(3) });
-  if (timeslip?.et !== undefined) stats.push({ label: "1/4", value: timeslip.et.toFixed(3) });
-  if (timeslip?.mph !== undefined) stats.push({ label: "mph", value: timeslip.mph.toFixed(2) });
+  if (timeslip?.eighthEt !== undefined) {
+    stats.push({ label: "1/8", value: etAtMph(timeslip.eighthEt, timeslip.eighthMph) });
+  }
+  if (timeslip?.et !== undefined) {
+    stats.push({ label: "1/4", value: etAtMph(timeslip.et, timeslip.mph) });
+  } else if (timeslip?.mph !== undefined) {
+    stats.push({ label: "mph", value: timeslip.mph.toFixed(2) });
+  }
 
   return (
     <div
