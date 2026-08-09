@@ -826,11 +826,21 @@ export function TraceContainer({
       }
     }
     const list = [...seen.values()].sort((a, b) => a.index - b.index);
-    // Short tag for the key: racers name runs "Q1", "E1 6.325 @ 227" — the
-    // leading token is the useful part. Fall back to the full name on a clash.
-    const tags = list.map((l) => l.name.trim().split(/\s+/)[0] || l.name);
-    const unique = new Set(tags).size === tags.length;
-    return list.map((l, i) => ({ ...l, tag: unique ? tags[i] : l.name }));
+    // Short tag for the key: racers name runs "Q1", "SEATTLE E2 7.126 176.47".
+    // The first word is usually the round — but when two runs share a weekend
+    // it's the same word on both, so take the first one that actually tells
+    // them apart. Full name only if nothing does.
+    const tokens = list.map((l) => l.name.trim().split(/\s+/).filter(Boolean));
+    const depth = Math.min(4, Math.max(0, ...tokens.map((t) => t.length)));
+    let tags: string[] | null = null;
+    for (let i = 0; i < depth; i++) {
+      const candidate = tokens.map((t) => t[i] ?? "");
+      if (candidate.every(Boolean) && new Set(candidate).size === candidate.length) {
+        tags = candidate;
+        break;
+      }
+    }
+    return list.map((l, i) => ({ ...l, tag: tags ? tags[i] : l.name }));
   }, [legendGroups]);
 
   // The channels panel is docked beside the chart rather than floating over
@@ -1229,54 +1239,50 @@ export function TraceContainer({
                   </>
                 ) : multiLogTrace ? (
                   <>
-                    <div className="flex items-center gap-1.5 text-[10px] leading-tight pb-0.5 mb-0.5 border-b border-white/10">
-                      <span className="shrink-0" style={{ width: 10 }} />
-                      <span className="w-2 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate text-white/40">Channel</span>
-                      {traceLogs.map((l) => (
-                        <span
-                          key={l.id}
-                          title={l.name}
-                          className="font-bold uppercase tracking-wider w-14 text-right truncate"
-                          style={{ color: l.color }}
-                        >
-                          {l.tag}
-                        </span>
-                      ))}
-                      <span className="w-8 shrink-0" />
-                    </div>
+                    {/* Comparing runs: the channel is named once and each run
+                        gets its own line under it. Side by side the values had
+                        to live in narrow columns under a run tag, which read as
+                        a table of tags rather than "RPM, this run vs that one". */}
                     {compactChannels.map(({ name, rows, unitLabel }) => {
                       const keys = rows.map((r) => r.chKey);
                       const allHidden = rows.every((r) => r.isChHidden);
                       const someHidden = rows.some((r) => r.isChHidden);
                       const dot = rows[0]?.color;
                       return (
-                        <div key={name} className="flex items-center gap-1.5 text-xs leading-tight">
-                          <input
-                            type="checkbox"
-                            checked={!allHidden}
-                            ref={(el) => { if (el) el.indeterminate = someHidden && !allHidden; }}
-                            onChange={() => onSetChannelsHidden?.(keys, !allHidden)}
-                            className="accent-white/60 cursor-pointer shrink-0"
-                            style={{ width: 10, height: 10 }}
-                          />
-                          <span
-                            className="w-2 h-2 rounded-full shrink-0"
-                            style={{ backgroundColor: dot, opacity: rows[0]?.opacity ?? 1 }}
-                          />
-                          <span className={`min-w-0 flex-1 truncate text-white/70 ${allHidden ? "opacity-40" : ""}`}>
-                            {name}
-                          </span>
+                        <div key={name} className="mt-1 first:mt-0">
+                          <div className="flex items-center gap-1.5 text-xs leading-tight">
+                            <input
+                              type="checkbox"
+                              checked={!allHidden}
+                              ref={(el) => { if (el) el.indeterminate = someHidden && !allHidden; }}
+                              onChange={() => onSetChannelsHidden?.(keys, !allHidden)}
+                              className="accent-white/60 cursor-pointer shrink-0"
+                              style={{ width: 10, height: 10 }}
+                            />
+                            <span
+                              className="w-2 h-2 rounded-full shrink-0"
+                              style={{ backgroundColor: dot, opacity: rows[0]?.opacity ?? 1 }}
+                            />
+                            <span className={`min-w-0 flex-1 truncate text-white/70 ${allHidden ? "opacity-40" : ""}`}>
+                              {name}
+                            </span>
+                            <span className="text-[9px] text-white/40 whitespace-nowrap shrink-0">{unitLabel}</span>
+                          </div>
                           {traceLogs.map((l) => {
                             const r = rows.find((x) => (x.ch.logFileId as string) === l.id);
                             if (!r) {
-                              return <span key={l.id} className="w-14 text-right text-white/20 font-mono tabular-nums">—</span>;
+                              return (
+                                <div key={l.id} className="flex items-center gap-1.5 pl-[22px] text-xs leading-tight">
+                                  <span className="min-w-0 flex-1 truncate text-white/25">{l.tag}</span>
+                                  <span className="font-mono text-white/20 tabular-nums">—</span>
+                                </div>
+                              );
                             }
                             const isHovered = hoveredChannel === r.chKey;
                             const isDimmed = hoveredChannel !== null && !isHovered;
                             const muted = r.isChHidden || r.isLogHidden;
                             return (
-                              <span
+                              <div
                                 key={l.id}
                                 draggable
                                 onClick={(e) => {
@@ -1307,16 +1313,29 @@ export function TraceContainer({
                                   });
                                 }}
                                 title={`${l.name} · ${name}${r.isChHidden ? " (hidden)" : ""} — click to ${r.isChHidden ? "show" : "hide"}, drag to move, right-click to style`}
-                                className={`font-mono font-medium w-14 text-right tabular-nums cursor-pointer rounded-sm px-0.5 transition-all ${
-                                  muted ? "line-through decoration-1 opacity-40" : ""
-                                } ${isDimmed ? "opacity-40" : ""} ${isHovered ? "bg-white/15" : ""}`}
-                                style={{ color: l.color }}
+                                className={`flex items-center gap-1.5 pl-[22px] text-xs leading-tight cursor-pointer rounded-sm transition-all ${
+                                  isDimmed ? "opacity-40" : ""
+                                } ${isHovered ? "bg-white/10" : ""}`}
                               >
-                                {r.valueStr ?? "---"}
-                              </span>
+                                <span
+                                  className={`min-w-0 flex-1 truncate font-semibold uppercase tracking-wider text-[10px] ${
+                                    muted ? "opacity-40" : ""
+                                  }`}
+                                  style={{ color: l.color }}
+                                >
+                                  {l.tag}
+                                </span>
+                                <span
+                                  className={`font-mono font-medium tabular-nums ${
+                                    muted ? "line-through decoration-1 opacity-40" : ""
+                                  }`}
+                                  style={{ color: l.color }}
+                                >
+                                  {r.valueStr ?? "---"}
+                                </span>
+                              </div>
                             );
                           })}
-                          <span className="text-[9px] text-white/40 min-w-8 whitespace-nowrap shrink-0">{unitLabel}</span>
                         </div>
                       );
                     })}
