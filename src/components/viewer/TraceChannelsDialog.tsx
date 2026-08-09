@@ -5,13 +5,17 @@ import { useChannelGroups } from "@/hooks/useChannelGroups";
 import { DEFAULT_ECU_TYPE } from "@/lib/ecu/registry";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, PencilIcon, PlusIcon } from "lucide-react";
+import { MathChannelDialog } from "./MathChannelDialog";
+import type { Doc, Id } from "../../../convex/_generated/dataModel";
+import type { UnitSystem, UnitOverrides } from "@/lib/units";
 
 interface Entry {
   name: string;
   displayName: string;
   group: string;
   aliases?: string[];
+  custom?: boolean;
 }
 
 /** Channels of a node and everything under it. */
@@ -51,6 +55,7 @@ function flatten(tree: GroupNode[]): Entry[] {
         displayName: ch.displayName,
         group: label,
         aliases: ch.aliases,
+        custom: ch.def.custom,
       });
     }
     for (const child of node.children) walk(child, label);
@@ -73,6 +78,10 @@ export function TraceChannelsDialog({
   onAdd,
   onRemove,
   onReorder,
+  vehicleId,
+  mathChannels,
+  unitSystem,
+  unitOverrides,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -81,11 +90,16 @@ export function TraceChannelsDialog({
   onAdd: (names: string[]) => void;
   onRemove: (names: string[]) => void;
   onReorder: (channelNames: string[]) => void;
+  vehicleId: Id<"vehicles">;
+  mathChannels: Doc<"mathChannels">[];
+  unitSystem?: UnitSystem;
+  unitOverrides?: UnitOverrides;
 }) {
   const [search, setSearch] = useState("");
   const [pickedAvailable, setPickedAvailable] = useState<Set<string>>(new Set());
   const [pickedSelected, setPickedSelected] = useState<Set<string>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [mathDialog, setMathDialog] = useState<{ editing: Doc<"mathChannels"> | null } | null>(null);
 
   const allDefs = useMemo(() => {
     const seen = new Set<string>();
@@ -209,6 +223,19 @@ export function TraceChannelsDialog({
                 className={row(pickedAvailable.has(ch.def.name))}
               >
                 <span className="min-w-0 flex-1 truncate">{ch.displayName}</span>
+                {ch.def.custom && (
+                  <button
+                    title="Edit this math channel"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      const def = mathChannels.find((m) => m.name === ch.def.name);
+                      if (def) setMathDialog({ editing: def });
+                    }}
+                    className="shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
+                  >
+                    <PencilIcon className="size-3" />
+                  </button>
+                )}
               </div>
             ))}
             {node.children.map((child) => renderGroup(child, key))}
@@ -357,15 +384,32 @@ export function TraceChannelsDialog({
         </div>
 
         <div className="flex items-center justify-between">
-          <p className="text-[11px] text-muted-foreground">
-            Double-click or drag to move a channel across; drag within the right
-            list to reorder it.
-          </p>
+          <div className="flex items-center gap-3">
+            <Button size="sm" variant="outline" onClick={() => setMathDialog({ editing: null })}>
+              <PlusIcon className="size-3.5" />
+              Math channel
+            </Button>
+            <p className="text-[11px] text-muted-foreground">
+              Double-click or drag to move a channel across; drag within the
+              right list to reorder it.
+            </p>
+          </div>
           <Button size="sm" onClick={() => onOpenChange(false)}>
             Done
           </Button>
         </div>
       </DialogContent>
+      {mathDialog && (
+        <MathChannelDialog
+          open
+          onOpenChange={(o) => { if (!o) setMathDialog(null); }}
+          vehicleId={vehicleId}
+          channelNames={entries.filter((e) => !e.custom).map((e) => e.name)}
+          unitSystem={unitSystem ?? "imperial"}
+          unitOverrides={unitOverrides}
+          editing={mathDialog.editing}
+        />
+      )}
     </Dialog>
   );
 }

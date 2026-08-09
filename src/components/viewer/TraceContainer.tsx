@@ -1,15 +1,17 @@
 import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import type { LoadedLog, ChannelOnTrace, TraceConfig, HighlightZoneConfig } from "@/lib/viewer-types";
 import { resolveChannelStyle, CHART_COLORS, MIN_TRACE_HEIGHT } from "@/lib/viewer-types";
-import type { Id } from "../../../convex/_generated/dataModel";
+import type { Id, Doc } from "../../../convex/_generated/dataModel";
 import { TraceChart } from "./TraceChart";
 import { TraceSettingsPanel, ChannelPicker } from "./TraceSettingsPanel";
 import { TraceChannelsDialog } from "./TraceChannelsDialog";
-import { findValueAtTime, formatValue, formatChannelValue, computeRangeStats } from "@/lib/cursor-utils";
-import { convertForDisplay, convertFromDisplay, getDisplayUnit, getDisplayPrecision, type UnitSystem, type UnitOverrides } from "@/lib/units";
+import { findValueAtTime, formatValue, formatChannelValue, computeRangeStats, statusNote } from "@/lib/cursor-utils";
+import { convertForDisplay, convertFromDisplay, getDisplayUnit, getDisplayPrecision, getUnitOptions, resolveUnitKey, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon, MoveHorizontalIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
+import { useMutation, useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -376,6 +378,9 @@ interface Props {
   onSetChannelOrder?: (channelNames: string[]) => void;
   /** Open the picker as soon as this trace appears — it was just created. */
   autoOpenChannels?: boolean;
+  vehicleId: Id<"vehicles">;
+  mathChannels: Doc<"mathChannels">[];
+  onSetUnit: (quantitySlug: string, unitKey: string) => void;
   onToggleTimeslip?: () => void;
   /** Shared across every trace — the panel is one column down the page. */
   legendWidth?: number;
@@ -459,6 +464,9 @@ export function TraceContainer({
   onReorderTrace,
   onSetChannelOrder,
   autoOpenChannels,
+  vehicleId,
+  mathChannels,
+  onSetUnit,
   onToggleTimeslip,
   legendWidth,
   legendCollapsed = false,
@@ -515,6 +523,16 @@ export function TraceContainer({
   const [contextMenu, setContextMenu] = useState<ChannelStyleTarget | null>(null);
   const [customColorOpen, setCustomColorOpen] = useState(false);
   const [channelsDialogOpen, setChannelsDialogOpen] = useState(false);
+  const channelOverrides = useQuery(api.vehicleChannelOverrides.listByVehicle, { vehicleId });
+  const channelDisplayNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const o of channelOverrides ?? []) {
+      if (o.displayName) map.set(o.channelName, o.displayName);
+    }
+    return map;
+  }, [channelOverrides]);
+  const setChannelOverride = useMutation(api.vehicleChannelOverrides.setOverride);
+  const removeChannelOverride = useMutation(api.vehicleChannelOverrides.removeOverride);
   // Once per trace: reopening every time the flag happens to be true again
   // would fight anyone who closed it.
   const autoOpenedRef = useRef<string | null>(null);
@@ -1681,9 +1699,17 @@ export function TraceContainer({
           ? traceLogs.find((l) => l.id === (contextMenu.logFileId as string))
           : null;
         const section = "text-[10px] font-semibold uppercase tracking-wider text-muted-foreground";
+        const cmDisplayName = channelDisplayNames.get(contextMenu.channelName) ?? "";
+        const cmUnitOptions = getUnitOptions(cmMu);
+        const cmUnitKey = cmMu ? resolveUnitKey(cmMu, unitSystem ?? "imperial", unitOverrides) : "";
+        // A channel that spent the run reporting a fault is a dead sensor, and
+        // that explains a flat line better than any amount of restyling.
+        const cmStatus = cmLog?.parsed.sessions[cmLog.activeSessionIndex]?.channelStatus.get(
+          contextMenu.channelName,
+        );
         return (
           <Dialog open onOpenChange={(o) => { if (!o) { setContextMenu(null); setCustomColorOpen(false); } }}>
-            <DialogContent className="sm:max-w-2xl">
+            <DialogContent className="sm:max-w-xl">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2 pr-6">
                   <span className="truncate">{contextMenu.channelName}</span>
@@ -1700,13 +1726,57 @@ export function TraceContainer({
                   )}
                 </DialogTitle>
                 {(cmDef?.description || cmDisplayUnit) && (
-                  <p className="truncate text-xs text-muted-foreground">
+                  <p className="text-xs leading-snug text-muted-foreground">
                     {cmDef?.description}
                     {cmDef?.description && cmDisplayUnit ? " · " : ""}
                     {cmDisplayUnit}
                   </p>
                 )}
               </DialogHeader>
+
+              {/* Naming, units and sensor health belong to the channel rather
+                  than to this trace, but this is where you're looking at it. */}
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                <div>
+                  <div className={`${section} mb-1`}>Name</div>
+                  <input
+                    key={cmKey}
+                    defaultValue={cmDisplayName}
+                    placeholder={contextMenu.channelName}
+                    onBlur={(e) => {
+                      const next = e.target.value.trim();
+                      if (next === cmDisplayName) return;
+                      if (next && next !== contextMenu.channelName) {
+                        void setChannelOverride({ vehicleId, channelName: contextMenu.channelName, displayName: next });
+                      } else {
+                        void removeChannelOverride({ vehicleId, channelName: contextMenu.channelName });
+                      }
+                    }}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
+                  />
+                </div>
+                {cmUnitOptions.length > 1 && (
+                  <div>
+                    <div className={`${section} mb-1`}>Units</div>
+                    <select
+                      value={cmUnitKey}
+                      onChange={(e) => onSetUnit(cmMu, e.target.value)}
+                      className="h-9 cursor-pointer rounded-md border bg-background px-2 text-sm"
+                    >
+                      {cmUnitOptions.map((a) => (
+                        <option key={a.key} value={a.key}>{a.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {cmStatus && (
+                <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                  {statusNote(cmStatus)}
+                </p>
+              )}
 
               <div className="grid gap-5 sm:grid-cols-2">
                 {/* ── Appearance ─────────────────────────────────────────── */}
@@ -1966,6 +2036,10 @@ export function TraceContainer({
           }
         }}
         onReorder={(channelNames) => onSetChannelOrder?.(channelNames)}
+        vehicleId={vehicleId}
+        mathChannels={mathChannels}
+        unitSystem={unitSystem}
+        unitOverrides={unitOverrides}
       />
 
       {/* Race-start marker line styling menu (right-click the race line) */}

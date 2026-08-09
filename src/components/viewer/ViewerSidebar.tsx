@@ -1,642 +1,107 @@
-import { useState, useMemo, useCallback, useRef } from "react";
-import { useMutation } from "convex/react";
-import { api } from "../../../convex/_generated/api";
-import type { ChannelDef, ChannelStatus, LogSession } from "@/lib/log-types";
-import type { LoadedLog, TraceConfig, ChannelOnTrace } from "@/lib/viewer-types";
-import type { Doc, Id } from "../../../convex/_generated/dataModel";
-import { PlusIcon, PencilIcon, ActivityIcon, TimerIcon } from "lucide-react";
-import { Tip } from "@/components/ui/tooltip";
+import { useCallback, useRef, useState } from "react";
+import type { Id } from "../../../convex/_generated/dataModel";
 import { PassList } from "./PassList";
-import { MathChannelDialog } from "./MathChannelDialog";
-import { getDisplayUnit, getUnitOptions, type UnitSystem, type UnitOverrides } from "@/lib/units";
-import { GROUP_COLORS, type GroupNode, type GroupChannel } from "@/lib/channel-groups";
-import { useChannelGroups } from "@/hooks/useChannelGroups";
-import { DEFAULT_ECU_TYPE } from "@/lib/ecu/registry";
 
-function countGroupChannels(node: GroupNode): number {
-  return node.channels.length + node.children.reduce((sum, c) => sum + c.channels.length, 0);
-}
-
-/** Match a channel against search text (name, displayName, and aliases). */
-function matchesSearch(ch: GroupChannel, searchLower: string): boolean {
-  if (!searchLower) return true;
-  if (ch.def.name.toLowerCase().includes(searchLower)) return true;
-  if (ch.displayName.toLowerCase().includes(searchLower)) return true;
-  if (ch.aliases?.some((a) => a.toLowerCase().includes(searchLower))) return true;
-  return false;
-}
-
-/** Filter a group node to only channels in the given set, applying empty/search filters. */
-function filterGroupNode(
-  node: GroupNode,
-  logDefNames: Set<string>,
-  emptySet: Set<string>,
-  searchLower: string,
-): GroupNode | null {
-  const channels = node.channels.filter((ch) => {
-    if (!logDefNames.has(ch.def.name)) return false;
-    if (emptySet.has(ch.def.name)) return false;
-    if (searchLower && !matchesSearch(ch, searchLower)) return false;
-    return true;
-  });
-
-  const children = node.children
-    .map((child) => filterGroupNode(child, logDefNames, emptySet, searchLower))
-    .filter((c): c is GroupNode => c !== null);
-
-  // Math survives being empty: it's where math channels are created, so
-  // dropping it when there are none leaves no way to make the first.
-  if (channels.length === 0 && children.length === 0 && node.tag !== "Math") return null;
-
-  return { tag: node.tag, channels, children };
-}
-
-function detectEmptyChannels(defs: ChannelDef[], session: LogSession): Set<string> {
-  const empty = new Set<string>();
-  for (const def of defs) {
-    const data = session.channels.get(def.name);
-    if (!data || data.length === 0) { empty.add(def.name); continue; }
-    let firstValid = NaN;
-    let hasVariation = false;
-    for (let i = 0; i < data.length; i++) {
-      const v = data[i];
-      if (v !== v) continue;
-      if (firstValid !== firstValid) { firstValid = v; continue; }
-      if (v !== firstValid) { hasVariation = true; break; }
-    }
-    if (!hasVariation) empty.add(def.name);
-  }
-  return empty;
-}
-
-// ── Component ──
-
-interface Props {
-  logs: LoadedLog[];
-  vehicleId: Id<"vehicles">;
-  eventId: Id<"events">;
-  mathVersion?: number;
-  mathErrors?: { name: string; message: string }[];
-  mathChannels?: Doc<"mathChannels">[];
-  loadedFileIds: Id<"files">[];
-  pendingFileIds?: Id<"files">[];
-  traces: TraceConfig[];
-  hiddenLogIds: string[];
-  onAddFile: (fileId: Id<"files">) => void;
-  onRemoveFile: (fileId: Id<"files">) => void;
-  onAddChannel: (traceId: string, channel: ChannelOnTrace) => void;
-  onAddTraceWithChannel: (channel: ChannelOnTrace) => void;
-  onRemoveChannel: (traceId: string, logFileId: Id<"files">, channelName: string) => void;
-  onToggleLogVisibility: (logFileId: Id<"files">) => void;
-  activeTraceId: string | null;
-  unitSystem: UnitSystem;
-  unitOverrides?: UnitOverrides;
-  onCycleUnit?: (quantitySlug: string) => void;
-}
-
+/**
+ * The passes for this car, and somewhere to drop a channel you want off a
+ * trace.
+ *
+ * This used to carry a channel tree as well, but a trace now owns its own
+ * channels: the panel beside it lists them and its picker adds them. Browsing
+ * every channel in the log from a place with no idea which trace it would land
+ * on was the weaker half of that job.
+ */
 export function ViewerSidebar({
-  logs,
   vehicleId,
   eventId,
-  mathVersion,
-  mathErrors,
-  mathChannels,
   loadedFileIds,
   pendingFileIds,
   hiddenLogIds,
+  onToggleLogVisibility,
   onAddFile,
   onRemoveFile,
-  onAddChannel,
-  onAddTraceWithChannel,
   onRemoveChannel,
-  onToggleLogVisibility,
-  activeTraceId,
-  unitSystem,
-  unitOverrides,
-  onCycleUnit,
-}: Props) {
-  const [search, setSearch] = useState("");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [tab, setTab] = useState<"channels" | "passes">("channels");
-  const [mathDialog, setMathDialog] = useState<{ editing: Doc<"mathChannels"> | null } | null>(null);
+}: {
+  vehicleId: Id<"vehicles">;
+  eventId: Id<"events">;
+  loadedFileIds: Id<"files">[];
+  pendingFileIds?: Id<"files">[];
+  hiddenLogIds: string[];
+  onToggleLogVisibility: (fileId: Id<"files">) => void;
+  onAddFile: (fileId: Id<"files">) => void;
+  onRemoveFile: (fileId: Id<"files">) => void;
+  onRemoveChannel: (traceId: string, logFileId: Id<"files">, channelName: string) => void;
+}) {
   const [isDragTarget, setIsDragTarget] = useState(false);
-  const sidebarDragCounter = useRef(0);
+  const dragCounter = useRef(0);
 
-  // Per-vehicle channel renaming. The shared taxonomy is curated reference
-  // data, so a user's own naming lives against their vehicle instead.
-  const setOverride = useMutation(api.vehicleChannelOverrides.setOverride);
-  const removeOverride = useMutation(api.vehicleChannelOverrides.removeOverride);
-  const [renaming, setRenaming] = useState<string | null>(null);
-
-  const handleRename = useCallback(
-    (channelName: string, name: string) => {
-      const trimmed = name.trim();
-      setRenaming(null);
-      if (trimmed) {
-        void setOverride({ vehicleId, channelName, displayName: trimmed });
-      } else {
-        void removeOverride({ vehicleId, channelName });
-      }
-    },
-    [setOverride, removeOverride, vehicleId],
-  );
-
-  // Combine all channel defs from all logs for the hook
-  const allDefs = useMemo(() => {
-    const seen = new Set<string>();
-    const defs: ChannelDef[] = [];
-    for (const log of logs) {
-      for (const def of log.parsed.channelDefs) {
-        if (!seen.has(def.name)) {
-          seen.add(def.name);
-          defs.push(def);
-        }
-      }
-    }
-    return defs;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logs, mathVersion]);
-
-  // DB-driven channel grouping (falls back to hardcoded while loading)
-  const { tree: masterTree } = useChannelGroups(allDefs, DEFAULT_ECU_TYPE, vehicleId);
-
-  // One list for every loaded pass, so "empty" has to mean empty everywhere —
-  // a channel that's flat in one run but alive in the one you're comparing
-  // against is exactly the channel you want to see.
-  const emptyChannels = useMemo(() => {
-    const alive = new Set<string>();
-    const seen = new Set<string>();
-    for (const log of logs) {
-      const session = log.parsed.sessions[log.activeSessionIndex];
-      if (!session) continue;
-      const empty = detectEmptyChannels(log.parsed.channelDefs, session);
-      for (const def of log.parsed.channelDefs) {
-        seen.add(def.name);
-        if (!empty.has(def.name)) alive.add(def.name);
-      }
-    }
-    const result = new Set<string>();
-    for (const name of seen) if (!alive.has(name)) result.add(name);
-    return result;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logs, mathVersion]);
-
-  // A dead sensor is worth flagging even if only one of the passes saw it.
-  const statusMap = useMemo(() => {
-    const map = new Map<string, ChannelStatus>();
-    for (const log of logs) {
-      const session = log.parsed.sessions[log.activeSessionIndex];
-      if (!session) continue;
-      for (const [name, status] of session.channelStatus) {
-        const prev = map.get(name);
-        if (!prev || status.samples > prev.samples) map.set(name, status);
-      }
-    }
-    return map;
-  }, [logs]);
-
-  // Channels are added against the first log; every other loaded log mirrors
-  // it, so the reducer fans the same channel out to all of them.
-  const sourceFileId = logs[0]?.fileId;
-
-  const toggleGroup = useCallback((key: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
-
-  const handleDragStart = useCallback(
-    (e: React.DragEvent, logFileId: Id<"files">, channelName: string) => {
-      e.dataTransfer.setData("text/plain", JSON.stringify({ logFileId, channelName }));
-      e.dataTransfer.effectAllowed = "copy";
-    },
-    []
-  );
-
-  const handleSidebarDragEnter = useCallback((e: React.DragEvent) => {
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    sidebarDragCounter.current++;
-    if (sidebarDragCounter.current === 1) setIsDragTarget(true);
+    dragCounter.current++;
+    if (dragCounter.current === 1) setIsDragTarget(true);
   }, []);
 
-  const handleSidebarDragOver = useCallback((e: React.DragEvent) => {
+  const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   }, []);
 
-  const handleSidebarDragLeave = useCallback(() => {
-    sidebarDragCounter.current--;
-    if (sidebarDragCounter.current <= 0) {
-      sidebarDragCounter.current = 0;
+  const handleDragLeave = useCallback(() => {
+    dragCounter.current--;
+    if (dragCounter.current <= 0) {
+      dragCounter.current = 0;
       setIsDragTarget(false);
     }
   }, []);
 
-  const handleSidebarDrop = useCallback(
+  // Dragging a channel off a trace and dropping it anywhere off-chart is the
+  // quickest way to be rid of one, so the sidebar stays a target for it.
+  const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
-      sidebarDragCounter.current = 0;
+      dragCounter.current = 0;
       setIsDragTarget(false);
       const raw = e.dataTransfer.getData("text/plain");
       if (!raw) return;
       try {
         const parsed = JSON.parse(raw) as {
-          logFileId: Id<"files">;
-          channelName: string;
+          logFileId?: Id<"files">;
+          channelName?: string;
           sourceTraceId?: string;
         };
         if (parsed.sourceTraceId && parsed.logFileId && parsed.channelName) {
           onRemoveChannel(parsed.sourceTraceId, parsed.logFileId, parsed.channelName);
         }
       } catch {
-        // ignore
+        // Not one of ours — ignore.
       }
     },
-    [onRemoveChannel]
+    [onRemoveChannel],
   );
-
-  const isSearching = search.length > 0;
-  const searchLower = search.toLowerCase();
-
-  const tree = useMemo(() => {
-    const names = new Set(allDefs.map((d) => d.name));
-    return masterTree
-      .map((node) => filterGroupNode(node, names, emptyChannels, searchLower))
-      .filter((n): n is GroupNode => n !== null);
-  }, [masterTree, allDefs, emptyChannels, searchLower]);
 
   return (
     <div
-      className={`flex flex-col h-full border-r bg-muted/20 transition-colors ${
-        isDragTarget ? "ring-2 ring-inset ring-destructive/30 bg-destructive/5" : ""
+      className={`flex h-full flex-col border-r bg-muted/20 transition-colors ${
+        isDragTarget ? "bg-destructive/5 ring-2 ring-inset ring-destructive/30" : ""
       }`}
-      onDragEnter={handleSidebarDragEnter}
-      onDragOver={handleSidebarDragOver}
-      onDragLeave={handleSidebarDragLeave}
-      onDrop={handleSidebarDrop}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
-      <div className="flex border-b">
-        {(
-          [
-            { id: "channels", label: "Channels", Icon: ActivityIcon },
-            { id: "passes", label: "Passes", Icon: TimerIcon },
-          ] as const
-        ).map(({ id, label, Icon }) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors ${
-              tab === id
-                ? "border-b-2 border-primary text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Icon className="size-3.5" />
-            {label}
-          </button>
-        ))}
+      <div className="shrink-0 border-b px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Passes
       </div>
-
-      {tab === "passes" ? (
-        <PassList
-          vehicleId={vehicleId}
-          eventId={eventId}
-          loadedFileIds={loadedFileIds}
-          pendingFileIds={pendingFileIds}
-          hiddenLogIds={hiddenLogIds}
-          onToggleLogVisibility={onToggleLogVisibility}
-          onAddFile={onAddFile}
-          onRemoveFile={onRemoveFile}
-        />
-      ) : (
-      <>
-      <div className="p-3 border-b">
-        <input
-          type="text"
-          placeholder="Search channels..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full px-3 py-1.5 rounded bg-muted border border-border text-sm placeholder:text-muted-foreground outline-none focus:border-primary"
-        />
-      </div>
-      <div className="flex-1 overflow-y-auto p-2">
-        {sourceFileId &&
-          tree.map((node) => (
-            <SidebarGroupNode
-              key={node.tag}
-              node={node}
-              keyPrefix=""
-              isRoot
-              isSearching={isSearching}
-              expanded={expanded}
-              emptySet={emptyChannels}
-              statusMap={statusMap}
-              onNewMathChannel={() => setMathDialog({ editing: null })}
-              onEditMathChannel={(name) => {
-                const def = (mathChannels ?? []).find((m) => m.name === name);
-                if (def) setMathDialog({ editing: def });
-              }}
-              renaming={renaming}
-              onStartRename={setRenaming}
-              onCommitRename={handleRename}
-              logFileId={sourceFileId}
-              unitSystem={unitSystem}
-              unitOverrides={unitOverrides}
-              activeTraceId={activeTraceId}
-              onToggleGroup={toggleGroup}
-              onDragStart={handleDragStart}
-              onAddChannel={onAddChannel}
-              onAddTraceWithChannel={onAddTraceWithChannel}
-              onCycleUnit={onCycleUnit}
-            />
-          ))}
-      </div>
-
-      </>
-      )}
-
-      {(mathErrors?.length ?? 0) > 0 && tab === "channels" && (
-        <div className="border-t px-3 py-2 text-xs text-destructive">
-          {mathErrors!.map((e) => (
-            <div key={e.name} className="truncate" title={`${e.name}: ${e.message}`}>
-              {e.name} couldn't be computed
-            </div>
-          ))}
-        </div>
-      )}
-
-      {mathDialog && (
-        <MathChannelDialog
-          open
-          onOpenChange={(o) => { if (!o) setMathDialog(null); }}
-          vehicleId={vehicleId}
-          channelNames={allDefs.filter((d) => !d.custom).map((d) => d.name)}
-          unitSystem={unitSystem}
-          unitOverrides={unitOverrides}
-          editing={mathDialog.editing}
-        />
-      )}
+      <PassList
+        vehicleId={vehicleId}
+        eventId={eventId}
+        loadedFileIds={loadedFileIds}
+        pendingFileIds={pendingFileIds}
+        hiddenLogIds={hiddenLogIds}
+        onToggleLogVisibility={onToggleLogVisibility}
+        onAddFile={onAddFile}
+        onRemoveFile={onRemoveFile}
+      />
     </div>
-  );
-}
-
-/** Recursive group node renderer — supports arbitrary nesting depth. */
-function SidebarGroupNode({
-  node,
-  keyPrefix,
-  isRoot,
-  isSearching,
-  expanded,
-  emptySet,
-  statusMap,
-  renaming,
-  onStartRename,
-  onCommitRename,
-  logFileId,
-  unitSystem,
-  unitOverrides,
-  activeTraceId,
-  onToggleGroup,
-  onDragStart,
-  onAddChannel,
-  onAddTraceWithChannel,
-  onCycleUnit,
-  onNewMathChannel,
-  onEditMathChannel,
-}: {
-  node: GroupNode;
-  keyPrefix: string;
-  isRoot?: boolean;
-  isSearching: boolean;
-  expanded: Set<string>;
-  emptySet: Set<string>;
-  statusMap: Map<string, ChannelStatus>;
-  renaming: string | null;
-  onStartRename: (channelName: string | null) => void;
-  onCommitRename: (channelName: string, name: string) => void;
-  logFileId: Id<"files">;
-  unitSystem?: UnitSystem;
-  unitOverrides?: UnitOverrides;
-  activeTraceId: string | null;
-  onToggleGroup: (key: string) => void;
-  onDragStart: (e: React.DragEvent, logFileId: Id<"files">, channelName: string) => void;
-  onAddChannel: (traceId: string, channel: ChannelOnTrace) => void;
-  onAddTraceWithChannel: (channel: ChannelOnTrace) => void;
-  onCycleUnit?: (quantitySlug: string) => void;
-  onNewMathChannel?: () => void;
-  onEditMathChannel?: (name: string) => void;
-}) {
-  const groupKey = `${keyPrefix}${node.tag}`;
-  const isOpen = isSearching || expanded.has(groupKey);
-  const total = countGroupChannels(node);
-  const color = isRoot ? (GROUP_COLORS[node.tag] ?? "#6b7280") : undefined;
-
-  return (
-    <div className={isRoot ? "mb-0.5" : "ml-3"}>
-      <div className="flex items-center gap-1 pr-1">
-        <button
-          onClick={() => onToggleGroup(groupKey)}
-          className="flex items-center gap-1.5 flex-1 min-w-0 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1 rounded hover:bg-muted cursor-pointer"
-        >
-          <span className="text-[10px] w-3">{isOpen ? "\u25BC" : "\u25B6"}</span>
-          {color && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />}
-          <span className="flex-1 truncate">{node.tag}</span>
-          <span className="font-normal normal-case tracking-normal text-[11px] opacity-50">
-            {total}
-          </span>
-        </button>
-        {node.tag === "Math" && onNewMathChannel && (
-          <Tip content="New math channel — describe it and Claude writes the expression">
-            <button
-              onClick={(e) => { e.stopPropagation(); onNewMathChannel(); }}
-              className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
-            >
-              <PlusIcon className="size-3.5" />
-            </button>
-          </Tip>
-        )}
-      </div>
-      {isOpen && (
-        <div className={isRoot ? "ml-1 border-l-2 pl-0" : ""} style={isRoot && color ? { borderColor: color + "40" } : undefined}>
-          {node.channels.map((ch) => (
-            <ChannelRow
-              key={ch.def.name}
-              ch={ch}
-              logFileId={logFileId}
-              isEmpty={emptySet.has(ch.def.name)}
-              status={statusMap.get(ch.def.name)}
-              isRenaming={renaming === ch.def.name}
-              onStartRename={() => onStartRename(ch.def.name)}
-              onEditMathChannel={
-                ch.def.custom && onEditMathChannel
-                  ? () => onEditMathChannel(ch.def.name)
-                  : undefined
-              }
-              onCommitRename={(name) => onCommitRename(ch.def.name, name)}
-              unitSystem={isRoot ? unitSystem : undefined}
-              unitOverrides={isRoot ? unitOverrides : undefined}
-              onDragStart={onDragStart}
-              onClick={() => {
-                if (activeTraceId) {
-                  onAddChannel(activeTraceId, { logFileId, channelName: ch.def.name });
-                } else {
-                  onAddTraceWithChannel({ logFileId, channelName: ch.def.name });
-                }
-              }}
-              onCycleUnit={onCycleUnit}
-            />
-          ))}
-          {node.children.map((child) => (
-            <SidebarGroupNode
-              key={`${keyPrefix}${node.tag}/${child.tag}`}
-              node={child}
-              keyPrefix={`${keyPrefix}${node.tag}/`}
-              isSearching={isSearching}
-              expanded={expanded}
-              emptySet={emptySet}
-              statusMap={statusMap}
-              onNewMathChannel={onNewMathChannel}
-              onEditMathChannel={onEditMathChannel}
-              renaming={renaming}
-              onStartRename={onStartRename}
-              onCommitRename={onCommitRename}
-              logFileId={logFileId}
-              activeTraceId={activeTraceId}
-              onToggleGroup={onToggleGroup}
-              onDragStart={onDragStart}
-              onAddChannel={onAddChannel}
-              onAddTraceWithChannel={onAddTraceWithChannel}
-              onCycleUnit={onCycleUnit}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Explains why a channel is blank. A channel that reported a fault for its
- * whole run is a dead sensor, not a missing feature — worth saying plainly.
- */
-function statusNote(status: ChannelStatus): string {
-  const reason = status.dominantLabel ?? `status ${status.dominantCode}`;
-  if (status.samples >= status.rowCount) return `no reading all run (${reason})`;
-  const pct = Math.round((status.samples / status.rowCount) * 100);
-  return `${reason} for ${pct || "<1"}% of the run`;
-}
-
-function ChannelRow({
-  ch,
-  logFileId,
-  isEmpty,
-  unitSystem,
-  unitOverrides,
-  onDragStart,
-  onClick,
-  onCycleUnit,
-  status,
-  isRenaming,
-  onStartRename,
-  onCommitRename,
-  onEditMathChannel,
-}: {
-  ch: GroupChannel;
-  logFileId: Id<"files">;
-  isEmpty: boolean;
-  unitSystem?: UnitSystem;
-  unitOverrides?: UnitOverrides;
-  onDragStart: (e: React.DragEvent, logFileId: Id<"files">, channelName: string) => void;
-  onClick: () => void;
-  onCycleUnit?: (quantitySlug: string) => void;
-  onEditMathChannel?: () => void;
-  status?: ChannelStatus;
-  isRenaming: boolean;
-  onStartRename: () => void;
-  onCommitRename: (name: string) => void;
-}) {
-  const quantitySlug = ch.def.quantitySlug;
-  const displayUnit = quantitySlug && unitSystem ? getDisplayUnit(quantitySlug, unitSystem, unitOverrides) : "";
-  const canCycle = !!(quantitySlug && onCycleUnit && getUnitOptions(quantitySlug).length > 1);
-  // When renamed, keep the ECU's own name visible so the channel stays
-  // identifiable against the tuning software.
-  const renamedFrom = ch.displayName !== ch.def.name ? ch.def.name : null;
-  const baseTip = displayUnit ? `${ch.displayName} (${displayUnit})` : ch.displayName;
-  const tipText = ch.def.computed
-    ? `${baseTip} — math channel`
-    : [baseTip, renamedFrom, ch.def.description, status && statusNote(status)]
-        .filter(Boolean)
-        .join(" — ");
-  if (isRenaming) {
-    return (
-      <div className="flex items-center gap-2 px-2 py-1 pl-6">
-        <input
-          autoFocus
-          defaultValue={ch.displayName}
-          onBlur={(e) => onCommitRename(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onCommitRename(e.currentTarget.value);
-            if (e.key === "Escape") onCommitRename(ch.displayName);
-          }}
-          className="flex-1 min-w-0 bg-background border rounded px-1 py-0.5 text-sm"
-        />
-      </div>
-    );
-  }
-
-  return (
-    <Tip content={tipText} side="right">
-      <div
-        draggable
-        onDragStart={(e) => onDragStart(e, logFileId, ch.def.name)}
-        onClick={onClick}
-        onContextMenu={
-          ch.def.computed
-            ? undefined
-            : (e) => {
-                e.preventDefault();
-                onStartRename();
-              }
-        }
-        className={`group flex items-center gap-2 px-2 py-1 pl-6 rounded text-sm cursor-pointer select-none ${
-          isEmpty
-            ? "opacity-35 text-muted-foreground"
-            : "text-muted-foreground hover:text-foreground hover:bg-muted"
-        }`}
-      >
-        {ch.def.computed && (
-          <span className="shrink-0 font-serif italic text-xs text-lime-400">ƒ</span>
-        )}
-        <span className="flex-1 truncate">{ch.displayName}</span>
-        {onEditMathChannel && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onEditMathChannel(); }}
-            title="Edit this math channel"
-            className="shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground cursor-pointer"
-          >
-            <PencilIcon className="size-3" />
-          </button>
-        )}
-        {displayUnit && (
-          canCycle ? (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onCycleUnit!(quantitySlug!);
-              }}
-              title="Click to change units"
-              className="text-xs text-muted-foreground hover:text-foreground border border-transparent hover:border-border rounded px-1 -mr-1 cursor-pointer"
-            >
-              {displayUnit}
-            </button>
-          ) : (
-            <span className="text-xs text-muted-foreground">{displayUnit}</span>
-          )
-        )}
-      </div>
-    </Tip>
   );
 }

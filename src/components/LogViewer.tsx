@@ -10,7 +10,6 @@ import { useScatterSuggestions } from "@/hooks/useScatterSuggestions";
 import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 import { useMathChannels } from "@/hooks/useMathChannels";
 import { buildDefaultConfig } from "@/lib/default-layout";
-import { cycleUnit as cycleUnitFn } from "@/lib/units";
 import { computeAlignment } from "@/lib/alignment";
 import { buildTimeslipZones } from "@/lib/timeslip-zones";
 import {
@@ -498,11 +497,6 @@ function LogViewerReady({
     []
   );
 
-  const handleAddChannel = useCallback((traceId: string, channel: ChannelOnTrace) => {
-    dispatch({ type: "addChannel", traceId, channel });
-    setActiveTraceId(traceId);
-  }, []);
-
   const handleAddTraceWithChannel = useCallback(
     (channel: ChannelOnTrace) => {
       const id = `trace-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -544,33 +538,18 @@ function LogViewerReady({
       <div className="flex flex-1 min-h-0">
         <div className="shrink-0 overflow-hidden" style={{ width: sidebarWidth }}>
           <ViewerSidebar
-            logs={logs}
-            unitSystem={units.unitSystem}
-            mathVersion={math.version}
-            mathErrors={math.errors}
-            mathChannels={math.definitions}
             vehicleId={vehicleId}
             eventId={eventId}
             loadedFileIds={fileIds}
             pendingFileIds={pendingFileIds}
-            traces={effectiveTraces}
             hiddenLogIds={config.hiddenLogIds ?? []}
             onAddFile={handleAddFile}
             onRemoveFile={handleRemoveFile}
-            onAddChannel={handleAddChannel}
-            onAddTraceWithChannel={handleAddTraceWithChannel}
             onRemoveChannel={(traceId, logFileId, channelName) =>
               dispatch({ type: "removeChannel", traceId, logFileId, channelName })
             }
             onToggleLogVisibility={(logFileId) =>
               dispatch({ type: "toggleLogVisibility", logFileId })
-            }
-            activeTraceId={activeTraceId}
-                unitOverrides={units.resolved}
-            onCycleUnit={(quantitySlug) =>
-              units.setVehicleOverrides(
-                cycleUnitFn(quantitySlug, units.unitSystem, units.resolved),
-              )
             }
           />
         </div>
@@ -652,6 +631,11 @@ function LogViewerReady({
           onToggleTraceCollapsed={(traceId) => dispatch({ type: "toggleTraceCollapsed", traceId })}
           onToggleTraceTimeslip={(traceId) => dispatch({ type: "toggleTraceTimeslip", traceId })}
           pickChannelsFor={pickChannelsFor}
+          vehicleId={vehicleId}
+          mathChannels={math.definitions}
+          onSetUnit={(quantitySlug, unitKey) =>
+            units.setVehicleOverrides({ ...units.resolved, [quantitySlug]: unitKey })
+          }
           onSetTraceChannelOrder={(traceId, channelNames) =>
             dispatch({ type: "setTraceChannelOrder", traceId, channelNames })
           }

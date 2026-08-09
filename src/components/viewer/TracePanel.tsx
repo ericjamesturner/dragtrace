@@ -3,7 +3,7 @@ import type { LoadedLog, TraceConfig, ChannelOnTrace, PageConfig, HighlightZoneC
 import { MIN_TRACE_HEIGHT } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import type { UnitSystem, UnitOverrides } from "@/lib/units";
-import type { Id } from "../../../convex/_generated/dataModel";
+import type { Id, Doc } from "../../../convex/_generated/dataModel";
 import { TraceContainer, TRACE_CHROME_PX } from "./TraceContainer";
 import { ScatterContainer } from "./ScatterContainer";
 import { ScatterConfigDialog } from "./ScatterConfigDialog";
@@ -42,6 +42,9 @@ interface Props {
   onSetTraceChannelOrder: (traceId: string, channelNames: string[]) => void;
   /** Trace whose channel picker should open itself — a freshly made one. */
   pickChannelsFor?: string | null;
+  vehicleId: Id<"vehicles">;
+  mathChannels: Doc<"mathChannels">[];
+  onSetUnit: (quantitySlug: string, unitKey: string) => void;
   onToggleTraceTimeslip: (traceId: string) => void;
   legendWidth?: number;
   legendCollapsed?: boolean;
@@ -114,6 +117,9 @@ export function TracePanel({
   onReorderTrace,
   onSetTraceChannelOrder,
   pickChannelsFor,
+  vehicleId,
+  mathChannels,
+  onSetUnit,
   onToggleTraceTimeslip,
   legendWidth,
   legendCollapsed,
@@ -666,6 +672,9 @@ export function TracePanel({
                 onToggleTimeslip={() => onToggleTraceTimeslip(trace.id)}
                 onSetChannelOrder={(names) => onSetTraceChannelOrder(trace.id, names)}
                 autoOpenChannels={pickChannelsFor === trace.id}
+                vehicleId={vehicleId}
+                mathChannels={mathChannels}
+                onSetUnit={onSetUnit}
                 legendWidth={legendWidth}
                 legendCollapsed={legendCollapsed}
                 onSetLegendWidth={onSetLegendWidth}

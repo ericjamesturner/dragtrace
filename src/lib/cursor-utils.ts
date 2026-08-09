@@ -144,3 +144,14 @@ export function formatDuration(seconds: number): string {
   const s = seconds % 60;
   return `${m}:${s.toFixed(1).padStart(4, "0")}`;
 }
+
+/**
+ * Explains why a channel is blank. A channel that reported a fault for its
+ * whole run is a dead sensor, not a missing feature — worth saying plainly.
+ */
+export function statusNote(status: { samples: number; rowCount: number; dominantCode: number; dominantLabel?: string }): string {
+  const reason = status.dominantLabel ?? `status ${status.dominantCode}`;
+  if (status.samples >= status.rowCount) return `no reading all run (${reason})`;
+  const pct = Math.round((status.samples / status.rowCount) * 100);
+  return `${reason} for ${pct || "<1"}% of the run`;
+}
