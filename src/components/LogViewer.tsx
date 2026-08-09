@@ -25,7 +25,6 @@ import {
 } from "@/lib/viewer-types";
 import { ViewerToolbar } from "./viewer/ViewerToolbar";
 import { ViewerBreadcrumb } from "./viewer/ViewerBreadcrumb";
-import { ViewerSidebar } from "./viewer/ViewerSidebar";
 import { TracePanel } from "./viewer/TracePanel";
 
 interface Props {
@@ -221,34 +220,6 @@ function LogViewerReady({
   // Active trace tracking
   const [activeTraceId, setActiveTraceId] = useState<string | null>(null);
 
-  // Sidebar width (drag-resizable, persisted per browser)
-  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
-    const saved = Number(localStorage.getItem("dragtrace:sidebarWidth"));
-    return Number.isFinite(saved) && saved >= 180 && saved <= 600 ? saved : 256;
-  });
-
-  const handleSidebarResize = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startW = sidebarWidth;
-      const onMove = (ev: MouseEvent) => {
-        setSidebarWidth(Math.min(600, Math.max(180, startW + (ev.clientX - startX))));
-      };
-      const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-        setSidebarWidth((w) => {
-          localStorage.setItem("dragtrace:sidebarWidth", String(w));
-          return w;
-        });
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-    },
-    [sidebarWidth],
-  );
-
   useEffect(() => {
     if (activeTraceId && !effectiveTraces.some((t) => t.id === activeTraceId)) {
       setActiveTraceId(effectiveTraces[effectiveTraces.length - 1]?.id ?? null);
@@ -437,8 +408,10 @@ function LogViewerReady({
             vehicleId={vehicleId}
             eventId={eventId}
             loadedFileIds={fileIds}
+            pendingFileIds={pendingFileIds}
             onOpen={(v, e, fileId) => goToViewer(v, e, [fileId])}
             onCompare={handleAddFile}
+            onRemove={handleRemoveFile}
             onGoToEvent={goToFiles}
           />
         }
@@ -450,31 +423,9 @@ function LogViewerReady({
         </div>
       )}
 
+      {/* No sidebar: the toolbar picks passes, and a trace owns its channels.
+          The charts get the whole window. */}
       <div className="flex flex-1 min-h-0">
-        <div className="shrink-0 overflow-hidden" style={{ width: sidebarWidth }}>
-          <ViewerSidebar
-            vehicleId={vehicleId}
-            eventId={eventId}
-            loadedFileIds={fileIds}
-            pendingFileIds={pendingFileIds}
-            hiddenLogIds={config.hiddenLogIds ?? []}
-            onAddFile={handleAddFile}
-            onRemoveFile={handleRemoveFile}
-            onRemoveChannel={(traceId, logFileId, channelName) =>
-              dispatch({ type: "removeChannel", traceId, logFileId, channelName })
-            }
-            onToggleLogVisibility={(logFileId) =>
-              dispatch({ type: "toggleLogVisibility", logFileId })
-            }
-          />
-        </div>
-
-        {/* Sidebar width resize handle */}
-        <div
-          className="w-1 shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/40 transition-colors"
-          onMouseDown={handleSidebarResize}
-        />
-
         <TracePanel
           logs={logs}
           avgOnSelection

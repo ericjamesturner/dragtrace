@@ -12,7 +12,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDownIcon, ChevronRightIcon, CheckIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, CheckIcon, LoaderCircleIcon } from "lucide-react";
 import { useTimeslips } from "@/hooks/useTimeslips";
 import { usePassPreviews, LEAD_IN_SECONDS } from "@/hooks/usePassPreviews";
 import { sparklinePath, type RaceSeries } from "@/lib/preview";
@@ -25,6 +25,17 @@ function shortDate(date: string): string {
   const year = new Date().getFullYear();
   const suffix = +m[1] !== year ? ` '${m[1].slice(2)}` : "";
   return `${MONTHS[+m[2] - 1]} ${+m[3]}${suffix}`;
+}
+
+/**
+ * What a racer calls a run. The file name carries the upload stamp on the end
+ * ("… 2026-07-25_0654pm_Logs643to646"), which identifies nothing you'd say out
+ * loud — the useful part is everything before it.
+ */
+function shortPassName(fileName: string): string {
+  const name = fileName.replace(/\.[^.]+$/, "");
+  const stamped = name.search(/\s\d{4}-\d{2}-\d{2}/);
+  return (stamped > 0 ? name.slice(0, stamped) : name).trim();
 }
 
 /** Name, then the three numbers off the slip, then the two things you can do. */
@@ -104,17 +115,24 @@ export function ViewerBreadcrumb({
   vehicleId,
   eventId,
   loadedFileIds,
+  pendingFileIds,
   onOpen,
   onCompare,
+  onRemove,
   onGoToEvent,
 }: {
   vehicleId: Id<"vehicles">;
   eventId: Id<"events">;
   loadedFileIds: Id<"files">[];
+  /** Chosen but still being fetched and parsed — a multi-megabyte log is not
+   *  instant, and without this the row just sits there. */
+  pendingFileIds?: Id<"files">[];
   /** Show this pass on its own, replacing what's loaded. */
   onOpen: (vehicleId: Id<"vehicles">, eventId: Id<"events">, fileId: Id<"files">) => void;
   /** Lay this pass over what's already loaded. */
   onCompare: (fileId: Id<"files">) => void;
+  /** Take this pass back off the chart. */
+  onRemove: (fileId: Id<"files">) => void;
   /** No pass chosen yet — go to the event's file list. */
   onGoToEvent: (vehicleId: Id<"vehicles">, eventId: Id<"events">) => void;
 }) {
@@ -129,6 +147,14 @@ export function ViewerBreadcrumb({
   const event = events?.find((e) => e._id === eventId);
 
   const loaded = useMemo(() => new Set(loadedFileIds as string[]), [loadedFileIds]);
+  const pending = useMemo(() => new Set((pendingFileIds ?? []) as string[]), [pendingFileIds]);
+
+  // The first loaded pass names the menu; the rest are counted beside it.
+  const loadedLabel = useMemo(() => {
+    const first = loadedFileIds[0];
+    const file = first ? files?.find((f) => f._id === first) : undefined;
+    return file ? shortPassName(file.fileName) : "Passes";
+  }, [loadedFileIds, files]);
 
   // Names are short and they are the label — no reason to clip them.
   const crumb = "h-7 shrink-0 gap-1 whitespace-nowrap px-2 text-sm font-normal";
@@ -218,10 +244,12 @@ export function ViewerBreadcrumb({
         <DropdownMenuTrigger
           render={
             <Button variant="ghost" size="sm" className={crumb}>
-              Passes
-              <span className="tabular-nums text-muted-foreground">
-                {loadedFileIds.length > 0 ? loadedFileIds.length : ""}
-              </span>
+              <span>{loadedLabel}</span>
+              {loadedFileIds.length > 1 && (
+                <span className="text-muted-foreground">
+                  +{loadedFileIds.length - 1} more
+                </span>
+              )}
               <ChevronDownIcon className="size-3.5 opacity-50" />
             </Button>
           }
@@ -249,12 +277,17 @@ export function ViewerBreadcrumb({
           <div className="space-y-1.5 p-1.5">
             {(files ?? []).map((file) => {
               const isLoaded = loaded.has(file._id as string);
+              const isPending = pending.has(file._id as string);
               const slip = timeslips.get(file._id)?.[0];
               return (
                 <div
                   key={file._id}
                   className={`rounded-md border px-2 py-1.5 transition-colors ${
-                    isLoaded ? "border-primary/50 bg-primary/10" : "hover:bg-muted/50"
+                    isPending
+                      ? "border-sky-500/60 bg-sky-500/5"
+                      : isLoaded
+                        ? "border-primary/50 bg-primary/10"
+                        : "hover:bg-muted/50"
                   }`}
                 >
                   <div className={`${PASS_ROW} items-center text-sm`}>
@@ -274,23 +307,44 @@ export function ViewerBreadcrumb({
                     {etAtMph(slip?.et, slip?.mph)}
                   </span>
                   <span className="flex items-center justify-end gap-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => onOpen(vehicleId, eventId, file._id)}
-                    >
-                      Open
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 px-2 text-xs"
-                      disabled={isLoaded}
-                      onClick={() => onCompare(file._id)}
-                    >
-                      {isLoaded ? "Loaded" : "Compare"}
-                    </Button>
+                    {isPending ? (
+                      <span className="flex items-center gap-1.5 pr-2 text-xs text-sky-400">
+                        <LoaderCircleIcon className="size-3.5 animate-spin" />
+                        Loading
+                      </span>
+                    ) : (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => onOpen(vehicleId, eventId, file._id)}
+                        >
+                          Open
+                        </Button>
+                        {isLoaded ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-2 text-xs text-muted-foreground hover:text-destructive"
+                            // The chart needs something to draw; the last one stays.
+                            disabled={loadedFileIds.length <= 1}
+                            onClick={() => onRemove(file._id)}
+                          >
+                            Remove
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-2 text-xs"
+                            onClick={() => onCompare(file._id)}
+                          >
+                            Compare
+                          </Button>
+                        )}
+                      </>
+                    )}
                   </span>
                   </div>
                   <PassSpark
