@@ -69,10 +69,11 @@ export function ImpersonationBanner() {
     // Every corner of the viewer is occupied — the overview bar spans the
     // bottom, the readouts sit above it — so on a touch screen this pill lands
     // on something you need. Impersonating is done from a desk anyway, so it
-    // simply isn't there when the pointer is a finger.
-    <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 pointer-coarse:hidden">
-      <div className="flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-950/90 px-4 py-1.5 text-xs text-amber-300 shadow-lg backdrop-blur">
-        <EyeIcon className="size-3.5" />
+    // simply isn't there when the pointer is a finger. On a desk it sits in the
+    // bottom-right corner, small: it is a status note, not a control.
+    <div className="fixed bottom-2 right-2 z-50 pointer-coarse:hidden">
+      <div className="flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-950/90 px-2 py-0.5 text-[10px] text-amber-300/90 shadow-lg backdrop-blur">
+        <EyeIcon className="size-3" />
         <span>
           Viewing as{" "}
           <span className="font-medium">
@@ -81,10 +82,10 @@ export function ImpersonationBanner() {
         </span>
         <button
           onClick={() => void handleStop()}
-          className="ml-1 rounded-full p-0.5 hover:bg-amber-500/20"
+          className="rounded-full p-0.5 hover:bg-amber-500/20"
           title="Stop impersonating"
         >
-          <XIcon className="size-3.5" />
+          <XIcon className="size-3" />
         </button>
       </div>
     </div>

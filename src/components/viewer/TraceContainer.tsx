@@ -14,6 +14,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 
 /** Which channel's style dialog is open. Opened by clicking its row in the
  *  channels panel, or its line on the chart. */
@@ -155,33 +156,40 @@ function AxisInputs({
   };
 
   const inputCls =
-    "w-full px-2 py-1 rounded bg-muted border border-border text-sm font-mono placeholder:text-muted-foreground/70 outline-none focus:border-primary";
+    "w-full px-2 py-1.5 rounded-md bg-background border border-border text-sm font-mono placeholder:text-muted-foreground/60 outline-none focus:border-primary";
 
+  // Two labelled fields rather than "box – box": empty means automatic, and
+  // without a label an empty box beside a greyed number reads as broken.
   return (
-    <div className="flex items-center gap-1.5">
-      <input
-        type="text"
-        inputMode="decimal"
-        placeholder={minPlaceholder}
-        title={minRaw === undefined ? `Auto — currently ${minPlaceholder}` : undefined}
-        value={minInput}
-        onChange={(e) => setMinInput(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
-        className={inputCls}
-      />
-      <span className="text-muted-foreground text-xs shrink-0">–</span>
-      <input
-        type="text"
-        inputMode="decimal"
-        placeholder={maxPlaceholder}
-        title={maxRaw === undefined ? `Auto — currently ${maxPlaceholder}` : undefined}
-        value={maxInput}
-        onChange={(e) => setMaxInput(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
-        className={inputCls}
-      />
+    <div className="grid grid-cols-2 gap-2">
+      <label className="block">
+        <span className="mb-1 block text-xs text-muted-foreground">Min</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder={minPlaceholder}
+          title={minRaw === undefined ? `Automatic — currently ${minPlaceholder}` : undefined}
+          value={minInput}
+          onChange={(e) => setMinInput(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
+          className={inputCls}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs text-muted-foreground">Max</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder={maxPlaceholder}
+          title={maxRaw === undefined ? `Automatic — currently ${maxPlaceholder}` : undefined}
+          value={maxInput}
+          onChange={(e) => setMaxInput(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
+          className={inputCls}
+        />
+      </label>
     </div>
   );
 }
@@ -236,21 +244,27 @@ function ColorByEditor({
 
   if (!ch?.colorBy) {
     return showPicker ? (
-      <ChannelPicker
-        logs={pickerLogs}
-        selected=""
-        onSelect={(name) => {
-          if (name === selfName) return; // can't color by self
-          onSet(name, ch?.colorByMin, ch?.colorByMax);
-          setShowPicker(false);
-        }}
-      />
+      <div className="space-y-1.5">
+        <div className="text-xs text-muted-foreground">Color by another channel</div>
+        <ChannelPicker
+          logs={pickerLogs}
+          selected=""
+          onSelect={(name) => {
+            if (name === selfName) return; // can't color by self
+            onSet(name, ch?.colorByMin, ch?.colorByMax);
+            setShowPicker(false);
+          }}
+        />
+      </div>
     ) : (
+      // The gradient on the button says what the feature does. A bare
+      // "Color by a channel…" link says only that something will happen.
       <button
         onClick={() => setShowPicker(true)}
-        className="text-sm text-primary hover:text-primary/80 cursor-pointer"
+        className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-dashed border-border px-2 py-1.5 text-xs text-muted-foreground hover:border-primary/60 hover:text-foreground"
       >
-        Color by a channel…
+        <span>Color by another channel</span>
+        <span className="h-2.5 w-16 shrink-0 rounded-full" style={{ background: COLORBY_CSS_GRADIENT }} />
       </button>
     );
   }
@@ -258,7 +272,8 @@ function ColorByEditor({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
-        <span className="text-xs text-primary font-medium truncate" title={ch.colorBy}>
+        <span className="shrink-0 text-xs text-muted-foreground">Color by</span>
+        <span className="truncate text-xs font-medium text-primary" title={ch.colorBy}>
           {ch.colorBy}
         </span>
         <button
@@ -525,6 +540,8 @@ export function TraceContainer({
   const [contextMenu, setContextMenu] = useState<ChannelStyleTarget | null>(null);
   const [customColorOpen, setCustomColorOpen] = useState(false);
   const [channelsDialogOpen, setChannelsDialogOpen] = useState(false);
+  /** A channel is being dragged over the Channels… button, which removes it. */
+  const [dropToRemove, setDropToRemove] = useState(false);
   const channelOverrides = useQuery(api.vehicleChannelOverrides.listByVehicle, { vehicleId });
   const channelDisplayNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -777,9 +794,12 @@ export function TraceContainer({
       .filter((log) => !hiddenSet.has(log.fileId))
       .map((log) => ({
         log,
-        channels: (channelsByLog.get(log.fileId) ?? []).filter(
-          (ch) => !hiddenChannels.has(`${ch.logFileId}:${ch.channelName}`)
-        ),
+        // A channel with no colour of its own takes one from its position in
+        // the list. Pin that colour before dropping the switched-off ones,
+        // or turning one off would repaint every line under it.
+        channels: (channelsByLog.get(log.fileId) ?? [])
+          .map((ch, i) => (ch.color ? ch : { ...ch, color: resolveChannelStyle(ch, i, log.logIndex).color }))
+          .filter((ch) => !hiddenChannels.has(`${ch.logFileId}:${ch.channelName}`)),
         timeOffset: offsets.get(log.fileId) ?? 0,
       }))
       .filter((g) => g.channels.length > 0);
@@ -852,7 +872,11 @@ export function TraceContainer({
         let maxTime: number | null = null;
         let unitLabel = "";
         const def = log?.parsed.channelDefs.find((d) => d.name === ch.channelName);
-        const visible = !!log && !isLogHidden && !isChHidden;
+        // Switching a channel off takes its line off the chart. It does not take
+        // the channel off the panel — the numbers are still worth reading with
+        // the line out of the way. A hidden RUN is different: everything from
+        // that pass goes quiet together.
+        const visible = !!log && !isLogHidden;
         if (cursorTime !== null && log && visible) {
           const offset = offsets.get(log.fileId) ?? 0;
           const val = findValueAtTime(log, ch.channelName, cursorTime, offset);
@@ -1221,10 +1245,14 @@ export function TraceContainer({
               </div>
             ))}
           </div>
-        ) : (
+        ) : collapsed ? (
+          // Collapsed hides the channels panel, so the header has to say what
+          // this trace holds. Open, the panel says it — do not say it twice.
           <span className="text-xs text-muted-foreground flex-1 truncate" title={traceTitle}>
             {traceTitle}
           </span>
+        ) : (
+          <span className="flex-1" />
         )}
         {/* Actions sit apart from the title and from each other — five
             small targets in a row need the room. */}
@@ -1402,7 +1430,7 @@ export function TraceContainer({
                         <>
                           {showTag && (
                             <span
-                              className="font-bold uppercase tracking-wider text-[10px] truncate max-w-[84px] pl-4 flex-1"
+                              className="font-bold uppercase tracking-wider text-[10px] truncate max-w-[84px] pl-6 flex-1"
                               style={{ color: r.logColor }}
                             >
                               {traceLogs.find((l) => l.id === (r.ch.logFileId as string))?.tag ?? r.logName}
@@ -1431,16 +1459,15 @@ export function TraceContainer({
                       );
                       return (
                         <div key={name} {...channelDragProps(name)}>
-                          <div className={`flex cursor-grab items-center gap-1.5 text-xs leading-tight active:cursor-grabbing ${allHidden ? "opacity-40" : ""}`}>
-                            <input
-                              type="checkbox"
+                          <div className="flex cursor-grab items-center gap-1.5 text-xs leading-tight active:cursor-grabbing">
+                            <Switch
                               checked={!allHidden}
-                              ref={(el) => { if (el) el.indeterminate = someHidden && !allHidden; }}
+                              mixed={someHidden && !allHidden}
                               onChange={() => onSetChannelsHidden?.(keys, !allHidden)}
-                              className="accent-white/60 cursor-pointer shrink-0"
-                              style={{ width: 10, height: 10 }}
+                              title={allHidden ? `Show ${name}` : `Hide ${name}`}
+                              color={rows[0]?.color}
+                              opacity={rows[0]?.opacity ?? 1}
                             />
-                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: rows[0]?.color, opacity: rows[0]?.opacity ?? 1 }} />
                             <span className="min-w-0 flex-1 truncate text-white/70">{name}</span>
                             {/* One run: its numbers sit on the name row. */}
                             {!multiLogTrace && rows[0] && stats(rows[0], false)}
@@ -1450,7 +1477,7 @@ export function TraceContainer({
                               <div
                                 key={r.chKey}
                                 className={`flex items-center gap-1.5 text-xs leading-tight ${
-                                  r.isChHidden || r.isLogHidden ? "opacity-40" : ""
+                                  r.isLogHidden ? "opacity-40" : ""
                                 }`}
                                 onMouseEnter={() => setHoveredChannel(r.chKey)}
                                 onMouseLeave={() => setHoveredChannel(null)}
@@ -1475,15 +1502,13 @@ export function TraceContainer({
                       return (
                         <div key={name} className="mt-1 first:mt-0" {...channelDragProps(name)}>
                           <div className="flex cursor-grab items-center gap-1.5 text-xs leading-tight active:cursor-grabbing">
-                            <input
-                              type="checkbox"
+                            <Switch
                               checked={!allHidden}
-                              ref={(el) => { if (el) el.indeterminate = someHidden && !allHidden; }}
+                              mixed={someHidden && !allHidden}
                               onChange={() => onSetChannelsHidden?.(keys, !allHidden)}
-                              className="accent-white/60 cursor-pointer shrink-0"
-                              style={{ width: 10, height: 10 }}
+                              title={allHidden ? `Show ${name}` : `Hide ${name}`}
                             />
-                            <span className={`min-w-0 flex-1 truncate text-white/70 ${allHidden ? "opacity-40" : ""}`}>
+                            <span className="min-w-0 flex-1 truncate text-white/70">
                               {name}
                             </span>
                             <span className="text-[9px] text-white/40 whitespace-nowrap shrink-0">{unitLabel}</span>
@@ -1492,7 +1517,7 @@ export function TraceContainer({
                             const r = rows.find((x) => (x.ch.logFileId as string) === l.id);
                             if (!r) {
                               return (
-                                <div key={l.id} className="flex items-center gap-1.5 pl-[22px] text-xs leading-tight">
+                                <div key={l.id} className="flex items-center gap-1.5 pl-[30px] text-xs leading-tight">
                                   <span className="w-2 shrink-0" />
                                   <span className="min-w-0 flex-1 truncate text-white/25">{l.tag}</span>
                                   <span className="font-mono text-white/20 tabular-nums">—</span>
@@ -1501,7 +1526,7 @@ export function TraceContainer({
                             }
                             const isHovered = hoveredChannel === r.chKey;
                             const isDimmed = hoveredChannel !== null && !isHovered;
-                            const muted = r.isChHidden || r.isLogHidden;
+                            const muted = r.isLogHidden;
                             return (
                               <div
                                 key={l.id}
@@ -1531,7 +1556,7 @@ export function TraceContainer({
                                   });
                                 }}
                                 title={`${l.name} · ${name}${r.isChHidden ? " (hidden)" : ""} — click to style, drag to move`}
-                                className={`flex items-center gap-1.5 pl-[22px] text-xs leading-tight cursor-pointer rounded-sm transition-all ${
+                                className={`flex items-center gap-1.5 pl-[30px] text-xs leading-tight cursor-pointer rounded-sm transition-all ${
                                   isDimmed ? "opacity-40" : ""
                                 } ${isHovered ? "bg-white/10" : ""}`}
                               >
@@ -1568,14 +1593,11 @@ export function TraceContainer({
                       <div key={logId} className={isHidden ? "opacity-30" : ""}>
                         {multiLog && log && (
                           <div className="flex items-center gap-1 text-[10px] text-white/40 truncate mt-1 first:mt-0 mb-0.5">
-                            <input
-                              type="checkbox"
+                            <Switch
                               checked={!allLogHidden}
-                              ref={(el) => { if (el) el.indeterminate = someLogHidden && !allLogHidden; }}
-                              onChange={() => {
-                                onSetChannelsHidden?.(allLogChKeys, !allLogHidden);
-                              }}
-                              className="accent-white/60 cursor-pointer"
+                              mixed={someLogHidden && !allLogHidden}
+                              onChange={() => onSetChannelsHidden?.(allLogChKeys, !allLogHidden)}
+                              title={allLogHidden ? "Show this run's channels" : "Hide this run's channels"}
                             />
                             {log.fileName.replace(/\.[^.]+$/, "")}
                           </div>
@@ -1587,7 +1609,7 @@ export function TraceContainer({
                             <div
                               key={chKey}
                               className={`flex cursor-pointer items-center gap-1.5 text-xs leading-tight transition-opacity ${
-                                isChHidden ? "opacity-30" : isDimmed ? "opacity-40" : ""
+                                isDimmed ? "opacity-40" : ""
                               } ${isHovered ? "bg-white/10 -mx-1 px-1 rounded" : ""} ${indent ? "ml-3" : ""}`}
                               onDragOver={channelDragProps(ch.channelName).onDragOver}
                               onDrop={channelDragProps(ch.channelName).onDrop}
@@ -1618,17 +1640,13 @@ export function TraceContainer({
                                 });
                               }}
                             >
-                              <input
-                                type="checkbox"
+                              <Switch
                                 checked={!isChHidden}
-                                onChange={() => {
-                                  onSetChannelsHidden?.([chKey], !isChHidden);
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                                className="accent-white/60 cursor-pointer shrink-0"
-                                style={{ width: 10, height: 10 }}
+                                onChange={() => onSetChannelsHidden?.([chKey], !isChHidden)}
+                                title={isChHidden ? `Show ${ch.channelName}` : `Hide ${ch.channelName}`}
+                                color={color}
+                                opacity={opacity}
                               />
-                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color, opacity }} />
                               <span className="min-w-0 flex-1 truncate text-white/70">
                                 {ch.channelName}
                               </span>
@@ -1655,9 +1673,42 @@ export function TraceContainer({
             {!legendCollapsed && (
               <button
                 onClick={() => setChannelsDialogOpen(true)}
-                className="shrink-0 cursor-pointer border-t border-white/10 bg-black/30 px-2 py-1 text-xs text-white/50 hover:bg-white/10 hover:text-white/80"
+                // Same button, the other direction: it is the door channels come
+                // in through, so it is also the door they go out through. Drop a
+                // channel on it and it leaves the trace.
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.dataTransfer.dropEffect = "move";
+                  setDropToRemove(true);
+                }}
+                onDragLeave={() => setDropToRemove(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  // Without this the trace's own drop handler runs next and puts
+                  // the channel straight back.
+                  e.stopPropagation();
+                  setDropToRemove(false);
+                  let parsed: { logFileId?: Id<"files">; channelName?: string; sourceTraceId?: string };
+                  try {
+                    parsed = JSON.parse(e.dataTransfer.getData("text/plain"));
+                  } catch {
+                    return; // not a channel — a trace being reordered, say
+                  }
+                  if (!parsed.logFileId || !parsed.channelName) return;
+                  if (parsed.sourceTraceId && parsed.sourceTraceId !== trace.id) {
+                    onMoveChannel(parsed.sourceTraceId, parsed.logFileId, parsed.channelName);
+                  } else {
+                    onRemoveChannel(parsed.logFileId, parsed.channelName);
+                  }
+                }}
+                className={`shrink-0 cursor-pointer border-t px-2 py-1 text-xs transition-colors ${
+                  dropToRemove
+                    ? "border-destructive bg-destructive/30 text-white"
+                    : "border-white/10 bg-black/30 text-white/50 hover:bg-white/10 hover:text-white/80"
+                }`}
               >
-                Channels…
+                {dropToRemove ? "Drop to remove" : "Channels…"}
               </button>
             )}
           </div>
@@ -1683,7 +1734,6 @@ export function TraceContainer({
         );
         const curWidth = cmCh?.width ?? 1.5;
         const curDash = cmCh?.dash;
-        const seg = "flex-1 h-6 rounded border flex items-center justify-center cursor-pointer";
         // Data extent of the channel, for quick axis actions
         const cmLog = logs.find((l) => l.fileId === contextMenu.logFileId);
         const cmSession = cmLog?.parsed.sessions[cmLog.activeSessionIndex];
@@ -1716,7 +1766,17 @@ export function TraceContainer({
         const cmRunTag = multiLogTrace
           ? traceLogs.find((l) => l.id === (contextMenu.logFileId as string))
           : null;
-        const section = "text-[10px] font-semibold uppercase tracking-wider text-muted-foreground";
+        // Three levels, so the eye can tell them apart: a boxed card, an
+        // uppercase card title, and a plain-case field label inside it. The old
+        // layout gave every one of these the same 10px uppercase grey, so
+        // nothing looked more important than anything else.
+        const cardCls = "rounded-lg border border-border/60 bg-muted/20 p-4";
+        const cardTitle = "text-[11px] font-semibold uppercase tracking-wider text-muted-foreground";
+        const fieldLabel = "text-xs text-muted-foreground";
+        const segBtn = "flex h-8 cursor-pointer items-center justify-center rounded-md border transition-colors";
+        const styleName =
+          STYLE_OPTIONS.find((s) => JSON.stringify(s.dash ?? null) === JSON.stringify(curDash ?? null))?.label ??
+          "Solid";
         const cmDisplayName = channelDisplayNames.get(contextMenu.channelName) ?? "";
         const cmUnitOptions = getUnitOptions(cmMu);
         const cmUnitKey = cmMu ? resolveUnitKey(cmMu, unitSystem ?? "imperial", unitOverrides) : "";
@@ -1727,10 +1787,15 @@ export function TraceContainer({
         );
         return (
           <Dialog open onOpenChange={(o) => { if (!o) { setContextMenu(null); setCustomColorOpen(false); } }}>
-            <DialogContent className="sm:max-w-xl">
+            <DialogContent className="sm:max-w-3xl">
               <DialogHeader>
-                <DialogTitle className="flex items-center gap-2 pr-6">
-                  <span className="truncate">{contextMenu.channelName}</span>
+                <DialogTitle className="flex items-center gap-2 pr-8">
+                  <span className="truncate">{cmDisplayName || contextMenu.channelName}</span>
+                  {cmDisplayUnit && (
+                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] font-normal text-muted-foreground">
+                      {cmDisplayUnit}
+                    </span>
+                  )}
                   {/* Two runs on one trace means two lines with this name — say
                       which one is being styled. */}
                   {cmRunTag && (
@@ -1743,175 +1808,188 @@ export function TraceContainer({
                     </span>
                   )}
                 </DialogTitle>
-                {(cmDef?.description || cmDisplayUnit) && (
+                {(cmDef?.description || cmDisplayName) && (
                   <p className="text-xs leading-snug text-muted-foreground">
+                    {cmDisplayName && cmDisplayName !== contextMenu.channelName
+                      ? `Logged as ${contextMenu.channelName}`
+                      : ""}
+                    {cmDisplayName && cmDisplayName !== contextMenu.channelName && cmDef?.description ? " · " : ""}
                     {cmDef?.description}
-                    {cmDef?.description && cmDisplayUnit ? " · " : ""}
-                    {cmDisplayUnit}
                   </p>
                 )}
               </DialogHeader>
 
-              {/* Naming, units and sensor health belong to the channel rather
-                  than to this trace, but this is where you're looking at it. */}
-              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                <div>
-                  <div className={`${section} mb-1`}>Name</div>
-                  <input
-                    key={cmKey}
-                    defaultValue={cmDisplayName}
-                    placeholder={contextMenu.channelName}
-                    onBlur={(e) => {
-                      const next = e.target.value.trim();
-                      if (next === cmDisplayName) return;
-                      if (next && next !== contextMenu.channelName) {
-                        void setChannelOverride({ vehicleId, channelName: contextMenu.channelName, displayName: next });
-                      } else {
-                        void removeChannelOverride({ vehicleId, channelName: contextMenu.channelName });
-                      }
-                    }}
-                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                    className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
-                  />
-                </div>
-                {cmUnitOptions.length > 1 && (
-                  <div>
-                    <div className={`${section} mb-1`}>Units</div>
-                    <select
-                      value={cmUnitKey}
-                      onChange={(e) => onSetUnit(cmMu, e.target.value)}
-                      className="h-9 cursor-pointer rounded-md border bg-background px-2 text-sm"
-                    >
-                      {cmUnitOptions.map((a) => (
-                        <option key={a.key} value={a.key}>{a.label}</option>
-                      ))}
-                    </select>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* ── Line: everything about how it is drawn ──────────────── */}
+                <div className={`${cardCls} space-y-4`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className={cardTitle}>Line</span>
+                    <div className="flex items-center gap-1.5">
+                      <Switch
+                        checked={!cmHidden}
+                        color={cmColor}
+                        opacity={cmOpacity}
+                        onChange={() => onSetChannelsHidden?.([cmKey], !cmHidden)}
+                        title={cmHidden ? "Draw this line" : "Stop drawing this line"}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {cmHidden ? "Hidden" : "Visible"}
+                      </span>
+                    </div>
                   </div>
-                )}
-              </div>
 
-              {cmStatus && (
-                <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                  {statusNote(cmStatus)}
-                </p>
-              )}
-
-              <div className="grid gap-5 sm:grid-cols-2">
-                {/* ── Appearance ─────────────────────────────────────────── */}
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className={section}>Color</span>
-                    <svg width="52" height="8" viewBox="0 0 52 8" className="ml-auto shrink-0">
+                  {/* The line itself, drawn at the real width, dash and opacity.
+                      Every control below changes this, so it goes first. */}
+                  <div className="rounded-md border border-border/60 bg-background/60 px-2 py-2.5">
+                    <svg className="block h-4 w-full">
+                      {cmCh?.colorBy && (
+                        <defs>
+                          <linearGradient id="cmPreviewGrad" x1="0" y1="0" x2="1" y2="0">
+                            {(cmCh.colorByLowColor && cmCh.colorByHighColor
+                              ? [cmCh.colorByLowColor, cmCh.colorByHighColor]
+                              : COLORBY_STOPS
+                            ).map((c, i, a) => (
+                              <stop key={`${c}-${i}`} offset={`${(i / (a.length - 1)) * 100}%`} stopColor={c} />
+                            ))}
+                          </linearGradient>
+                        </defs>
+                      )}
                       <line
-                        x1="1" y1="4" x2="51" y2="4"
-                        stroke={cmColor}
-                        strokeOpacity={cmOpacity}
+                        x1="0"
+                        y1="8"
+                        x2="100%"
+                        y2="8"
+                        stroke={cmCh?.colorBy ? "url(#cmPreviewGrad)" : cmColor}
+                        strokeOpacity={cmHidden ? 0.15 : cmOpacity}
                         strokeWidth={curWidth}
                         strokeDasharray={curDash ? curDash.join(",") : undefined}
                       />
                     </svg>
                   </div>
 
-                  {/* Hover a swatch to see it on the line before committing. */}
-                  <div className="flex flex-nowrap items-center gap-1.5">
-                    {CHART_COLORS.map((c) => (
+                  <div>
+                    <div className={`${fieldLabel} mb-1.5`}>Color</div>
+                    {/* Hover a swatch to see it on the chart before committing. */}
+                    <div className="grid grid-cols-12 gap-1.5">
+                      {CHART_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          title={c}
+                          onMouseEnter={() => setColorPreview({ key: cmKey, color: c })}
+                          onMouseLeave={() => setColorPreview(null)}
+                          onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c); setColorPreview(null); }}
+                          className={`aspect-square w-full cursor-pointer rounded-full border transition-transform hover:scale-110 ${
+                            cmCh?.color === c ? "border-foreground" : "border-white/20"
+                          }`}
+                          style={{ backgroundColor: c }}
+                        />
+                      ))}
                       <button
-                        key={c}
-                        title={c}
-                        onMouseEnter={() => setColorPreview({ key: cmKey, color: c })}
-                        onMouseLeave={() => setColorPreview(null)}
-                        onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c); setColorPreview(null); }}
-                        className={`size-5 shrink-0 cursor-pointer rounded-full border transition-transform hover:scale-110 ${
-                          cmCh?.color === c ? "border-foreground" : "border-white/20"
+                        title="More colors"
+                        onClick={() => setCustomColorOpen((v) => !v)}
+                        className={`aspect-square w-full cursor-pointer rounded-full border transition-transform hover:scale-110 ${
+                          customColorOpen ? "border-foreground" : "border-white/40"
                         }`}
-                        style={{ backgroundColor: c }}
+                        style={{ background: "conic-gradient(from 90deg, #ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)" }}
                       />
-                    ))}
-                    <button
-                      title="More colors"
-                      onClick={() => setCustomColorOpen((v) => !v)}
-                      className={`size-5 shrink-0 cursor-pointer rounded-full border transition-transform hover:scale-110 ${
-                        customColorOpen ? "border-foreground" : "border-white/40"
-                      }`}
-                      style={{ background: "conic-gradient(from 90deg, #ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)" }}
-                    />
-                    <button
-                      title="Back to the automatic color"
-                      onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, undefined); setColorPreview(null); }}
-                      className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full border border-white/30 text-[10px] leading-none text-muted-foreground hover:text-foreground"
-                    >
-                      ↺
-                    </button>
-                  </div>
-
-                  {customColorOpen && (
-                    <div className="space-y-2 rounded-md border bg-muted/30 p-2">
-                      <div className="grid grid-cols-8 gap-1.5">
-                        {CUSTOM_COLORS.map((c) => (
-                          <button
-                            key={c}
-                            title={c}
-                            onMouseEnter={() => setColorPreview({ key: cmKey, color: c })}
-                            onMouseLeave={() => setColorPreview(null)}
-                            onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c); setColorPreview(null); }}
-                            className={`size-5 cursor-pointer rounded border transition-transform hover:scale-110 ${
-                              cmCh?.color === c ? "border-foreground" : "border-white/10"
-                            }`}
-                            style={{ backgroundColor: c }}
-                          />
-                        ))}
-                      </div>
-                      <HexInput
-                        key={cmKey}
-                        value={cmCh?.color ?? cmColor}
-                        onPreview={(c) => setColorPreview(c ? { key: cmKey, color: c } : null)}
-                        onCommit={(c) => onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c)}
-                      />
+                      <button
+                        title="Back to the automatic color"
+                        onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, undefined); setColorPreview(null); }}
+                        className="flex aspect-square w-full cursor-pointer items-center justify-center rounded-full border border-white/30 text-[11px] leading-none text-muted-foreground hover:text-foreground"
+                      >
+                        ↺
+                      </button>
                     </div>
-                  )}
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <div className={`${section} mb-1`}>Width</div>
-                      <div className="flex gap-1">
-                        {WIDTH_OPTIONS.map((w) => (
-                          <button
-                            key={w}
-                            title={`${w}px`}
-                            onClick={() => onSetChannelWidth(contextMenu.logFileId, contextMenu.channelName, w)}
-                            className={`${seg} h-7 ${Math.abs(curWidth - w) < 0.01 ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
-                          >
-                            <div className="w-5 rounded-full bg-foreground/80" style={{ height: w }} />
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <div className={`${section} mb-1`}>Style</div>
-                      <div className="flex gap-1">
-                        {STYLE_OPTIONS.map((s) => {
-                          const active = JSON.stringify(curDash ?? null) === JSON.stringify(s.dash ?? null);
-                          return (
+                    {customColorOpen && (
+                      <div className="mt-2 space-y-2 rounded-md border border-border/60 bg-background/60 p-2">
+                        <div className="grid grid-cols-8 gap-1.5">
+                          {CUSTOM_COLORS.map((c) => (
                             <button
-                              key={s.label}
-                              title={s.label}
-                              onClick={() => onSetChannelDash(contextMenu.logFileId, contextMenu.channelName, s.dash)}
-                              className={`${seg} h-7 ${active ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
-                            >
-                              <svg width="30" height="6" viewBox="0 0 30 6" className="text-foreground/80">
-                                <line x1="1" y1="3" x2="29" y2="3" stroke="currentColor" strokeWidth="1.5" strokeDasharray={s.dash ? s.dash.join(",") : undefined} />
-                              </svg>
-                            </button>
-                          );
-                        })}
+                              key={c}
+                              title={c}
+                              onMouseEnter={() => setColorPreview({ key: cmKey, color: c })}
+                              onMouseLeave={() => setColorPreview(null)}
+                              onClick={() => { onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c); setColorPreview(null); }}
+                              className={`aspect-square w-full cursor-pointer rounded border transition-transform hover:scale-110 ${
+                                cmCh?.color === c ? "border-foreground" : "border-white/10"
+                              }`}
+                              style={{ backgroundColor: c }}
+                            />
+                          ))}
+                        </div>
+                        <HexInput
+                          key={cmKey}
+                          value={cmCh?.color ?? cmColor}
+                          onPreview={(c) => setColorPreview(c ? { key: cmKey, color: c } : null)}
+                          onCommit={(c) => onSetChannelColor(contextMenu.logFileId, contextMenu.channelName, c)}
+                        />
                       </div>
+                    )}
+
+                    {/* The other way to pick a colour, so it belongs with the
+                        swatches — one flat colour, or a gradient driven by a
+                        second channel. */}
+                    <div className="mt-2">
+                      <ColorByEditor
+                        key={cmKey}
+                        ch={cmCh}
+                        pickerLogs={cmLog ? [cmLog] : logs}
+                        selfName={contextMenu.channelName}
+                        onSet={(colorBy, lo, hi, lowColor, highColor) =>
+                          onSetChannelColorBy(contextMenu.logFileId, contextMenu.channelName, colorBy, lo, hi, lowColor, highColor)
+                        }
+                      />
                     </div>
                   </div>
 
                   <div>
-                    <div className={`${section} mb-1 flex items-center justify-between`}>
+                    <div className={`${fieldLabel} mb-1.5 flex items-baseline justify-between`}>
+                      <span>Width</span>
+                      <span className="font-mono text-[11px] text-muted-foreground/70">{curWidth} px</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {WIDTH_OPTIONS.map((w) => (
+                        <button
+                          key={w}
+                          title={`${w}px`}
+                          onClick={() => onSetChannelWidth(contextMenu.logFileId, contextMenu.channelName, w)}
+                          className={`${segBtn} ${Math.abs(curWidth - w) < 0.01 ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
+                        >
+                          <div className="w-7 rounded-full bg-foreground/80" style={{ height: w }} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className={`${fieldLabel} mb-1.5 flex items-baseline justify-between`}>
+                      <span>Style</span>
+                      <span className="text-[11px] text-muted-foreground/70">{styleName}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {STYLE_OPTIONS.map((s) => {
+                        const active = JSON.stringify(curDash ?? null) === JSON.stringify(s.dash ?? null);
+                        return (
+                          <button
+                            key={s.label}
+                            title={s.label}
+                            onClick={() => onSetChannelDash(contextMenu.logFileId, contextMenu.channelName, s.dash)}
+                            className={`${segBtn} ${active ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
+                          >
+                            <svg width="44" height="6" viewBox="0 0 44 6" className="text-foreground/80">
+                              <line x1="1" y1="3" x2="43" y2="3" stroke="currentColor" strokeWidth="1.5" strokeDasharray={s.dash ? s.dash.join(",") : undefined} />
+                            </svg>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className={`${fieldLabel} mb-1.5 flex items-baseline justify-between`}>
                       <span>Opacity</span>
-                      <span className="font-mono normal-case tracking-normal">
+                      <span className="font-mono text-[11px] text-muted-foreground/70">
                         {Math.round(cmOpacity * 100)}%
                       </span>
                     </div>
@@ -1927,27 +2005,16 @@ export function TraceContainer({
                       className="h-1.5 w-full cursor-pointer accent-primary"
                     />
                   </div>
-                  <div>
-                    <ColorByEditor
-                      key={cmKey}
-                      ch={cmCh}
-                      pickerLogs={cmLog ? [cmLog] : logs}
-                      selfName={contextMenu.channelName}
-                      onSet={(colorBy, lo, hi, lowColor, highColor) =>
-                        onSetChannelColorBy(contextMenu.logFileId, contextMenu.channelName, colorBy, lo, hi, lowColor, highColor)
-                      }
-                    />
-                  </div>
 
                 </div>
 
-                {/* ── Axis + stats ───────────────────────────────────────── */}
+                {/* ── Scale, then identity ────────────────────────────────── */}
                 <div className="space-y-4">
-                  <div>
-                    <div className={`${section} mb-1 flex items-center justify-between`}>
-                      <span>Axis{cmDisplayUnit ? ` (${cmDisplayUnit})` : ""}</span>
-                      <span className="font-normal normal-case tracking-normal text-muted-foreground/70">
-                        {hasManualAxis ? "manual" : "auto"}
+                  <div className={cardCls}>
+                    <div className="mb-2 flex items-baseline justify-between gap-2">
+                      <span className={cardTitle}>Axis{cmDisplayUnit ? ` (${cmDisplayUnit})` : ""}</span>
+                      <span className="text-[11px] text-muted-foreground/70">
+                        {hasManualAxis ? "Set by hand" : "Automatic"}
                       </span>
                     </div>
                     <AxisInputs
@@ -1962,7 +2029,7 @@ export function TraceContainer({
                         onSetChannelAxisRange(contextMenu.logFileId, contextMenu.channelName, min, max)
                       }
                     />
-                    <div className="mt-1.5 flex items-center gap-2">
+                    <div className="mt-2 flex items-center gap-2">
                       {cmExtent && (
                         <Button
                           size="sm"
@@ -1996,34 +2063,79 @@ export function TraceContainer({
                           onSetChannelAxisRange(contextMenu.logFileId, contextMenu.channelName, undefined, undefined)
                         }
                       >
-                        Auto
+                        Back to automatic
                       </Button>
-                      {cmExtent && (
-                        <span className="ml-auto font-mono text-[11px] text-muted-foreground">
-                          data {formatValue(cmToDisplay(cmExtent.min))} – {formatValue(cmToDisplay(cmExtent.max))}
-                        </span>
-                      )}
                     </div>
+                    {cmExtent && (
+                      <p className="mt-2 text-[11px] text-muted-foreground/80">
+                        This run reads{" "}
+                        <span className="font-mono text-muted-foreground">
+                          {formatValue(cmToDisplay(cmExtent.min))} – {formatValue(cmToDisplay(cmExtent.max))}
+                        </span>
+                        . Leave a box empty to let the axis follow the data.
+                      </p>
+                    )}
                   </div>
 
+                  {/* Naming and units belong to the channel, not to this trace,
+                      so they change it everywhere. Say so. */}
+                  <div className={cardCls}>
+                    <div className={`${cardTitle} mb-2`}>Channel</div>
+                    <div className="space-y-2">
+                      <label className="block">
+                        <span className={`${fieldLabel} mb-1 block`}>Name</span>
+                        <input
+                          key={cmKey}
+                          defaultValue={cmDisplayName}
+                          placeholder={contextMenu.channelName}
+                          onBlur={(e) => {
+                            const next = e.target.value.trim();
+                            if (next === cmDisplayName) return;
+                            if (next && next !== contextMenu.channelName) {
+                              void setChannelOverride({ vehicleId, channelName: contextMenu.channelName, displayName: next });
+                            } else {
+                              void removeChannelOverride({ vehicleId, channelName: contextMenu.channelName });
+                            }
+                          }}
+                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                          className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
+                        />
+                      </label>
+                      {cmUnitOptions.length > 1 && (
+                        <label className="block">
+                          <span className={`${fieldLabel} mb-1 block`}>Units</span>
+                          <select
+                            value={cmUnitKey}
+                            onChange={(e) => onSetUnit(cmMu, e.target.value)}
+                            className="h-9 w-full cursor-pointer rounded-md border bg-background px-2 text-sm"
+                          >
+                            {cmUnitOptions.map((a) => (
+                              <option key={a.key} value={a.key}>{a.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                      <p className="text-[11px] leading-snug text-muted-foreground/80">
+                        The name and the units apply to this channel on every log for this vehicle.
+                      </p>
+                    </div>
+                    {cmStatus && (
+                      <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs leading-snug text-amber-200">
+                        {statusNote(cmStatus)}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 border-t pt-3">
+              <div className="-mx-4 -mb-4 flex items-center gap-2 rounded-b-xl border-t bg-muted/40 px-4 py-3">
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-destructive hover:text-destructive"
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                   onClick={() => { onRemoveChannel(contextMenu.logFileId, contextMenu.channelName); setContextMenu(null); }}
                 >
                   Remove from trace
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onSetChannelsHidden?.([cmKey], !cmHidden)}
-                >
-                  {cmHidden ? "Show line" : "Hide line"}
                 </Button>
                 <Button size="sm" className="ml-auto" onClick={() => { setContextMenu(null); setCustomColorOpen(false); }}>
                   Done

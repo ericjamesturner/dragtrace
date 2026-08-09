@@ -99,12 +99,6 @@ function valueToColor(t: number): [number, number, number] {
   ];
 }
 
-/** Format a legend value compactly: ≥100→0dp, ≥10→1dp, else 2dp. */
-function fmtLegendVal(v: number): string {
-  const a = Math.abs(v);
-  return a >= 100 ? v.toFixed(0) : a >= 10 ? v.toFixed(1) : v.toFixed(2);
-}
-
 interface LogGroup {
   log: LoadedLog;
   channels: ChannelOnTrace[];
@@ -796,32 +790,8 @@ export function TraceChart({
                 }
                 ctx.restore();
 
-                // Legend bar — only when a single colorBy line is shown.
-                if (colorBySeries.length === 1) {
-                  const lw = 12 * dpr;
-                  const lh = Math.min(u.bbox.height * 0.6, 200 * dpr);
-                  const lx = u.bbox.left + u.bbox.width - lw - 8 * dpr;
-                  const ly = u.bbox.top + (u.bbox.height - lh) / 2;
-                  ctx.save();
-                  for (let k = 0; k < lh; k++) {
-                    const [r, g, b] = colorFor(1 - k / lh);
-                    ctx.fillStyle = `rgb(${r},${g},${b})`;
-                    ctx.fillRect(lx, ly + k, lw, 1.5);
-                  }
-                  ctx.strokeStyle = "rgba(255,255,255,0.15)";
-                  ctx.lineWidth = 1;
-                  ctx.strokeRect(lx, ly, lw, lh);
-                  ctx.fillStyle = "rgba(255,255,255,0.6)";
-                  ctx.font = `${9 * dpr}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-                  ctx.textAlign = "left";
-                  ctx.textBaseline = "top";
-                  ctx.fillText(fmtLegendVal(cMax), lx + lw + 3 * dpr, ly);
-                  ctx.textBaseline = "bottom";
-                  ctx.fillText(fmtLegendVal(cMin), lx + lw + 3 * dpr, ly + lh);
-                  ctx.textBaseline = "middle";
-                  ctx.fillText(meta.colorBy!, lx + lw + 3 * dpr, ly + lh / 2);
-                  ctx.restore();
-                }
+                // No gradient scale is drawn beside the plot. It sat over the
+                // right-hand end of every line, which is where the run ends.
               }
             },
           ],
