@@ -1,12 +1,10 @@
 import { Button } from "@/components/ui/button";
-import { ChevronLeftIcon, PlusIcon, SigmaIcon, FlagIcon, ListIcon } from "lucide-react";
+import { ChevronLeftIcon, PlusIcon, SigmaIcon, FlagIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 
 interface Props {
-  compactLegend: boolean;
   avgOnSelection: boolean;
   showTimeslip: boolean;
-  onToggleCompactLegend: () => void;
   onToggleAvgOnSelection: () => void;
   onToggleTimeslip: () => void;
   onAddTrace: () => void;
@@ -14,7 +12,7 @@ interface Props {
   workspaceMenu?: React.ReactNode;
 }
 
-export function ViewerToolbar({ compactLegend, avgOnSelection, showTimeslip, onToggleCompactLegend, onToggleAvgOnSelection, onToggleTimeslip, onAddTrace, onBack, workspaceMenu }: Props) {
+export function ViewerToolbar({ avgOnSelection, showTimeslip, onToggleAvgOnSelection, onToggleTimeslip, onAddTrace, onBack, workspaceMenu }: Props) {
   return (
     <div className="flex items-center gap-3 border-b px-3 py-2 shrink-0 bg-background">
       <Button variant="ghost" size="sm" onClick={onBack}>
@@ -27,16 +25,6 @@ export function ViewerToolbar({ compactLegend, avgOnSelection, showTimeslip, onT
       <div className="flex-1" />
 
       <div className="flex items-center gap-1.5">
-        <Tip content="Compact the channel legend into each trace's header so it stops covering the plot (the full readout returns while a range is selected)">
-          <Button
-            variant={compactLegend ? "default" : "outline"}
-            size="sm"
-            onClick={onToggleCompactLegend}
-          >
-            <ListIcon className="size-4 mr-1" />
-            Compact
-          </Button>
-        </Tip>
         <Tip content="Show average over a drag-selected range in the channel readout">
           <Button
             variant={avgOnSelection ? "default" : "outline"}

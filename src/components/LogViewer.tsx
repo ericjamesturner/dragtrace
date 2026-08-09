@@ -499,10 +499,8 @@ function LogViewerReady({
   return (
     <div className="flex flex-col h-screen">
       <ViewerToolbar
-        compactLegend={!!config.compactLegend}
         avgOnSelection={config.avgOnSelection !== false}
         showTimeslip={showTimeslip}
-        onToggleCompactLegend={() => dispatch({ type: "setCompactLegend", enabled: !config.compactLegend })}
         onToggleAvgOnSelection={() => dispatch({ type: "toggleAvgOnSelection" })}
         onToggleTimeslip={() => dispatch({ type: "toggleTimeslip" })}
         onAddTrace={() => handleAddTrace()}
@@ -632,8 +630,7 @@ function LogViewerReady({
             dispatch({ type: "toggleZone", traceId, zoneId })
           }
             unitOverrides={units.resolved}
-                  compactLegend={!!config.compactLegend}
-          onSetTraceHeights={(heights) => dispatch({ type: "setTraceHeights", heights })}
+                    onSetTraceHeights={(heights) => dispatch({ type: "setTraceHeights", heights })}
           onToggleTraceCollapsed={(traceId) => dispatch({ type: "toggleTraceCollapsed", traceId })}
           onSetChannelsHidden={(traceId, keys, hidden) =>
             dispatch({ type: "setChannelsHidden", traceId, keys, hidden })
