@@ -380,6 +380,7 @@ interface Props {
   autoOpenChannels?: boolean;
   vehicleId: Id<"vehicles">;
   mathChannels: Doc<"mathChannels">[];
+  mathVersion: number;
   onSetUnit: (quantitySlug: string, unitKey: string) => void;
   onToggleTimeslip?: () => void;
   /** Shared across every trace — the panel is one column down the page. */
@@ -466,6 +467,7 @@ export function TraceContainer({
   autoOpenChannels,
   vehicleId,
   mathChannels,
+  mathVersion,
   onSetUnit,
   onToggleTimeslip,
   legendWidth,
@@ -2038,6 +2040,7 @@ export function TraceContainer({
         onReorder={(channelNames) => onSetChannelOrder?.(channelNames)}
         vehicleId={vehicleId}
         mathChannels={mathChannels}
+        mathVersion={mathVersion}
         unitSystem={unitSystem}
         unitOverrides={unitOverrides}
       />

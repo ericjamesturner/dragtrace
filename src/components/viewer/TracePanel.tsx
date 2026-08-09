@@ -44,6 +44,7 @@ interface Props {
   pickChannelsFor?: string | null;
   vehicleId: Id<"vehicles">;
   mathChannels: Doc<"mathChannels">[];
+  mathVersion: number;
   onSetUnit: (quantitySlug: string, unitKey: string) => void;
   onToggleTraceTimeslip: (traceId: string) => void;
   legendWidth?: number;
@@ -119,6 +120,7 @@ export function TracePanel({
   pickChannelsFor,
   vehicleId,
   mathChannels,
+  mathVersion,
   onSetUnit,
   onToggleTraceTimeslip,
   legendWidth,
@@ -674,6 +676,7 @@ export function TracePanel({
                 autoOpenChannels={pickChannelsFor === trace.id}
                 vehicleId={vehicleId}
                 mathChannels={mathChannels}
+                mathVersion={mathVersion}
                 onSetUnit={onSetUnit}
                 legendWidth={legendWidth}
                 legendCollapsed={legendCollapsed}

@@ -23,6 +23,7 @@ export function MathChannelDialog({
   unitSystem,
   unitOverrides,
   editing,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -31,6 +32,9 @@ export function MathChannelDialog({
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
   editing?: Doc<"mathChannels"> | null;
+  /** Told the name of a channel that's just been written, so whoever opened
+   *  this can put it somewhere — nobody makes one to leave it unplotted. */
+  onCreated?: (channelName: string) => void;
 }) {
   const generate = useAction(api.mathChannels.generate);
   const createChannel = useMutation(api.mathChannels.create);
@@ -95,6 +99,7 @@ export function MathChannelDialog({
           quantitySlug: quantitySlug || undefined,
           prompt: prompt.trim() || undefined,
         });
+        onCreated?.(name.trim());
       }
       reset();
       onOpenChange(false);

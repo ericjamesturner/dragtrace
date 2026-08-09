@@ -80,6 +80,7 @@ export function TraceChannelsDialog({
   onReorder,
   vehicleId,
   mathChannels,
+  mathVersion,
   unitSystem,
   unitOverrides,
 }: {
@@ -92,6 +93,9 @@ export function TraceChannelsDialog({
   onReorder: (channelNames: string[]) => void;
   vehicleId: Id<"vehicles">;
   mathChannels: Doc<"mathChannels">[];
+  /** Bumped when math channels are recomputed into the logs. The parsed defs
+   *  are mutated in place, so nothing else tells this list they changed. */
+  mathVersion?: number;
   unitSystem?: UnitSystem;
   unitOverrides?: UnitOverrides;
 }) {
@@ -112,7 +116,8 @@ export function TraceChannelsDialog({
       }
     }
     return defs;
-  }, [logs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logs, mathVersion]);
 
   const { tree } = useChannelGroups(allDefs, DEFAULT_ECU_TYPE);
   const entries = useMemo(() => flatten(tree), [tree]);
@@ -408,6 +413,7 @@ export function TraceChannelsDialog({
           unitSystem={unitSystem ?? "imperial"}
           unitOverrides={unitOverrides}
           editing={mathDialog.editing}
+          onCreated={(channelName) => onAdd([channelName])}
         />
       )}
     </Dialog>

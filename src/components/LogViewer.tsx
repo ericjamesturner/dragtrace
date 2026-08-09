@@ -633,6 +633,7 @@ function LogViewerReady({
           pickChannelsFor={pickChannelsFor}
           vehicleId={vehicleId}
           mathChannels={math.definitions}
+          mathVersion={math.version}
           onSetUnit={(quantitySlug, unitKey) =>
             units.setVehicleOverrides({ ...units.resolved, [quantitySlug]: unitKey })
           }
