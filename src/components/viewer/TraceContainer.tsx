@@ -36,7 +36,7 @@ const LEGEND_MIN_W = 120;
 const LEGEND_STATS_W = 380;
 
 /** Seconds kept either side of the run when zooming to the pass. */
-const PASS_WINDOW_PAD_S = 1;
+const PASS_WINDOW_PAD_S = 0.5;
 
 const WIDTH_OPTIONS = [1, 1.5, 2.5, 4];
 const STYLE_OPTIONS: { label: string; dash: number[] | undefined }[] = [
@@ -864,8 +864,8 @@ export function TraceContainer({
   const legendInHeader = compactLegend && !avgRange && trace.channels.length > 0;
 
   // The pass itself — the launch through the finish line, taken from the
-  // timeslip band, with a second either side. The stage and the shutdown are
-  // most of a log and none of the run.
+  // timeslip band, with half a second either side. The stage and the shutdown
+  // are most of a log and none of the run.
   const passWindow = useMemo<[number, number] | null>(() => {
     let start = Infinity;
     let end = -Infinity;
@@ -1138,7 +1138,7 @@ export function TraceContainer({
             small targets in a row need the room. */}
         <div className="flex shrink-0 items-center gap-3">
           {passWindow && onZoom && (
-            <Tip content="Zoom to the pass — a second either side of the run">
+            <Tip content="Zoom to the pass — half a second either side of the run">
               <button
                 onClick={(e) => { e.stopPropagation(); onZoom(passWindow[0], passWindow[1]); }}
                 className="cursor-pointer text-muted-foreground hover:text-foreground"
