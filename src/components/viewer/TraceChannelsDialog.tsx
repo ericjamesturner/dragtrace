@@ -5,7 +5,7 @@ import { useChannelGroups } from "@/hooks/useChannelGroups";
 import { DEFAULT_ECU_TYPE } from "@/lib/ecu/registry";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { ArrowLeftIcon, ArrowRightIcon, PencilIcon, PlusIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ChevronUpIcon, ChevronDownIcon, PencilIcon, PlusIcon } from "lucide-react";
 import { MathChannelDialog } from "./MathChannelDialog";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import type { UnitSystem, UnitOverrides } from "@/lib/units";
@@ -172,6 +172,17 @@ export function TraceChannelsDialog({
     } catch {
       return null;
     }
+  };
+
+  /** Nudge one place up or down. Dragging can't be the only way to reorder:
+   *  this list is built on HTML5 drag-and-drop, which touch never fires. */
+  const nudge = (name: string, by: -1 | 1) => {
+    const from = selectedNames.indexOf(name);
+    const to = from + by;
+    if (from < 0 || to < 0 || to >= selectedNames.length) return;
+    const next = [...selectedNames];
+    next.splice(to, 0, next.splice(from, 1)[0]);
+    onReorder(next);
   };
 
   /** Move `name` to sit where `before` is, or to the end when dropped past it. */
@@ -352,7 +363,7 @@ export function TraceChannelsDialog({
               }}
               className="h-80 overflow-y-auto rounded-md border p-1"
             >
-              {selectedNames.map((name) => {
+              {selectedNames.map((name, i) => {
                 const e = byName.get(name);
                 return (
                   <div
@@ -373,6 +384,24 @@ export function TraceChannelsDialog({
                     className={row(pickedSelected.has(name))}
                   >
                     <span className="min-w-0 flex-1 truncate">{e?.displayName ?? name}</span>
+                    <span className="flex shrink-0 items-center">
+                      <button
+                        title="Move up"
+                        disabled={i === 0}
+                        onClick={(ev) => { ev.stopPropagation(); nudge(name, -1); }}
+                        className="rounded p-0.5 text-muted-foreground enabled:cursor-pointer enabled:hover:text-foreground disabled:opacity-20"
+                      >
+                        <ChevronUpIcon className="size-3.5" />
+                      </button>
+                      <button
+                        title="Move down"
+                        disabled={i === selectedNames.length - 1}
+                        onClick={(ev) => { ev.stopPropagation(); nudge(name, 1); }}
+                        className="rounded p-0.5 text-muted-foreground enabled:cursor-pointer enabled:hover:text-foreground disabled:opacity-20"
+                      >
+                        <ChevronDownIcon className="size-3.5" />
+                      </button>
+                    </span>
                     <span className="shrink-0 truncate text-[10px] text-muted-foreground/60">
                       {e?.group}
                     </span>
