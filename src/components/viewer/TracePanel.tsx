@@ -40,6 +40,8 @@ interface Props {
   onRemoveTrace: (traceId: string) => void;
   onReorderTrace: (traceId: string, beforeTraceId: string) => void;
   onSetTraceChannelOrder: (traceId: string, channelNames: string[]) => void;
+  /** Trace whose channel picker should open itself — a freshly made one. */
+  pickChannelsFor?: string | null;
   onToggleTraceTimeslip: (traceId: string) => void;
   legendWidth?: number;
   legendCollapsed?: boolean;
@@ -111,6 +113,7 @@ export function TracePanel({
   onRemoveTrace,
   onReorderTrace,
   onSetTraceChannelOrder,
+  pickChannelsFor,
   onToggleTraceTimeslip,
   legendWidth,
   legendCollapsed,
@@ -662,6 +665,7 @@ export function TracePanel({
                 onRemoveTrace={() => onRemoveTrace(trace.id)}
                 onToggleTimeslip={() => onToggleTraceTimeslip(trace.id)}
                 onSetChannelOrder={(names) => onSetTraceChannelOrder(trace.id, names)}
+                autoOpenChannels={pickChannelsFor === trace.id}
                 legendWidth={legendWidth}
                 legendCollapsed={legendCollapsed}
                 onSetLegendWidth={onSetLegendWidth}

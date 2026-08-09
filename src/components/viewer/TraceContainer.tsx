@@ -374,6 +374,8 @@ interface Props {
   onRemoveTrace: () => void;
   onReorderTrace?: (draggedTraceId: string) => void;
   onSetChannelOrder?: (channelNames: string[]) => void;
+  /** Open the picker as soon as this trace appears — it was just created. */
+  autoOpenChannels?: boolean;
   onToggleTimeslip?: () => void;
   /** Shared across every trace — the panel is one column down the page. */
   legendWidth?: number;
@@ -456,6 +458,7 @@ export function TraceContainer({
   onRemoveTrace,
   onReorderTrace,
   onSetChannelOrder,
+  autoOpenChannels,
   onToggleTimeslip,
   legendWidth,
   legendCollapsed = false,
@@ -512,6 +515,14 @@ export function TraceContainer({
   const [contextMenu, setContextMenu] = useState<ChannelStyleTarget | null>(null);
   const [customColorOpen, setCustomColorOpen] = useState(false);
   const [channelsDialogOpen, setChannelsDialogOpen] = useState(false);
+  // Once per trace: reopening every time the flag happens to be true again
+  // would fight anyone who closed it.
+  const autoOpenedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!autoOpenChannels || autoOpenedRef.current === trace.id) return;
+    autoOpenedRef.current = trace.id;
+    setChannelsDialogOpen(true);
+  }, [autoOpenChannels, trace.id]);
   // Race-start marker line right-click menu.
   const [raceMenu, setRaceMenu] = useState<{ x: number; y: number } | null>(null);
   // Live color preview while hovering a swatch in the context menu.
@@ -1075,7 +1086,7 @@ export function TraceContainer({
         </Tip>
         {trace.channels.length === 0 ? (
           <span className="text-xs text-muted-foreground flex-1 truncate">
-            Drop channels here or click a channel in the sidebar
+            Empty — pick channels from the panel, or drag one in
           </span>
         ) : legendInHeader && !collapsed ? (
           // Compact legend: one scrollable line of channel chips. Same
@@ -1286,14 +1297,14 @@ export function TraceContainer({
           />
         ) : (
           <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-            Drag channels from the sidebar to add them
+            Nothing plotted yet
           </div>
         )}
         </div>
 
         {/* Channels panel — docked to the right of the plot so it never covers
             a trace. Suppressed while the legend lives in the header. */}
-        {trace.channels.length > 0 && !legendInHeader && (
+        {!legendInHeader && (
           <div
             className="relative flex shrink-0 flex-col select-none overflow-hidden border-l border-border bg-black/25"
             style={{ width: legendPanelWidth }}

@@ -484,11 +484,16 @@ function LogViewerReady({
     dispatch({ type: "purgeFile", logFileId: fileId });
   }, [fileIds, setFileIds]);
 
+  // A trace made from the toolbar has nothing on it, and the next thing anyone
+  // wants is to say what goes on it — so the picker opens with it.
+  const [pickChannelsFor, setPickChannelsFor] = useState<string | null>(null);
+
   const handleAddTrace = useCallback(
     (channels?: ChannelOnTrace[]) => {
       const id = `trace-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       dispatch({ type: "addTrace", id, channels });
       setActiveTraceId(id);
+      if (!channels || channels.length === 0) setPickChannelsFor(id);
     },
     []
   );
@@ -646,6 +651,7 @@ function LogViewerReady({
                     onSetTraceHeights={(heights) => dispatch({ type: "setTraceHeights", heights })}
           onToggleTraceCollapsed={(traceId) => dispatch({ type: "toggleTraceCollapsed", traceId })}
           onToggleTraceTimeslip={(traceId) => dispatch({ type: "toggleTraceTimeslip", traceId })}
+          pickChannelsFor={pickChannelsFor}
           onSetTraceChannelOrder={(traceId, channelNames) =>
             dispatch({ type: "setTraceChannelOrder", traceId, channelNames })
           }
