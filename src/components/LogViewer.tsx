@@ -60,6 +60,17 @@ export default function LogViewer({ vehicleId, eventId, fileIds: initialFileIds 
   const { goToFiles } = useNav();
 
   const [fileIds, setFileIds] = useState<Id<"files">[]>(initialFileIds);
+
+  // Navigation can hand us a different set — "Open" on a pass does exactly
+  // that. useState keeps only its first value, so without this the viewer
+  // quietly ignored being told where to go. Keyed by the ids themselves, so
+  // adding or removing a pass in here isn't clobbered by a re-render.
+  const navFileKey = initialFileIds.join(",");
+  useEffect(() => {
+    setFileIds(initialFileIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navFileKey]);
+
   const { logs, loading, errors } = useLoadedLogs(fileIds);
 
   // Load workspaces from DB; active = last used for this vehicle, else most recent
