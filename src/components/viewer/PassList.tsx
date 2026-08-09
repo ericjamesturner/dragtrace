@@ -51,6 +51,8 @@ export function PassList({
   eventId,
   loadedFileIds,
   pendingFileIds,
+  hiddenLogIds,
+  onToggleLogVisibility,
   onAddFile,
   onRemoveFile,
 }: {
@@ -58,6 +60,8 @@ export function PassList({
   eventId: Id<"events">;
   loadedFileIds: Id<"files">[];
   pendingFileIds?: Id<"files">[];
+  hiddenLogIds: string[];
+  onToggleLogVisibility: (fileId: Id<"files">) => void;
   onAddFile: (fileId: Id<"files">) => void;
   onRemoveFile: (fileId: Id<"files">) => void;
 }) {
@@ -232,6 +236,8 @@ export function PassList({
                         active={isLoaded}
                         isOnlyLoaded={isLoaded && loadedFileIds.length === 1}
                         isPending={pending.has(file._id)}
+                        chartHidden={hiddenLogIds.includes(file._id)}
+                        onToggleVisibility={() => onToggleLogVisibility(file._id)}
                         series={trimmedSeries.get(file._id) ?? null}
                         spanSeconds={spanSeconds}
                         onToggle={() =>

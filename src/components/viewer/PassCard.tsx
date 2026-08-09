@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { sparklinePath, type RaceSeries } from "@/lib/preview";
-import { PlusIcon, CheckIcon, LoaderCircleIcon } from "lucide-react";
+import { PlusIcon, CheckIcon, LoaderCircleIcon, EyeIcon, EyeOffIcon } from "lucide-react";
+import { LogNotes } from "./LogNotes";
 
 /**
  * A run's outcome in one word. Only `aborted` is derived today — it needs no
@@ -34,12 +35,15 @@ export interface PassCardProps {
   series?: RaceSeries | null;
   /** Time axis shared by every card, so runs are drawn to one scale. */
   spanSeconds?: number;
+  /** Loaded, but currently not drawn on the chart. */
+  chartHidden?: boolean;
+  onToggleVisibility?: () => void;
   /** Seconds from the window start to the launch, for the start marker. */
   leadInSeconds?: number;
   onToggle: () => void;
 }
 
-export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPending, series, spanSeconds, leadInSeconds = 1, onToggle }: PassCardProps) {
+export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPending, series, spanSeconds, chartHidden, onToggleVisibility, leadInSeconds = 1, onToggle }: PassCardProps) {
   // Three lines tell you what the run did: engine speed, what the driver asked
   // for, and what reached the ground. Each is scaled to its own range, since
   // they share no units — the shapes are the point, not the values.
@@ -95,7 +99,7 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
         isOnlyLoaded ? "cursor-default" : "cursor-pointer"
       } ${
         active ? "border-primary/60 bg-muted/40" : "border-border hover:bg-muted/30"
-      } ${outcome === "aborted" ? "opacity-60" : ""}`}
+      } ${outcome === "aborted" || chartHidden ? "opacity-60" : ""}`}
     >
       <div className="flex items-baseline gap-2">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
@@ -155,6 +159,15 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
         {style && <span className={`shrink-0 font-medium ${style.text}`}>{style.label}</span>}
       </div>
 
+      {/* Notes are written while you're looking at the run, so they live on the
+          loaded pass rather than only on the event dashboard. Clicks stay in the
+          field — the card itself unloads the pass. */}
+      {loaded && (
+        <div onClick={(e) => e.stopPropagation()} className="mt-2">
+          <LogNotes fileId={file._id} />
+        </div>
+      )}
+
       <button
         onClick={(e) => {
           e.stopPropagation();
@@ -176,6 +189,19 @@ export function PassCard({ file, timeslip, loaded, active, isOnlyLoaded, isPendi
       >
         {loaded ? <CheckIcon className="size-3.5" /> : <PlusIcon className="size-3.5" />}
       </button>
+
+      {loaded && onToggleVisibility && !isOnlyLoaded && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleVisibility();
+          }}
+          title={chartHidden ? "Show on chart" : "Hide from chart"}
+          className="absolute right-9 top-2 rounded p-1 text-muted-foreground transition-opacity hover:text-foreground"
+        >
+          {chartHidden ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
+        </button>
+      )}
 
       {isPending && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-lg bg-background/85 backdrop-blur-[1px] ring-2 ring-inset ring-sky-500/60">

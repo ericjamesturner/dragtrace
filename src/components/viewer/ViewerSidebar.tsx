@@ -1,10 +1,10 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useState, useMemo, useCallback, useRef } from "react";
+import { useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { ChannelDef, ChannelStatus, LogSession } from "@/lib/log-types";
 import type { LoadedLog, TraceConfig, ChannelOnTrace } from "@/lib/viewer-types";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
-import { XIcon, PlusIcon, PencilIcon } from "lucide-react";
+import { PlusIcon, PencilIcon, ActivityIcon, TimerIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { PassList } from "./PassList";
 import { MathChannelDialog } from "./MathChannelDialog";
@@ -31,18 +31,17 @@ function filterGroupNode(
   node: GroupNode,
   logDefNames: Set<string>,
   emptySet: Set<string>,
-  hideEmpty: boolean,
   searchLower: string,
 ): GroupNode | null {
   const channels = node.channels.filter((ch) => {
     if (!logDefNames.has(ch.def.name)) return false;
-    if (hideEmpty && emptySet.has(ch.def.name)) return false;
+    if (emptySet.has(ch.def.name)) return false;
     if (searchLower && !matchesSearch(ch, searchLower)) return false;
     return true;
   });
 
   const children = node.children
-    .map((child) => filterGroupNode(child, logDefNames, emptySet, hideEmpty, searchLower))
+    .map((child) => filterGroupNode(child, logDefNames, emptySet, searchLower))
     .filter((c): c is GroupNode => c !== null);
 
   // Math survives being empty: it's where math channels are created, so
@@ -118,9 +117,6 @@ export function ViewerSidebar({
 }: Props) {
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [hideEmpty, setHideEmpty] = useState(true);
-  // Only the run notes hide behind this now — the channel list is shared.
-  const [expandedLogs, setExpandedLogs] = useState<Set<string>>(() => new Set());
   const [tab, setTab] = useState<"channels" | "passes">("channels");
   const [mathDialog, setMathDialog] = useState<{ editing: Doc<"mathChannels"> | null } | null>(null);
   const [isDragTarget, setIsDragTarget] = useState(false);
@@ -212,15 +208,6 @@ export function ViewerSidebar({
     });
   }, []);
 
-  const toggleLog = useCallback((fileId: string) => {
-    setExpandedLogs((prev) => {
-      const next = new Set(prev);
-      if (next.has(fileId)) next.delete(fileId);
-      else next.add(fileId);
-      return next;
-    });
-  }, []);
-
   const handleDragStart = useCallback(
     (e: React.DragEvent, logFileId: Id<"files">, channelName: string) => {
       e.dataTransfer.setData("text/plain", JSON.stringify({ logFileId, channelName }));
@@ -277,9 +264,9 @@ export function ViewerSidebar({
   const tree = useMemo(() => {
     const names = new Set(allDefs.map((d) => d.name));
     return masterTree
-      .map((node) => filterGroupNode(node, names, emptyChannels, hideEmpty, searchLower))
+      .map((node) => filterGroupNode(node, names, emptyChannels, searchLower))
       .filter((n): n is GroupNode => n !== null);
-  }, [masterTree, allDefs, emptyChannels, hideEmpty, searchLower]);
+  }, [masterTree, allDefs, emptyChannels, searchLower]);
 
   return (
     <div
@@ -292,17 +279,23 @@ export function ViewerSidebar({
       onDrop={handleSidebarDrop}
     >
       <div className="flex border-b">
-        {(["channels", "passes"] as const).map((t) => (
+        {(
+          [
+            { id: "channels", label: "Channels", Icon: ActivityIcon },
+            { id: "passes", label: "Passes", Icon: TimerIcon },
+          ] as const
+        ).map(({ id, label, Icon }) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors ${
-              tab === t
+            key={id}
+            onClick={() => setTab(id)}
+            className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors ${
+              tab === id
                 ? "border-b-2 border-primary text-foreground"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {t === "channels" ? "Channels" : "Passes"}
+            <Icon className="size-3.5" />
+            {label}
           </button>
         ))}
       </div>
@@ -313,6 +306,8 @@ export function ViewerSidebar({
           eventId={eventId}
           loadedFileIds={loadedFileIds}
           pendingFileIds={pendingFileIds}
+          hiddenLogIds={hiddenLogIds}
+          onToggleLogVisibility={onToggleLogVisibility}
           onAddFile={onAddFile}
           onRemoveFile={onRemoveFile}
         />
@@ -326,62 +321,7 @@ export function ViewerSidebar({
           onChange={(e) => setSearch(e.target.value)}
           className="w-full px-3 py-1.5 rounded bg-muted border border-border text-sm placeholder:text-muted-foreground outline-none focus:border-primary"
         />
-        <label className="flex items-center gap-2 mt-2 text-xs text-muted-foreground cursor-pointer">
-          <input
-            type="checkbox"
-            checked={hideEmpty}
-            onChange={() => setHideEmpty((v) => !v)}
-            className="rounded"
-          />
-          Hide empty channels
-        </label>
       </div>
-      {/* The loaded passes and what you can do with them: show/hide on the
-          chart, unload, run notes. The channel list below is shared by all of
-          them, so a channel added from it lands on every pass at once. */}
-      <div className="border-b px-2 py-1.5">
-        {logs.map((log) => {
-          const isLogOpen = expandedLogs.has(log.fileId);
-          return (
-            <div key={log.fileId}>
-              <div className="flex items-center gap-1.5 px-1 py-1 rounded hover:bg-muted group">
-                {logs.length > 1 && (
-                  <Tip content={hiddenLogIds.includes(log.fileId) ? "Show on chart" : "Hide from chart"}>
-                    <input
-                      type="checkbox"
-                      checked={!hiddenLogIds.includes(log.fileId)}
-                      onChange={() => onToggleLogVisibility(log.fileId)}
-                      className="rounded shrink-0 cursor-pointer"
-                    />
-                  </Tip>
-                )}
-                <Tip content="Run notes">
-                  <button
-                    onClick={() => toggleLog(log.fileId)}
-                    className="flex items-center gap-1.5 flex-1 min-w-0 text-left text-xs font-semibold cursor-pointer"
-                  >
-                    <span className="text-[9px] w-2.5 opacity-50">{isLogOpen ? "▼" : "▶"}</span>
-                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: log.logColor }} />
-                    <span className="flex-1 truncate">{log.fileName.replace(/\.[^.]+$/, "")}</span>
-                  </button>
-                </Tip>
-                {logs.length > 1 && (
-                  <Tip content="Unload this pass">
-                    <button
-                      onClick={() => onRemoveFile(log.fileId)}
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive cursor-pointer p-0.5 shrink-0"
-                    >
-                      <XIcon className="size-3" />
-                    </button>
-                  </Tip>
-                )}
-              </div>
-              {isLogOpen && <LogNotes fileId={log.fileId} />}
-            </div>
-          );
-        })}
-      </div>
-
       <div className="flex-1 overflow-y-auto p-2">
         {sourceFileId &&
           tree.map((node) => (
@@ -439,88 +379,6 @@ export function ViewerSidebar({
           editing={mathDialog.editing}
         />
       )}
-    </div>
-  );
-}
-
-/** Live-saving notes for a log — same notes as the event dashboard card. */
-function LogNotes({ fileId }: { fileId: Id<"files"> }) {
-  const file = useQuery(api.files.get, { id: fileId });
-  const updateNotes = useMutation(api.files.updateNotes);
-  const [draft, setDraft] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latestRef = useRef<string | null>(null);
-  const focusedRef = useRef(false);
-
-  const flush = useCallback(
-    (value: string) => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-      void updateNotes({ id: fileId, notes: value.trim() || undefined }).finally(
-        () => setPending(false),
-      );
-    },
-    [fileId, updateNotes],
-  );
-
-  const handleChange = (v: string) => {
-    setDraft(v);
-    latestRef.current = v;
-    setPending(true);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => flush(v), 600);
-  };
-
-  // Flush a pending edit if the log/component goes away mid-debounce
-  useEffect(
-    () => () => {
-      if (timerRef.current && latestRef.current !== null) {
-        clearTimeout(timerRef.current);
-        void updateNotes({ id: fileId, notes: latestRef.current.trim() || undefined });
-      }
-    },
-    [fileId, updateNotes],
-  );
-
-  // Once the server catches up (and we're not typing), drop the local draft
-  // so remote edits show live again.
-  const serverNotes = file?.notes ?? "";
-  useEffect(() => {
-    if (!focusedRef.current && draft !== null && !pending && serverNotes === draft.trim()) {
-      setDraft(null);
-    }
-  }, [serverNotes, draft, pending]);
-
-  if (!file) return null;
-  const value = draft ?? serverNotes;
-
-  return (
-    <div className="px-2 mb-1.5">
-      <div className="flex items-center justify-between px-1 pb-0.5">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Run Notes
-        </span>
-        <span className="text-[10px] text-muted-foreground/60">
-          {pending ? "saving…" : ""}
-        </span>
-      </div>
-      <textarea
-        value={value}
-        onChange={(e) => handleChange(e.target.value)}
-        onFocus={() => {
-          focusedRef.current = true;
-        }}
-        onBlur={() => {
-          focusedRef.current = false;
-          if (timerRef.current && latestRef.current !== null) flush(latestRef.current);
-        }}
-        placeholder="Add notes about this run…"
-        rows={value ? Math.min(8, value.split("\n").length + 1) : 2}
-        className="w-full px-2 py-1.5 rounded bg-muted/50 border border-border text-xs leading-relaxed placeholder:text-muted-foreground/60 outline-none focus:border-primary resize-y"
-      />
     </div>
   );
 }
