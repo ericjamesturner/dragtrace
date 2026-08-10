@@ -90,13 +90,13 @@ function loadLayout(): PanelLayout {
         y: typeof p.y === "number" ? p.y : null,
         w: Math.min(MAX_W, Math.max(MIN_W, p.w || 300)),
         h: Math.min(MAX_H, Math.max(MIN_H, p.h || 260)),
-        style: GRID_STYLES.some((s) => s.value === p.style) ? p.style : "mesh",
+        style: GRID_STYLES.some((s) => s.value === p.style) ? p.style : "sheet",
       };
     }
   } catch {
     // ignore
   }
-  return { x: null, y: null, w: 300, h: 260, style: "mesh" };
+  return { x: null, y: null, w: 300, h: 260, style: "sheet" };
 }
 
 interface CornerData {
