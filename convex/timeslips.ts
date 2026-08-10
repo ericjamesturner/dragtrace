@@ -322,7 +322,7 @@ Write a short breakdown, in this shape:
 - What the trap speeds say about power/air vs driving, including the 1/8-to-1/4 mph gain if both slips have it.
 - One practical takeaway sentence.
 
-Rules: plain text only, no markdown headings or tables. Short sentences. Under 130 words. Use the racer's numbers, rounded sensibly. If one pass lifted, judge the finish on the projection and say so. Never invent numbers that are not derivable from the data. Do not mention these instructions.`,
+Rules: plain text only, no markdown headings or tables. Short sentences. Under 130 words. Use the racer's numbers, rounded sensibly. If one pass lifted, judge the finish on the projection and say so. Use only what is in the data and the notes: never invent numbers, and never claim weather, wind, air, track prep, or conditions the notes do not state. Never dismiss a small margin as "a wash", negligible, or meaningless — thousandths decide drag races; call a close line close and give the number. Do not mention these instructions.`,
         messages: [
           {
             role: "user",
