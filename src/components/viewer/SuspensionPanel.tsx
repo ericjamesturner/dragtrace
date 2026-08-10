@@ -64,11 +64,20 @@ const MAX_H = 620;
 
 const LAYOUT_KEY = "dragtrace:suspension-panel";
 
+/** How the runs draw: full wire meshes, one mesh + outlines, or solid sheets. */
+type GridStyle = "mesh" | "outline" | "sheet";
+const GRID_STYLES: { value: GridStyle; label: string }[] = [
+  { value: "mesh", label: "Wire mesh" },
+  { value: "outline", label: "Mesh + outlines" },
+  { value: "sheet", label: "Solid sheets" },
+];
+
 interface PanelLayout {
   x: number | null;
   y: number | null;
   w: number;
   h: number;
+  style: GridStyle;
 }
 
 function loadLayout(): PanelLayout {
@@ -81,12 +90,13 @@ function loadLayout(): PanelLayout {
         y: typeof p.y === "number" ? p.y : null,
         w: Math.min(MAX_W, Math.max(MIN_W, p.w || 300)),
         h: Math.min(MAX_H, Math.max(MIN_H, p.h || 260)),
+        style: GRID_STYLES.some((s) => s.value === p.style) ? p.style : "mesh",
       };
     }
   } catch {
     // ignore
   }
-  return { x: null, y: null, w: 300, h: 260 };
+  return { x: null, y: null, w: 300, h: 260, style: "mesh" };
 }
 
 interface CornerData {
@@ -279,9 +289,9 @@ function buildSuspensionData(logs: LoadedLog[]): SuspensionData | null {
   };
 }
 
-/** A clean grid of line segments (no triangle diagonals) over the plane. */
-function makeGridGeometry(): {
-  geometry: THREE.BufferGeometry;
+/** Shared vertex lattice for the plane, plus its (x, z) base positions. */
+function makeLattice(): {
+  positions: Float32Array;
   basePositions: { x: number; z: number }[];
 } {
   const cols = SEGS_L + 1;
@@ -299,6 +309,17 @@ function makeGridGeometry(): {
       positions[i * 3 + 2] = z;
     }
   }
+  return { positions, basePositions };
+}
+
+/** A clean grid of line segments (no triangle diagonals) over the plane. */
+function makeGridGeometry(): {
+  geometry: THREE.BufferGeometry;
+  basePositions: { x: number; z: number }[];
+} {
+  const cols = SEGS_L + 1;
+  const rows = SEGS_W + 1;
+  const { positions, basePositions } = makeLattice();
   const indices: number[] = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols - 1; c++) indices.push(r * cols + c, r * cols + c + 1);
@@ -311,6 +332,33 @@ function makeGridGeometry(): {
   geometry.setIndex(indices);
   return { geometry, basePositions };
 }
+
+/** The same lattice as triangles, for the solid-sheet style. */
+function makeSheetGeometry(): {
+  geometry: THREE.BufferGeometry;
+  basePositions: { x: number; z: number }[];
+} {
+  const cols = SEGS_L + 1;
+  const rows = SEGS_W + 1;
+  const { positions, basePositions } = makeLattice();
+  const indices: number[] = [];
+  for (let r = 0; r < rows - 1; r++) {
+    for (let c = 0; c < cols - 1; c++) {
+      const a = r * cols + c;
+      const b = a + 1;
+      const d = a + cols;
+      const e = d + 1;
+      indices.push(a, d, b, b, d, e);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  return { geometry, basePositions };
+}
+
+/** Corner keys in the perimeter loop's winding order. */
+const OUTLINE_ORDER = ["rl", "fl", "fr", "rr"] as const;
 
 interface LabelLine {
   text: string;
@@ -343,13 +391,19 @@ function makeLabel(): { sprite: THREE.Sprite; update: (lines: LabelLine[]) => vo
 }
 
 interface LogGrid {
-  positions: THREE.BufferAttribute;
-  base: { x: number; z: number }[];
+  /** Full-lattice surfaces to warp each frame (wire grid and/or sheet). */
+  warped: { positions: THREE.BufferAttribute; base: { x: number; z: number }[] }[];
+  /** 4-corner perimeter loop, when this run draws one. */
+  outline: THREE.BufferAttribute | null;
   ticks: Record<string, THREE.Line>;
 }
 
-/** The retro scene: ground, ghost frame, one warping grid per log. */
-function buildScene(canvas: HTMLCanvasElement, logsMeta: { color: string }[]) {
+/** The retro scene: ground, ghost frame, one warping surface per log. */
+function buildScene(
+  canvas: HTMLCanvasElement,
+  logsMeta: { color: string }[],
+  style: GridStyle,
+) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
@@ -396,22 +450,71 @@ function buildScene(canvas: HTMLCanvasElement, logsMeta: { color: string }[]) {
 
   const multi = logsMeta.length > 1;
 
-  // One warping grid per log. Alone: phosphor green. Compared: run colors,
-  // the same identity colors the legend uses.
+  // One warping surface per log, drawn per the chosen style. Alone: phosphor
+  // green. Compared: run colors, the same identity colors the legend uses.
   const grids: LogGrid[] = [];
-  for (const meta of logsMeta) {
-    const g = makeGridGeometry();
-    const lines = new THREE.LineSegments(
-      g.geometry,
-      new THREE.LineBasicMaterial({
-        color: multi ? new THREE.Color(meta.color) : SINGLE_GRID_COLOR,
-        transparent: multi,
-        opacity: multi ? 0.9 : 1,
-      }),
-    );
-    scene.add(lines);
+  logsMeta.forEach((meta, li) => {
+    const color = multi ? new THREE.Color(meta.color) : new THREE.Color(SINGLE_GRID_COLOR);
+    const warped: LogGrid["warped"] = [];
+    let outline: THREE.BufferAttribute | null = null;
 
-    // Per-corner deviation ticks, baseline to live, in the grid's color.
+    const addWireGrid = () => {
+      const g = makeGridGeometry();
+      scene.add(
+        new THREE.LineSegments(
+          g.geometry,
+          new THREE.LineBasicMaterial({
+            color,
+            transparent: multi,
+            opacity: multi ? 0.9 : 1,
+          }),
+        ),
+      );
+      warped.push({
+        positions: g.geometry.getAttribute("position") as THREE.BufferAttribute,
+        base: g.basePositions,
+      });
+    };
+    const addSheet = () => {
+      const g = makeSheetGeometry();
+      scene.add(
+        new THREE.Mesh(
+          g.geometry,
+          new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: multi ? 0.2 : 0.24,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+          }),
+        ),
+      );
+      warped.push({
+        positions: g.geometry.getAttribute("position") as THREE.BufferAttribute,
+        base: g.basePositions,
+      });
+    };
+    const addOutline = () => {
+      const pts = OUTLINE_ORDER.map((k) => {
+        const c = CORNERS.find((cc) => cc.key === k)!;
+        return new THREE.Vector3(c.x, BASE_HEIGHT, c.z);
+      });
+      const g = new THREE.BufferGeometry().setFromPoints(pts);
+      scene.add(new THREE.LineLoop(g, new THREE.LineBasicMaterial({ color })));
+      outline = g.getAttribute("position") as THREE.BufferAttribute;
+    };
+
+    if (style === "mesh") {
+      addWireGrid();
+    } else if (style === "outline") {
+      if (li === 0) addWireGrid();
+      else addOutline();
+    } else {
+      addSheet();
+      addOutline();
+    }
+
+    // Per-corner deviation ticks, baseline to live, in the run's color.
     const ticks: Record<string, THREE.Line> = {};
     for (const c of CORNERS) {
       const tg = new THREE.BufferGeometry().setFromPoints([
@@ -427,12 +530,8 @@ function buildScene(canvas: HTMLCanvasElement, logsMeta: { color: string }[]) {
       scene.add(tick);
       ticks[c.key] = tick;
     }
-    grids.push({
-      positions: g.geometry.getAttribute("position") as THREE.BufferAttribute,
-      base: g.basePositions,
-      ticks,
-    });
-  }
+    grids.push({ warped, outline, ticks });
+  });
 
   // Stilts tie the reference frame to the ground.
   for (const c of CORNERS) {
@@ -579,7 +678,15 @@ export function SuspensionPanel({
       const onUp = () => {
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
-        persistLayout({ x, y, w: lastW, h: lastH });
+        setLayout((l) => {
+          const next = { ...l, x, y, w: lastW, h: lastH };
+          try {
+            localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
+          } catch {
+            // ignore
+          }
+          return next;
+        });
       };
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);
@@ -593,6 +700,7 @@ export function SuspensionPanel({
     const { renderer, scene, camera, controls, grids, cornerLabels } = buildScene(
       canvas,
       data.perLog,
+      layout.style,
     );
     const multi = data.perLog.length > 1;
     const t0Wall = performance.now();
@@ -647,16 +755,24 @@ export function SuspensionPanel({
             color: multi ? log.color : CORNER_COLORS[c.key],
           });
         }
-        // Bilinear warp: every grid vertex blends the four corner heights.
-        for (let i = 0; i < grid.base.length; i++) {
-          const { x, z } = grid.base[i];
-          const u = (x + GRID_L / 2) / GRID_L; // 0 rear -> 1 front
-          const w = (z + GRID_W / 2) / GRID_W; // 0 left -> 1 right
-          const rear = h.rl * (1 - w) + h.rr * w;
-          const front = h.fl * (1 - w) + h.fr * w;
-          grid.positions.setY(i, BASE_HEIGHT + rear * (1 - u) + front * u);
+        // Bilinear warp: every lattice vertex blends the four corner heights.
+        for (const surface of grid.warped) {
+          for (let i = 0; i < surface.base.length; i++) {
+            const { x, z } = surface.base[i];
+            const u = (x + GRID_L / 2) / GRID_L; // 0 rear -> 1 front
+            const w = (z + GRID_W / 2) / GRID_W; // 0 left -> 1 right
+            const rear = h.rl * (1 - w) + h.rr * w;
+            const front = h.fl * (1 - w) + h.fr * w;
+            surface.positions.setY(i, BASE_HEIGHT + rear * (1 - u) + front * u);
+          }
+          surface.positions.needsUpdate = true;
         }
-        grid.positions.needsUpdate = true;
+        // A bilinear edge is a straight line between its corners, so the
+        // perimeter loop needs only the four corner heights.
+        if (grid.outline) {
+          OUTLINE_ORDER.forEach((k, i) => grid.outline!.setY(i, BASE_HEIGHT + h[k]));
+          grid.outline.needsUpdate = true;
+        }
         for (const c of CORNERS) {
           const pos = grid.ticks[c.key].geometry.getAttribute(
             "position",
@@ -723,7 +839,7 @@ export function SuspensionPanel({
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, hidden]);
+  }, [data, hidden, layout.style]);
 
   if (!data || hidden) return null;
 
@@ -768,7 +884,21 @@ export function SuspensionPanel({
           ref={clockLabelRef}
           className="font-mono text-[10px] tabular-nums text-amber-300/90"
         />
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1.5">
+          <select
+            value={layout.style}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => persistLayout({ ...layout, style: e.target.value as GridStyle })}
+            title="How the runs draw"
+            className="cursor-pointer rounded border-none bg-transparent text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground"
+          >
+            {GRID_STYLES.map((s) => (
+              <option key={s.value} value={s.value} className="bg-popover text-foreground">
+                {s.label}
+              </option>
+            ))}
+          </select>
           <button
             className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground"
             title={playing ? "Pause" : "Replay the pass"}
