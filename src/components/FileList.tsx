@@ -148,6 +148,12 @@ export function FileList({
     goToViewer(vehicleId, eventId, [fileId]);
   }, [goToViewer, vehicleId, eventId]);
 
+  // The compare dialog's "open both logs" — files can span events; the viewer
+  // loads by file id, so this event just hosts the breadcrumb.
+  const handleOpenLogs = useCallback((fileIds: Id<"files">[]) => {
+    goToViewer(vehicleId, eventId, fileIds);
+  }, [goToViewer, vehicleId, eventId]);
+
   // Alignment: collect race timing info from each file's preview
   const [raceTimings, setRaceTimings] = useState<Record<string, RaceTimingInfo | null>>({});
   const raceTimingsRef = useRef(raceTimings);
@@ -408,6 +414,7 @@ export function FileList({
       eventDate: ev?.date ?? "",
       estEt: estimates[f._id]?.et?.value,
       estMph: estimates[f._id]?.mph?.value,
+      notes: f.notes,
     }));
   }, [vehicleSlips, vehicleFiles, vehicleEvents, estimates]);
 
@@ -552,6 +559,7 @@ export function FileList({
                   onSlipStats={handleSlipStats}
                   alignWindow={alignWindow}
                   onOpenViewer={() => handleOpenViewer(file._id)}
+                  onOpenLogs={handleOpenLogs}
                   slipRefs={slipRefs}
                 />
               </div>
@@ -576,6 +584,7 @@ function PassCard({
   onSlipStats,
   alignWindow,
   onOpenViewer,
+  onOpenLogs,
   slipRefs,
 }: {
   file: Doc<"files">;
@@ -590,6 +599,7 @@ function PassCard({
   onSlipStats: (fileId: string, info: FileSlipStats) => void;
   alignWindow?: { preRace: number; postRace: number };
   onOpenViewer: () => void;
+  onOpenLogs: (fileIds: Id<"files">[]) => void;
   slipRefs: CompareSlipRef[];
 }) {
   const url = useQuery(api.files.getUrl, { fileId: file._id });
@@ -1231,6 +1241,7 @@ function PassCard({
         onOpenChange={setShowCompare}
         currentId={firstSlip._id}
         slips={slipRefs}
+        onOpenLogs={onOpenLogs}
       />
     )}
     </>

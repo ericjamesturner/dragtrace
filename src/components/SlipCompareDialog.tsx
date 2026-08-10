@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useAction } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import {
   Dialog,
@@ -15,8 +17,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
 import { ChevronDownIcon } from "lucide-react";
 import { SEGMENTS, segmentTimes } from "@/lib/timeslip-segments";
+
+const FT_PER_SEC_PER_MPH = 5280 / 3600;
 
 /** One slip with enough context to name it outside its own event page. */
 export interface CompareSlipRef {
@@ -30,6 +35,8 @@ export interface CompareSlipRef {
   /** No-lift projections, when the pass lifted and the math had references. */
   estEt?: number;
   estMph?: number;
+  /** The pass note ("Spun down low") — context the analysis should hear. */
+  notes?: string;
 }
 
 interface CompareRow {
@@ -48,6 +55,30 @@ interface CompareRow {
 
 function fmt(v: number | undefined, dp: number, approx?: boolean): string {
   return v !== undefined ? `${approx ? "≈" : ""}${v.toFixed(dp)}` : "—";
+}
+
+/** Flatten one side into what the analysis action wants to hear about. */
+function toAnalysisInput(s: CompareSlipRef) {
+  const t = s.slip;
+  return {
+    name: s.passName,
+    event: s.eventName,
+    date: s.eventDate,
+    notes: s.notes,
+    estEt: s.estEt,
+    estMph: s.estMph,
+    round: s.round,
+    delayBox: t.delayBox,
+    rt: t.rt,
+    sixtyFt: t.sixtyFt,
+    threeThirty: t.threeThirty,
+    eighthEt: t.eighthEt,
+    eighthMph: t.eighthMph,
+    thousandFt: t.thousandFt,
+    et: t.et,
+    mph: t.mph,
+    dialIn: t.dialIn,
+  };
 }
 
 /** Which side takes the line, if either: null on fouls, dashes and dead heats. */
@@ -107,6 +138,7 @@ export function SlipCompareDialog({
   onOpenChange,
   currentId,
   slips,
+  onOpenLogs,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -114,8 +146,15 @@ export function SlipCompareDialog({
   currentId: Id<"timeslips">;
   /** Every slip the car has, current one included. */
   slips: CompareSlipRef[];
+  /** Open the viewer with these files overlaid — the "why" behind the gap. */
+  onOpenLogs: (fileIds: Id<"files">[]) => void;
 }) {
   const [pickedId, setPickedId] = useState<Id<"timeslips"> | null>(null);
+
+  const compareAnalysis = useAction(api.timeslips.compareAnalysis);
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState(false);
 
   const current = slips.find((s) => s.slip._id === currentId);
   const others = useMemo(
@@ -138,6 +177,30 @@ export function SlipCompareDialog({
   }, [others, current]);
 
   const other = others.find((s) => s.slip._id === pickedId) ?? fallback;
+
+  // A new opponent is a new comparison — the old breakdown no longer applies.
+  const otherId = other?.slip._id ?? null;
+  useEffect(() => {
+    setAnalysis(null);
+    setAnalysisError(false);
+  }, [otherId, currentId]);
+
+  const handleAnalyze = async () => {
+    if (!current || !other || analyzing) return;
+    setAnalyzing(true);
+    setAnalysisError(false);
+    try {
+      const text = await compareAnalysis({
+        current: toAnalysisInput(current),
+        other: toAnalysisInput(other),
+      });
+      setAnalysis(text);
+    } catch {
+      setAnalysisError(true);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   // The picker, grouped by event in the order the slips already carry
   // (newest event first, passes in run order).
@@ -168,6 +231,15 @@ export function SlipCompareDialog({
       { label: "1/4", a: a.et, b: b.et, better: "low", dp: 3 },
       { label: "MPH", a: a.mph, b: b.mph, better: "high", dp: 2 },
     ];
+    // Back-half charge: how much the car picked up from the 1/8 lights to
+    // the stripe. A quarter-only number — an eighth slip has one trap.
+    const gainA =
+      a.mph !== undefined && a.eighthMph !== undefined ? a.mph - a.eighthMph : undefined;
+    const gainB =
+      b.mph !== undefined && b.eighthMph !== undefined ? b.mph - b.eighthMph : undefined;
+    if (gainA !== undefined || gainB !== undefined) {
+      all.push({ label: "MPH GAIN", a: gainA, b: gainB, better: "high", dp: 2 });
+    }
     // No-lift projections: a lifted pass shows its ≈ number; a flat pass
     // stands on its real one, so the gap still means something.
     if (current.estEt !== undefined || other.estEt !== undefined) {
@@ -210,6 +282,28 @@ export function SlipCompareDialog({
   const splitStart = rows
     ? rows.length - rows.filter((r) => SEGMENTS.some((s) => s.label === r.label)).length
     : 0;
+
+  // The final margin as distance: how far back the trailing car is when the
+  // leader crosses, at the trailing car's own trap speed. An estimate — the
+  // slips are from different passes, but the speeds barely move.
+  const stripe = useMemo(() => {
+    if (!current || !other) return null;
+    const a = current.slip;
+    const b = other.slip;
+    const at = (fa?: number, fb?: number, ma?: number, mb?: number) => {
+      if (fa === undefined || fb === undefined || fa === fb) return null;
+      const trailMph = fa > fb ? ma : mb;
+      if (trailMph === undefined || trailMph <= 0) return null;
+      const gap = Math.abs(fa - fb);
+      return {
+        gap,
+        mph: trailMph,
+        feet: gap * trailMph * FT_PER_SEC_PER_MPH,
+        lead: fa < fb ? ("a" as const) : ("b" as const),
+      };
+    };
+    return at(a.et, b.et, a.mph, b.mph) ?? at(a.eighthEt, b.eighthEt, a.eighthMph, b.eighthMph);
+  }, [current, other]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -306,6 +400,48 @@ export function SlipCompareDialog({
                 );
               })}
             </div>
+
+            {stripe && (
+              <p className="pt-3 text-center text-[11px] text-foreground/80">
+                {stripe.lead === "a" ? "This pass" : "The other pass"} reaches the
+                stripe ≈{stripe.feet.toFixed(0)} ft ahead
+                <span className="text-muted-foreground">
+                  {" "}
+                  ({stripe.gap.toFixed(3)} s at {stripe.mph.toFixed(0)} mph)
+                </span>
+              </p>
+            )}
+
+            <div className="flex gap-2 pt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                onClick={() => onOpenLogs([current.slip.fileId, other.slip.fileId])}
+              >
+                Open both logs
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                disabled={analyzing}
+                onClick={() => void handleAnalyze()}
+              >
+                {analyzing ? "Analyzing…" : "Analyze"}
+              </Button>
+            </div>
+
+            {analysisError && (
+              <p className="pt-2 font-sans text-[11px] text-red-400">
+                The analysis failed. Try again.
+              </p>
+            )}
+            {analysis && (
+              <div className="mt-3 rounded-md border bg-muted/40 px-3 py-2.5 font-sans text-xs leading-relaxed whitespace-pre-wrap">
+                {analysis}
+              </div>
+            )}
 
             <p className="pt-3 font-sans text-[11px] leading-relaxed text-muted-foreground">
               The middle number is the gap on that line; the arrow points at
