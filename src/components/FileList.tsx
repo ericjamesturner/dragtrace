@@ -46,8 +46,29 @@ function formatFileSize(bytes: number): string {
 const LOW_METRICS = ["rt", "sixtyFt", "threeThirty", "eighthEt", "thousandFt", "et"] as const;
 /** Where higher is faster. */
 const HIGH_METRICS = ["eighthMph", "mph"] as const;
+/** Marker-to-marker splits derived from the slip's cumulative clocks. */
+const SEGMENTS = [
+  { key: "seg60_330", label: "60-330", from: "sixtyFt", to: "threeThirty" },
+  { key: "seg330_660", label: "330-660", from: "threeThirty", to: "eighthEt" },
+  { key: "seg660_1000", label: "660-1000", from: "eighthEt", to: "thousandFt" },
+  { key: "seg1000_1320", label: "1000-1320", from: "thousandFt", to: "et" },
+] as const;
+type SegmentKey = (typeof SEGMENTS)[number]["key"];
 type MetricKey = (typeof LOW_METRICS)[number] | (typeof HIGH_METRICS)[number];
-type MetricBests = Partial<Record<MetricKey, number>>;
+type MetricBests = Partial<Record<MetricKey | SegmentKey, number>>;
+
+/** Each segment time a slip's clocks can support, rounded to slip precision so
+ *  equal splits compare equal for the best-of-event highlight. */
+function segmentTimes(ts: Doc<"timeslips">): Partial<Record<SegmentKey, number>> {
+  const out: Partial<Record<SegmentKey, number>> = {};
+  for (const s of SEGMENTS) {
+    const from = ts[s.from];
+    const to = ts[s.to];
+    if (from === undefined || to === undefined || from <= 0 || to <= from) continue;
+    out[s.key] = parseFloat((to - from).toFixed(3));
+  }
+  return out;
+}
 
 /** One flat pass's contribution to a ratio: its finish clock, the earlier
  *  split it is divided by, and the ratio those two make. */
@@ -385,7 +406,8 @@ export function FileList({
     if (stats.length < 2) return {};
     const out: MetricBests = {};
     for (const [, v] of stats) {
-      for (const k of LOW_METRICS) {
+      // Segments are times too — lower is quicker, same as the clocks.
+      for (const k of [...LOW_METRICS, ...SEGMENTS.map((s) => s.key)]) {
         const val = v.metrics[k];
         if (val !== undefined && (out[k] === undefined || val < out[k])) out[k] = val;
       }
@@ -587,6 +609,13 @@ function PassCard({
         const val = t[k];
         if (val === undefined) continue;
         if (metrics[k] === undefined || val > metrics[k]) metrics[k] = val;
+      }
+      const segs = segmentTimes(t);
+      for (const s of SEGMENTS) {
+        const val = segs[s.key];
+        if (val === undefined) continue;
+        const cur = metrics[s.key];
+        if (cur === undefined || val < cur) metrics[s.key] = val;
       }
     }
     onSlipStats(file._id, {
@@ -1314,6 +1343,11 @@ function SlipLines({
   const bestClass = (k: MetricKey) =>
     ts[k] !== undefined && ts[k] === bests[k] ? "text-green-400" : undefined;
 
+  // Marker-to-marker splits, derived from the cumulative clocks above.
+  const segs = segmentTimes(ts);
+  const segBestClass = (k: SegmentKey) =>
+    segs[k] !== undefined && segs[k] === bests[k] ? "text-green-400" : undefined;
+
   // Every line always renders — empty shows as "—" — so the slips line up
   // row for row across the whole gallery.
   return (
@@ -1353,6 +1387,20 @@ function SlipLines({
         valueClassName={breakout ? "text-red-400" : bestClass("et")}
       />
       <TimeslipLine label="MPH" value={ts.mph} bold valueClassName={bestClass("mph")} />
+
+      <Separator className="my-1.5" />
+
+      {/* Marker-to-marker splits. Always all four rows, so the gallery stays
+          aligned; an eighth-mile slip simply dashes the back half. */}
+      {SEGMENTS.map((s) => (
+        <TimeslipLine
+          key={s.key}
+          label={s.label}
+          // Always 3dp so the splits line up down the column.
+          value={segs[s.key]?.toFixed(3)}
+          valueClassName={segBestClass(s.key)}
+        />
+      ))}
     </div>
   );
 }
