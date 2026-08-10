@@ -9,6 +9,7 @@ import { ScatterContainer } from "./ScatterContainer";
 import { ScatterConfigDialog } from "./ScatterConfigDialog";
 import { HeatmapContainer } from "./HeatmapContainer";
 import { HeatmapConfigDialog } from "./HeatmapConfigDialog";
+import { SuspensionPanel } from "./SuspensionPanel";
 import { OverviewBar } from "./OverviewBar";
 import { PlusIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
@@ -539,7 +540,7 @@ export function TracePanel({
     : undefined;
 
   return (
-    <div ref={containerRef} className="flex flex-col flex-1 min-h-0 min-w-0">
+    <div ref={containerRef} className="relative flex flex-col flex-1 min-h-0 min-w-0">
       {/* Tab bar */}
       <div className="flex items-center border-b bg-muted/30 px-2 shrink-0">
         {pages.map((page) => {
@@ -809,6 +810,10 @@ export function TracePanel({
           </>
         )}
       </div>
+
+      {/* The little truck that moves like the pass did — only shows itself
+          when a loaded log carries all four shock-travel channels. */}
+      <SuspensionPanel logs={logs} offsets={offsets} cursorTime={effectiveCursorTime} />
 
       {/* Overview minimap (timeslip strip also renders here) */}
       <OverviewBar
