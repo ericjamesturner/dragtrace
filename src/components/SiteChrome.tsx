@@ -10,29 +10,47 @@ const CTA =
 export function SiteHeader({
   onHome,
   onSignIn,
+  links,
 }: {
   onHome: () => void;
   onSignIn: (flow: "signIn" | "signUp") => void;
+  /** In-page anchors, shown on the landing page so you can jump to a section. */
+  links?: readonly { label: string; href: string }[];
 }) {
   return (
-    <header className="mx-auto flex max-w-6xl items-center gap-4 px-6 py-5">
-      <button
-        onClick={onHome}
-        className="text-base font-semibold tracking-tight transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-      >
-        DragTrace
-      </button>
-      <span className="ml-auto flex items-center gap-2">
+    <header className="sticky top-0 z-40 border-b border-white/10 bg-[#08090a]/85 backdrop-blur">
+      <div className="mx-auto flex max-w-6xl items-center gap-4 px-6 py-4">
         <button
-          onClick={() => onSignIn("signIn")}
-          className="rounded-md px-3 py-2 text-base text-white/70 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+          onClick={onHome}
+          className="text-base font-semibold tracking-tight transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
         >
-          Sign in
+          DragTrace
         </button>
-        <button onClick={() => onSignIn("signUp")} className={`${CTA} px-4 py-2 text-sm`}>
-          Get started
-        </button>
-      </span>
+        {links && (
+          <nav className="ml-6 hidden items-center gap-1 md:flex">
+            {links.map((l) => (
+              <a
+                key={l.href}
+                href={l.href}
+                className="rounded-md px-3 py-2 text-base text-white/70 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+              >
+                {l.label}
+              </a>
+            ))}
+          </nav>
+        )}
+        <span className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => onSignIn("signIn")}
+            className="rounded-md px-3 py-2 text-base text-white/70 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+          >
+            Sign in
+          </button>
+          <button onClick={() => onSignIn("signUp")} className={`${CTA} px-4 py-2 text-sm`}>
+            Get started
+          </button>
+        </span>
+      </div>
     </header>
   );
 }

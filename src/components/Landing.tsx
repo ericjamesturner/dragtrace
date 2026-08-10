@@ -63,6 +63,14 @@ const STEPS = [
   },
 ] as const;
 
+/** In-page anchors for the header, so the page can be skimmed out of order. */
+const NAV = [
+  { label: "How it works", href: "#how-it-works" },
+  { label: "What you get", href: "#features" },
+  { label: "Questions", href: "#questions" },
+  { label: "Pricing", href: "#pricing" },
+] as const;
+
 const SECTIONS = [
   {
     eyebrow: "Saved charts",
@@ -88,6 +96,12 @@ const SECTIONS = [
     body: "Every car, every race, every pass, kept together. Your quickest ET shows on each race, so you can find the run you want months later.",
     visual: "season",
   },
+  {
+    eyebrow: "Online",
+    title: "Your logs are online, not on one laptop",
+    body: "Every pass you upload is stored online. Open it on your phone in the trailer, on the shop computer next week, or at home over the winter. If your laptop dies, your logs are still there.",
+    visual: "everywhere",
+  },
 ] as const;
 
 export function Landing({
@@ -105,6 +119,7 @@ export function Landing({
       <SiteHeader
         onHome={() => window.scrollTo({ top: 0, behavior: "smooth" })}
         onSignIn={onSignIn}
+        links={NAV}
       />
 
       {/* ─────────── Hero ─────────── */}
@@ -117,13 +132,9 @@ export function Landing({
             The datalog viewer that has your back.
           </h1>
           <p className="mt-6 max-w-2xl text-xl leading-relaxed text-white/75">
-            Upload the log from your Haltech. DragTrace shows you the run with
-            your 60-foot, eighth and quarter marked on the chart, and tells you if
-            anything looked wrong.
-          </p>
-          <p className="mt-3 max-w-2xl text-xl leading-relaxed text-white/75">
-            You set up your charts once for each car. After that they open the
-            same way every time, so you are not rebuilding them at the track.
+            Upload the log from your Haltech. Your charts open already set up,
+            with your 60-foot, eighth and quarter marked on the run — and
+            DragTrace tells you if anything looked wrong.
           </p>
           <div className="mt-9 flex flex-wrap items-center gap-5">
             <button onClick={() => onSignIn("signUp")} className={cta}>
@@ -139,19 +150,42 @@ export function Landing({
         <div className="motion-safe:animate-[fadeUp_0.7s_0.12s_ease-out_both]">
           <PassMockup />
         </div>
-        <p className="mt-5 max-w-3xl text-base text-white/55">
-          One pass, launch to finish line. The white line is the launch. The
-          coloured bar is your timeslip. The check at the top means DragTrace went
-          through the run and found nothing wrong.
-        </p>
+        {/* A legend, not a paragraph — three things to match up with the picture. */}
+        <ul className="mt-5 flex flex-wrap gap-x-8 gap-y-2 text-base text-white/60">
+          <li className="flex items-center gap-2.5">
+            <span aria-hidden className="h-4 w-px shrink-0 bg-white/80" />
+            White line — the launch
+          </li>
+          <li className="flex items-center gap-2.5">
+            <span aria-hidden className="flex shrink-0 overflow-hidden rounded-[2px]">
+              {MARKS.map((m) => (
+                <span
+                  key={m.mark}
+                  className="h-2.5 w-2.5"
+                  style={{ backgroundColor: m.color }}
+                />
+              ))}
+            </span>
+            Coloured bar — your timeslip
+          </li>
+          <li className="flex items-center gap-2.5">
+            <span
+              aria-hidden
+              className="flex size-4 shrink-0 items-center justify-center rounded-full bg-[#22c55e] text-[10px] font-bold text-black"
+            >
+              ✓
+            </span>
+            Green check — DragTrace found nothing wrong
+          </li>
+        </ul>
       </section>
 
       {/* ─────────── How it works ─────────── */}
-      <section className="mx-auto max-w-6xl px-6 py-20">
+      <section id="how-it-works" className="mx-auto max-w-6xl scroll-mt-20 px-6 py-16">
         <h2 className="text-[clamp(1.7rem,3.4vw,2.2rem)] font-semibold tracking-[-0.02em]">
           How it works
         </h2>
-        <ol className="mt-10 grid gap-8 md:grid-cols-3 md:gap-10">
+        <ol className="mt-8 grid gap-8 md:grid-cols-3 md:gap-10">
           {STEPS.map((s) => (
             <li key={s.n}>
               <span className="font-mono text-sm text-white/40 tabular-nums">
@@ -165,11 +199,14 @@ export function Landing({
       </section>
 
       {/* ─────────── Features ─────────── */}
-      <div className="mx-auto max-w-6xl px-6">
+      <div id="features" className="mx-auto max-w-6xl scroll-mt-20 px-6 pt-4">
+        <h2 className="border-t border-white/12 pt-16 text-[clamp(1.7rem,3.4vw,2.2rem)] font-semibold tracking-[-0.02em]">
+          What you get
+        </h2>
         {SECTIONS.map((s) => (
           <section
             key={s.title}
-            className="grid items-center gap-10 border-t border-white/12 py-20 first:border-t-0 md:py-24 lg:grid-cols-[1fr_19rem] lg:gap-14"
+            className="grid items-center gap-10 border-t border-white/12 py-14 first-of-type:border-t-0 first-of-type:pt-10 md:py-16 lg:grid-cols-[1fr_19rem] lg:gap-14"
           >
             <div>
               <p className="font-mono text-xs uppercase tracking-[0.2em] text-white/45">
@@ -187,30 +224,13 @@ export function Landing({
         ))}
       </div>
 
-      {/* ─────────── Everywhere ─────────── */}
-      <section className="border-t border-white/12">
-        <div className="mx-auto max-w-6xl px-6 py-20 md:py-24">
-          <h2 className="max-w-3xl text-[clamp(1.8rem,4vw,2.5rem)] font-semibold leading-tight tracking-[-0.02em]">
-            Your logs are online, not on one laptop
-          </h2>
-          <p className="mt-5 max-w-2xl text-xl leading-relaxed text-white/75">
-            Every log you upload is stored online. Open it on your phone in the
-            trailer, on the shop computer next week, or at home over the winter.
-            Same account, same charts, nothing to copy between machines.
-          </p>
-          <p className="mt-4 max-w-2xl text-xl leading-relaxed text-white/75">
-            If your laptop dies or gets stolen, your logs are still there.
-          </p>
-        </div>
-      </section>
-
       {/* ─────────── Reassurance ─────────── */}
-      <section className="border-t border-white/12">
-        <div className="mx-auto max-w-6xl px-6 py-20">
+      <section id="questions" className="scroll-mt-20 border-t border-white/12">
+        <div className="mx-auto max-w-6xl px-6 py-16">
           <h2 className="text-[clamp(1.7rem,3.4vw,2.2rem)] font-semibold tracking-[-0.02em]">
             Questions
           </h2>
-          <div className="mt-10 grid gap-10 md:grid-cols-3">
+          <div className="mt-8 grid gap-10 md:grid-cols-3">
             {[
               {
                 q: "I am not good with computers.",
@@ -235,8 +255,8 @@ export function Landing({
       </section>
 
       {/* ─────────── The stripe: price ─────────── */}
-      <section className="border-t border-white/12">
-        <div className="mx-auto max-w-6xl px-6 py-24 md:py-28">
+      <section id="pricing" className="scroll-mt-20 border-t border-white/12">
+        <div className="mx-auto max-w-6xl px-6 py-20 md:py-24">
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-white/45">
             Pricing
           </p>
@@ -264,6 +284,7 @@ export function Landing({
       <SiteFooter onLegal={onLegal} />
 
       <style>{`
+        html { scroll-behavior: smooth; }
         @keyframes fadeUp {
           from { opacity: 0; transform: translateY(12px); }
           to   { opacity: 1; transform: none; }
@@ -552,6 +573,31 @@ function SectionVisual({ kind }: { kind: string }) {
                 {r.tag}
               </span>
               <span className="font-mono tabular-nums text-white/90">{r.et}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (kind === "everywhere") {
+    return (
+      <div className={CARD}>
+        <p className={CAPTION}>Same account, same charts</p>
+        <div className="mt-2 space-y-1.5">
+          {[
+            { where: "Phone", when: "in the trailer" },
+            { where: "Shop computer", when: "next week" },
+            { where: "Home", when: "over the winter" },
+          ].map((p) => (
+            <div
+              key={p.where}
+              className="flex items-baseline gap-2 rounded-md border border-white/10 px-2 py-1.5"
+            >
+              <p className="min-w-0 flex-1 truncate text-sm text-white/85">
+                {p.where}
+              </p>
+              <p className="font-mono text-[10px] text-white/40">{p.when}</p>
             </div>
           ))}
         </div>
