@@ -146,4 +146,27 @@ export default defineSchema({
     dialIn: v.optional(v.number()),
     createdAt: v.number(),
   }).index("by_file", ["fileId"]),
+
+  /**
+   * One row per user once they reach checkout. Stripe is the source of truth —
+   * this is a local cache kept current by the webhook, so a query never has to
+   * call Stripe to decide whether someone is paid up.
+   *
+   * `compedUntil` is the escape hatch for accounts we let in without paying
+   * (our own, early testers). It is checked before Stripe status.
+   */
+  subscriptions: defineTable({
+    userId: v.id("users"),
+    stripeCustomerId: v.optional(v.string()),
+    stripeSubscriptionId: v.optional(v.string()),
+    // trialing | active | past_due | canceled | incomplete | incomplete_expired | unpaid
+    status: v.optional(v.string()),
+    // Seconds since epoch, straight from Stripe.
+    currentPeriodEnd: v.optional(v.number()),
+    cancelAtPeriodEnd: v.optional(v.boolean()),
+    compedUntil: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_customer", ["stripeCustomerId"]),
 });
