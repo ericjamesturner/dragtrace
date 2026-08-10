@@ -4,32 +4,50 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { LoadedLog } from "@/lib/viewer-types";
 import { PauseIcon, PlayIcon, XIcon } from "lucide-react";
+import { canonicalAlternate, getQuantity } from "@/lib/ecu/quantities";
 
 /**
- * A little 3D truck that moves the way the car did: each corner rides its
- * shock-travel channel, so scrubbing the charts (or pressing play) shows the
- * launch squat, the front-end rise and the side-to-side rock as motion
- * instead of four separate lines.
+ * The chassis as an old-school wireframe grid, seen from the back: each
+ * corner of a glowing plane rides its shock-travel channel, warping the mesh
+ * the way the body moved — launch squat, front rise, side-to-side rock, and
+ * corner-to-corner twist a rigid model can't show. A dim ghost grid holds the
+ * staged ride height so every deviation reads against it.
  *
- * Geometry is stylized and the travel is auto-scaled to readable motion —
- * the *shape* of the motion is real, the amplitude is exaggerated.
+ * Motion is TRUE TO SCALE when the shock channels carry a known length unit:
+ * travel converts to real inches and maps through the grid's proportions
+ * (its length standing in for a ~112" wheelbase). Only when the channels
+ * carry no known unit does it fall back to auto-scaling, and the footer says
+ * which one you're looking at.
  *
- * The card drags by its header and resizes from the corner grip; both stick
- * in localStorage.
+ * The card drags by its header, resizes from the corner grip (both stick in
+ * localStorage), orbits by dragging the scene, and can replay the pass.
  */
 
 const CORNERS = [
-  { key: "fl", channel: "Shock Travel Front Left", x: 1.45, z: -0.85 },
-  { key: "fr", channel: "Shock Travel Front Right", x: 1.45, z: 0.85 },
-  { key: "rl", channel: "Shock Travel Rear Left", x: -1.35, z: -0.85 },
-  { key: "rr", channel: "Shock Travel Rear Right", x: -1.35, z: 0.85 },
+  { key: "fl", label: "FL", channel: "Shock Travel Front Left", x: 1.4, z: -0.85 },
+  { key: "fr", label: "FR", channel: "Shock Travel Front Right", x: 1.4, z: 0.85 },
+  { key: "rl", label: "RL", channel: "Shock Travel Rear Left", x: -1.4, z: -0.85 },
+  { key: "rr", label: "RR", channel: "Shock Travel Rear Right", x: -1.4, z: 0.85 },
 ] as const;
 
-/** Biggest visual corner deflection, in scene units. */
+/** Chart colors: left channels red, right channels blue — same as the traces. */
+const CORNER_COLORS: Record<string, string> = {
+  fl: "#f87171",
+  fr: "#60a5fa",
+  rl: "#f87171",
+  rr: "#60a5fa",
+};
+
+/** Fallback only: biggest visual corner deflection when units are unknown. */
 const MAX_DEFLECT = 0.45;
-const RIDE_HEIGHT = 0.62;
-const WHEEL_R_FRONT = 0.38;
-const WHEEL_R_REAR = 0.5;
+/** The grid's 2.8-unit length stands in for a ~112" real wheelbase. */
+const UNITS_PER_INCH = 2.8 / 112;
+const BASE_HEIGHT = 0.55;
+
+const GRID_L = 2.8; // x, rear -> front
+const GRID_W = 1.7; // z, left -> right
+const SEGS_L = 16;
+const SEGS_W = 10;
 
 /** Header + footer chrome around the canvas, px. */
 const CHROME_H = 62;
@@ -77,6 +95,10 @@ interface SuspensionData {
   corners: Record<string, CornerData>;
   /** Travel units per scene unit — shared so corners stay comparable. */
   scale: number;
+  /** Inches per canonical travel unit, when the unit is known. */
+  inchesPerCanon: number | null;
+  /** Vertical drawing gain — labels stay real inches, geometry draws ×gain. */
+  gain: number;
   playStart: number;
   playEnd: number;
   raceStart: number;
@@ -137,12 +159,35 @@ function buildSuspensionData(logs: LoadedLog[]): SuspensionData | null {
     }
     if (Object.keys(corners).length < 4 || maxDelta === 0) continue;
 
+    // Real units when the channel carries a length quantity that can speak
+    // inches. Deltas are linear in the same raw integer, so a delta converts
+    // by the ratio of the alternates' scales; offsets cancel.
+    let scale = maxDelta / MAX_DEFLECT;
+    let inchesPerCanon: number | null = null;
+    let gain = 1;
+    const slug = log.parsed.channelDefs.find(
+      (d) => d.name === CORNERS[0].channel,
+    )?.quantitySlug;
+    const inchAlt = getQuantity(slug)?.alternates.find((a) => a.key === "inches");
+    const canonAlt = canonicalAlternate(slug);
+    if (inchAlt && canonAlt && canonAlt.scale > 0) {
+      inchesPerCanon = inchAlt.scale / canonAlt.scale;
+      // An inch is real-scale tiny on screen, so vertical geometry draws at a
+      // stated gain — a clean number sized so the pass's biggest excursion
+      // reads clearly. The corner labels always print the real inches.
+      const maxInches = maxDelta * inchesPerCanon;
+      gain = Math.min(8, Math.max(1, Math.round(0.3 / (maxInches * UNITS_PER_INCH))));
+      scale = 1 / (inchesPerCanon * UNITS_PER_INCH * gain);
+    }
+
     return {
       fileId: log.fileId,
       fileName: log.fileName.replace(/\.[^.]+$/, ""),
       timestamps: ts,
       corners,
-      scale: maxDelta / MAX_DEFLECT,
+      scale,
+      inchesPerCanon,
+      gain,
       playStart: Math.max(ts[0], t0 - 1),
       playEnd: ts[ts.length - 1],
       raceStart: t0,
@@ -151,31 +196,64 @@ function buildSuspensionData(logs: LoadedLog[]): SuspensionData | null {
   return null;
 }
 
-/** One wheel: tire cylinder + lighter rim disc, sitting on the ground. */
-function makeWheel(rear: boolean): THREE.Group {
-  const r = rear ? WHEEL_R_REAR : WHEEL_R_FRONT;
-  const w = rear ? 0.46 : 0.24;
-  const g = new THREE.Group();
-  const tire = new THREE.Mesh(
-    new THREE.CylinderGeometry(r, r, w, 28),
-    new THREE.MeshStandardMaterial({ color: 0x141416, roughness: 0.92 }),
-  );
-  g.add(tire);
-  const rim = new THREE.Mesh(
-    new THREE.CylinderGeometry(r * 0.52, r * 0.52, w + 0.02, 20),
-    new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 0.3, metalness: 0.6 }),
-  );
-  g.add(rim);
-  const hub = new THREE.Mesh(
-    new THREE.CylinderGeometry(r * 0.16, r * 0.16, w + 0.06, 12),
-    new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.4 }),
-  );
-  g.add(hub);
-  g.rotation.x = Math.PI / 2;
-  return g;
+/** A clean grid of line segments (no triangle diagonals) over the plane. */
+function makeGridGeometry(): {
+  geometry: THREE.BufferGeometry;
+  basePositions: { x: number; z: number }[];
+} {
+  const cols = SEGS_L + 1;
+  const rows = SEGS_W + 1;
+  const basePositions: { x: number; z: number }[] = [];
+  const positions = new Float32Array(cols * rows * 3);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const i = r * cols + c;
+      const x = -GRID_L / 2 + (GRID_L * c) / SEGS_L;
+      const z = -GRID_W / 2 + (GRID_W * r) / SEGS_W;
+      basePositions.push({ x, z });
+      positions[i * 3] = x;
+      positions[i * 3 + 1] = 0;
+      positions[i * 3 + 2] = z;
+    }
+  }
+  const indices: number[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols - 1; c++) indices.push(r * cols + c, r * cols + c + 1);
+  }
+  for (let c = 0; c < cols; c++) {
+    for (let r = 0; r < rows - 1; r++) indices.push(r * cols + c, (r + 1) * cols + c);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  return { geometry, basePositions };
 }
 
-/** The scene: ground, a boxy drag truck, wheels, telescoping shocks. */
+/** Canvas-backed text sprite with a cheap redraw hook. */
+function makeLabel(color: string): { sprite: THREE.Sprite; update: (text: string) => void } {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.anisotropy = 2;
+  const update = (text: string) => {
+    ctx.clearRect(0, 0, 256, 128);
+    ctx.font = "bold 46px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.textAlign = "center";
+    ctx.fillStyle = color;
+    const lines = text.split("\n");
+    lines.forEach((ln, i) => ctx.fillText(ln, 128, 54 + i * 54));
+    tex.needsUpdate = true;
+  };
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }),
+  );
+  sprite.scale.set(0.52, 0.26, 1);
+  return { sprite, update };
+}
+
+/** The retro scene: ground, ghost grid at ride height, live warping grid. */
 function buildScene(canvas: HTMLCanvasElement) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -183,173 +261,108 @@ function buildScene(canvas: HTMLCanvasElement) {
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(
-    32,
+    36,
     canvas.clientWidth / canvas.clientHeight,
     0.1,
     100,
   );
-  camera.position.set(4.8, 2.2, 5.6);
-  camera.lookAt(0, 0.55, 0);
+  // From the back and low, so vertical motion reads against the horizon.
+  camera.position.set(-4.4, 1.35, 0.9);
+  camera.lookAt(0, BASE_HEIGHT, 0);
 
-  // Orbit: drag the scene to walk around the truck, scroll to zoom.
   const controls = new OrbitControls(camera, canvas);
-  controls.target.set(0, 0.55, 0);
+  controls.target.set(0, BASE_HEIGHT, 0);
   controls.enablePan = false;
   controls.enableDamping = true;
   controls.dampingFactor = 0.12;
-  controls.minDistance = 3.5;
-  controls.maxDistance = 13;
+  controls.minDistance = 2.5;
+  controls.maxDistance = 12;
   // Keep the camera above the deck — under-floor views read as a glitch.
   controls.maxPolarAngle = Math.PI / 2 - 0.04;
   controls.update();
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-  sun.position.set(3, 6, 4);
-  scene.add(sun);
-  const fill = new THREE.DirectionalLight(0x8899cc, 0.35);
-  fill.position.set(-4, 3, -3);
-  scene.add(fill);
+  // Wireframes don't need light, but sprites render nicer with a little.
+  scene.add(new THREE.AmbientLight(0xffffff, 1));
 
-  const grid = new THREE.GridHelper(14, 28, 0x2a2a2e, 0x1c1c1f);
-  scene.add(grid);
-  // Center groove — the racing line under the truck.
-  const stripe = new THREE.Mesh(
-    new THREE.PlaneGeometry(14, 2.6),
-    new THREE.MeshStandardMaterial({ color: 0x121214, roughness: 1 }),
+  const ground = new THREE.GridHelper(14, 28, 0x232327, 0x18181b);
+  scene.add(ground);
+
+  // Staged ride height, as a crisp static reference frame: the rectangle
+  // outline the live grid left behind when the car moved.
+  const baselineRect = [
+    new THREE.Vector3(-GRID_L / 2, BASE_HEIGHT, -GRID_W / 2),
+    new THREE.Vector3(GRID_L / 2, BASE_HEIGHT, -GRID_W / 2),
+    new THREE.Vector3(GRID_L / 2, BASE_HEIGHT, GRID_W / 2),
+    new THREE.Vector3(-GRID_L / 2, BASE_HEIGHT, GRID_W / 2),
+  ];
+  const baseline = new THREE.LineLoop(
+    new THREE.BufferGeometry().setFromPoints(baselineRect),
+    new THREE.LineBasicMaterial({ color: 0x565c63 }),
   );
-  stripe.rotation.x = -Math.PI / 2;
-  stripe.position.y = 0.005;
-  scene.add(stripe);
+  scene.add(baseline);
 
-  // ---- Chassis group: everything sprung. Truck faces +x. ----
-  const chassis = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({ color: 0x8a1c1c, roughness: 0.42, metalness: 0.15 });
-  const paintDark = new THREE.MeshStandardMaterial({ color: 0x6d1414, roughness: 0.5, metalness: 0.1 });
-  const glass = new THREE.MeshStandardMaterial({ color: 0x1a2028, roughness: 0.15, metalness: 0.4 });
-  const black = new THREE.MeshStandardMaterial({ color: 0x1c1d20, roughness: 0.7 });
-  const chrome = new THREE.MeshStandardMaterial({ color: 0xb9bec6, roughness: 0.25, metalness: 0.7 });
+  // Live: phosphor green, warped by the corner heights each frame.
+  const live = makeGridGeometry();
+  const liveLines = new THREE.LineSegments(
+    live.geometry,
+    new THREE.LineBasicMaterial({ color: 0x39ff6a }),
+  );
+  scene.add(liveLines);
 
-  const addBox = (
-    mat: THREE.Material,
-    sx: number,
-    sy: number,
-    sz: number,
-    x: number,
-    y: number,
-    z: number,
-    rz = 0,
-  ) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
-    m.position.set(x, y, z);
-    if (rz) m.rotation.z = rz;
-    chassis.add(m);
-    return m;
-  };
-
-  // Frame floor pan
-  addBox(black, 3.9, 0.12, 1.5, 0, 0.06, 0);
-  // Rocker/body sides along the bottom
-  addBox(paintDark, 3.9, 0.3, 1.7, 0, 0.25, 0);
-  // Hood + front clip
-  addBox(paint, 1.25, 0.34, 1.62, 1.32, 0.57, 0);
-  // Hood scoop
-  addBox(black, 0.55, 0.16, 0.62, 1.35, 0.82, 0);
-  // Cowl
-  addBox(paint, 0.28, 0.4, 1.62, 0.62, 0.6, 0);
-  // Windshield, raked back
-  addBox(glass, 0.06, 0.62, 1.42, 0.42, 0.94, 0, -0.42);
-  // Roof
-  addBox(paint, 0.78, 0.08, 1.5, -0.08, 1.2, 0);
-  // Cab rear wall + side glass block
-  addBox(glass, 0.7, 0.44, 1.44, -0.05, 0.94, 0);
-  addBox(paint, 0.1, 0.5, 1.5, -0.46, 0.92, 0);
-  // Bed floor
-  addBox(paintDark, 1.5, 0.12, 1.6, -1.25, 0.45, 0);
-  // Bed side walls
-  addBox(paint, 1.5, 0.34, 0.12, -1.25, 0.62, -0.78);
-  addBox(paint, 1.5, 0.34, 0.12, -1.25, 0.62, 0.78);
-  // Tailgate
-  addBox(paint, 0.1, 0.34, 1.6, -1.97, 0.62, 0);
-  // Bumpers
-  addBox(chrome, 0.12, 0.16, 1.68, 2.0, 0.3, 0);
-  addBox(chrome, 0.1, 0.14, 1.66, -2.05, 0.32, 0);
-  // Front air dam
-  addBox(black, 0.5, 0.1, 1.5, 1.78, 0.12, 0);
-
-  // Wheelie bars: two tubes off the back of the chassis with little wheels.
-  const barMat = chrome;
-  for (const side of [-1, 1]) {
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.35, 8), barMat);
-    bar.position.set(-2.6, 0.02, side * 0.3);
-    bar.rotation.z = Math.PI / 2 - 0.2;
-    chassis.add(bar);
-    const barWheel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.09, 0.09, 0.08, 12),
-      new THREE.MeshStandardMaterial({ color: 0x2a2c30, roughness: 0.8 }),
-    );
-    barWheel.rotation.x = Math.PI / 2;
-    barWheel.position.set(-3.24, -0.1, side * 0.3);
-    chassis.add(barWheel);
-  }
-  scene.add(chassis);
-
-  // ---- Unsprung: wheels + axles stay on the ground. ----
-  const wheels: Record<string, THREE.Group> = {};
+  // Corner posts tie the plane to the ground: a dim stilt up to the staged
+  // height, then a bright colored segment covering the live deviation.
+  const posts: Record<string, THREE.Line> = {};
+  const cornerLabels: Record<string, ReturnType<typeof makeLabel>> = {};
   for (const c of CORNERS) {
-    const rear = c.x < 0;
-    const wheel = makeWheel(rear);
-    const w = rear ? 0.46 : 0.24;
-    wheel.position.set(c.x, rear ? WHEEL_R_REAR : WHEEL_R_FRONT, c.z + (c.z > 0 ? w / 2 : -w / 2));
-    scene.add(wheel);
-    wheels[c.key] = wheel;
-  }
-  const axleMat = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.5 });
-  const frontAxle = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.1, 10), axleMat);
-  frontAxle.rotation.x = Math.PI / 2;
-  frontAxle.position.set(CORNERS[0].x, WHEEL_R_FRONT, 0);
-  scene.add(frontAxle);
-  const rearAxle = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 2.2, 12), axleMat);
-  rearAxle.rotation.x = Math.PI / 2;
-  rearAxle.position.set(CORNERS[2].x, WHEEL_R_REAR, 0);
-  scene.add(rearAxle);
-  // Pumpkin
-  const diff = new THREE.Mesh(new THREE.SphereGeometry(0.17, 14, 12), axleMat);
-  diff.position.set(CORNERS[2].x, WHEEL_R_REAR, 0);
-  scene.add(diff);
+    const stilt = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(c.x, 0, c.z),
+        new THREE.Vector3(c.x, BASE_HEIGHT, c.z),
+      ]),
+      new THREE.LineBasicMaterial({ color: 0x33363b }),
+    );
+    scene.add(stilt);
 
-  // ---- Shocks: fixed lower body + telescoping shaft per corner. ----
-  const struts: Record<string, { body: THREE.Mesh; shaft: THREE.Mesh; spring: THREE.Mesh }> = {};
-  for (const c of CORNERS) {
-    const rear = c.x < 0;
-    const hubY = rear ? WHEEL_R_REAR : WHEEL_R_FRONT;
-    const body = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.055, 0.055, 0.3, 10),
-      new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.35, metalness: 0.5 }),
-    );
-    body.position.set(c.x, hubY + 0.15, c.z);
-    scene.add(body);
-    const shaft = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.028, 0.028, 1, 8),
-      new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.3 }),
-    );
-    scene.add(shaft);
-    // Coil spring impression: a slightly fatter, ribbed-looking sleeve.
-    const spring = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.085, 0.085, 1, 10, 4, true),
-      new THREE.MeshStandardMaterial({
-        color: 0xc23b3b,
-        roughness: 0.6,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.85,
+    const g = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(c.x, BASE_HEIGHT, c.z),
+      new THREE.Vector3(c.x, BASE_HEIGHT, c.z),
+    ]);
+    const line = new THREE.Line(
+      g,
+      new THREE.LineBasicMaterial({
+        color: new THREE.Color(CORNER_COLORS[c.key]),
+        linewidth: 2,
       }),
     );
-    scene.add(spring);
-    struts[c.key] = { body, shaft, spring };
+    scene.add(line);
+    posts[c.key] = line;
+
+    const label = makeLabel(CORNER_COLORS[c.key]);
+    // Pushed outward along the length so front and rear never stack when
+    // viewed end-on from behind; the rear pair stays closer in because it's
+    // nearest the default camera and grows fast in perspective.
+    label.sprite.position.set(c.x * (c.x > 0 ? 1.3 : 1.05), BASE_HEIGHT + 0.45, c.z * 1.12);
+    label.update(c.label);
+    scene.add(label.sprite);
+    cornerLabels[c.key] = label;
   }
 
-  return { renderer, scene, camera, controls, chassis, struts };
+  // Which way is forward — readable from any orbit.
+  const frontLabel = makeLabel("#8b8f96");
+  frontLabel.update("FRONT");
+  frontLabel.sprite.position.set(GRID_L / 2 + 0.55, BASE_HEIGHT + 0.05, 0);
+  scene.add(frontLabel.sprite);
+
+  return {
+    renderer,
+    scene,
+    camera,
+    controls,
+    livePositions: live.geometry.getAttribute("position") as THREE.BufferAttribute,
+    liveBase: live.basePositions,
+    posts,
+    cornerLabels,
+  };
 }
 
 export function SuspensionPanel({
@@ -473,9 +486,11 @@ export function SuspensionPanel({
   useEffect(() => {
     if (!data || hidden || !canvasRef.current) return;
     const canvas = canvasRef.current;
-    const { renderer, scene, camera, controls, chassis, struts } = buildScene(canvas);
+    const { renderer, scene, camera, controls, livePositions, liveBase, posts, cornerLabels } =
+      buildScene(canvas);
     const t0Wall = performance.now();
     let raf = 0;
+    const lastShown: Record<string, string> = {};
 
     // Follow the card through resizes.
     const ro = new ResizeObserver(() => {
@@ -490,44 +505,42 @@ export function SuspensionPanel({
 
     const poseAt = (t: number) => {
       const h: Record<string, number> = {};
+      const inches: Record<string, number | null> = {};
       for (const c of CORNERS) {
         const corner = data.corners[c.key];
         const v = valueAt(data.timestamps, corner.data, t);
-        h[c.key] = v === null ? 0 : (v - corner.baseline) / data.scale;
+        const delta = v === null ? 0 : v - corner.baseline;
+        h[c.key] = delta / data.scale;
+        inches[c.key] =
+          v === null || data.inchesPerCanon === null ? null : delta * data.inchesPerCanon;
       }
-      const heave = (h.fl + h.fr + h.rl + h.rr) / 4;
-      const front = (h.fl + h.fr) / 2;
-      const rear = (h.rl + h.rr) / 2;
-      const left = (h.fl + h.rl) / 2;
-      const right = (h.fr + h.rr) / 2;
-      const wheelbase = CORNERS[0].x - CORNERS[2].x;
-      const track = CORNERS[1].z - CORNERS[0].z;
-      chassis.position.y = RIDE_HEIGHT + heave;
-      chassis.rotation.z = Math.atan2(front - rear, wheelbase);
-      chassis.rotation.x = Math.atan2(right - left, track);
+      // Bilinear warp: every grid vertex blends the four corner heights.
+      for (let i = 0; i < liveBase.length; i++) {
+        const { x, z } = liveBase[i];
+        const u = (x + GRID_L / 2) / GRID_L; // 0 rear -> 1 front
+        const w = (z + GRID_W / 2) / GRID_W; // 0 left -> 1 right
+        const rear = h.rl * (1 - w) + h.rr * w;
+        const front = h.fl * (1 - w) + h.fr * w;
+        livePositions.setY(i, BASE_HEIGHT + rear * (1 - u) + front * u);
+      }
+      livePositions.needsUpdate = true;
+
       for (const c of CORNERS) {
-        const strut = struts[c.key];
-        const rear2 = c.x < 0;
-        const hubY = rear2 ? WHEEL_R_REAR : WHEEL_R_FRONT;
-        // Chassis corner height, small-angle: heave + pitch/roll shares.
-        const cornerY =
-          RIDE_HEIGHT +
-          heave +
-          (c.x / (wheelbase / 2)) * ((front - rear) / 2) +
-          (c.z / (track / 2)) * ((right - left) / 2);
-        const bodyTop = hubY + 0.3;
-        const shaftLen = Math.max(0.06, cornerY + 0.1 - bodyTop);
-        strut.shaft.position.set(c.x, bodyTop + shaftLen / 2, c.z);
-        strut.shaft.scale.y = shaftLen;
-        const springLen = Math.max(0.12, cornerY + 0.06 - hubY);
-        strut.spring.position.set(c.x, hubY + springLen / 2, c.z);
-        strut.spring.scale.y = springLen;
-        // Compressed reads warm, extended reads cool.
-        const d = h[c.key];
-        const mat = strut.spring.material as THREE.MeshStandardMaterial;
-        if (d < -0.02) mat.color.setRGB(1, 0.4, 0.3);
-        else if (d > 0.02) mat.color.setRGB(0.4, 0.6, 1);
-        else mat.color.setRGB(0.76, 0.23, 0.23);
+        const y = BASE_HEIGHT + h[c.key];
+        const post = posts[c.key];
+        const pos = post.geometry.getAttribute("position") as THREE.BufferAttribute;
+        pos.setY(1, y);
+        pos.needsUpdate = true;
+        const inch = inches[c.key];
+        const text =
+          inch === null
+            ? c.label
+            : `${c.label}\n${inch >= 0 ? "+" : ""}${inch.toFixed(2)}"`;
+        if (lastShown[c.key] !== text) {
+          lastShown[c.key] = text;
+          cornerLabels[c.key].update(text);
+        }
+        cornerLabels[c.key].sprite.position.y = BASE_HEIGHT + h[c.key] + 0.45;
       }
     };
 
@@ -567,11 +580,11 @@ export function SuspensionPanel({
       controls.dispose();
       renderer.dispose();
       scene.traverse((o) => {
-        if (o instanceof THREE.Mesh) {
-          o.geometry.dispose();
-          const m = o.material;
+        if (o instanceof THREE.Mesh || o instanceof THREE.Line || o instanceof THREE.Sprite) {
+          o.geometry?.dispose?.();
+          const m = (o as THREE.Mesh).material;
           if (Array.isArray(m)) m.forEach((x) => x.dispose());
-          else m.dispose();
+          else m?.dispose?.();
         }
       });
     };
@@ -633,8 +646,12 @@ export function SuspensionPanel({
       />
       <div className="flex items-center border-t px-2.5 py-1 text-[10px] leading-snug text-muted-foreground">
         <span className="truncate">
-          Hover a chart to scrub. Drag the truck to orbit, scroll to zoom.
-          Motion is exaggerated to read.
+          Hover a chart to scrub. Drag to orbit, scroll to zoom.{" "}
+          {data.inchesPerCanon === null
+            ? "Motion auto-scaled (travel units unknown)."
+            : data.gain > 1
+              ? `Labels are real inches; vertical drawn ×${data.gain}.`
+              : "Motion is true to scale."}
         </span>
       </div>
       {/* Resize grip */}
