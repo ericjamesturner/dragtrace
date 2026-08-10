@@ -963,7 +963,7 @@ function PassCard({
             <div className="pointer-events-none opacity-30" aria-hidden>
               <SlipLines ts={EMPTY_SLIP} bests={{}} />
               <Separator className="my-1.5" />
-              <TimeslipLine label="LIFT B4 1/4" value={undefined} />
+              <TimeslipLine label="LIFT BEFORE 1/4" value={undefined} />
             </div>
             <div className="absolute inset-0 flex items-center justify-center">
               <Button
@@ -993,9 +993,9 @@ function PassCard({
                   <TimeslipLine
                     label={
                       ts.et !== undefined
-                        ? "LIFT B4 1/4"
+                        ? "LIFT BEFORE 1/4"
                         : ts.eighthEt !== undefined
-                          ? "LIFT B4 1/8"
+                          ? "LIFT BEFORE 1/8"
                           : "LIFT"
                     }
                     value={
@@ -1021,7 +1021,7 @@ function PassCard({
                     <>
                       <div className="mb-0.5 mt-2 flex items-baseline justify-between">
                         <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                          Estimations
+                          No-Lift Estimations
                         </span>
                         <DropdownMenu>
                           <DropdownMenuTrigger
