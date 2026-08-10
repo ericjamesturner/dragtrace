@@ -59,6 +59,8 @@ export default defineSchema({
     fileSize: v.number(),
     contentType: v.string(),
     notes: v.optional(v.string()),
+    /** Which round the pass was — free text the racer types: T1, Q2, E3... */
+    round: v.optional(v.string()),
     tags: v.optional(v.array(v.string())),
     order: v.optional(v.number()),
     uploadedAt: v.number(),

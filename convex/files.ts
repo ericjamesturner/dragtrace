@@ -169,6 +169,22 @@ export const reorder = mutation({
   },
 });
 
+/** The round this pass ran (T1, Q2, E3...) — on the file, so a pass can
+ *  carry its round before any timeslip is entered. */
+export const updateRound = mutation({
+  args: {
+    id: v.id("files"),
+    round: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getEffectiveUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
+    const file = await ctx.db.get(args.id);
+    if (!file || file.userId !== userId) throw new Error("Not found");
+    await ctx.db.patch(args.id, { round: args.round });
+  },
+});
+
 export const updateNotes = mutation({
   args: {
     id: v.id("files"),

@@ -21,6 +21,7 @@ import {
   PlusIcon,
   PencilIcon,
   MoreVerticalIcon,
+  GripHorizontalIcon,
 } from "lucide-react";
 import {
   RpmPreview,
@@ -112,6 +113,14 @@ export function FileList({
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
   const dragIdxRef = useRef<number | null>(null);
+  // Dragging only starts from a card's grip bar; the card arms its wrapper
+  // on the grip's mousedown and everything else on the card stays inert —
+  // selecting text in the rename input no longer picks the card up.
+  const [armedIdx, setArmedIdx] = useState<number | null>(null);
+  const armDrag = useCallback((i: number) => {
+    setArmedIdx(i);
+    window.addEventListener("mouseup", () => setArmedIdx(null), { once: true });
+  }, []);
   const { goToEvents, goToViewer } = useNav();
 
   // Cards flow left-to-right and wrap, so the insertion point considers the
@@ -176,13 +185,24 @@ export function FileList({
   const PASS_PAD_S = 0.5;
 
   const alignWindow = useMemo(() => {
-    const lengths: number[] = [];
+    const slipLens: number[] = [];
+    const timerLens: number[] = [];
     for (const f of files ?? []) {
       const slipLen = slipStats[f._id]?.lastSplit ?? null;
-      const timing = raceTimings[f._id];
-      const len = slipLen ?? (timing ? timing.raceEnd - timing.raceStart : null);
-      if (len !== null && len > 0) lengths.push(len);
+      if (slipLen !== null && slipLen > 0) {
+        slipLens.push(slipLen);
+      } else {
+        const timing = raceTimings[f._id];
+        if (timing && timing.raceEnd > timing.raceStart) {
+          timerLens.push(timing.raceEnd - timing.raceStart);
+        }
+      }
     }
+    // A slip knows exactly how long its pass ran; the race timer often keeps
+    // counting long after the stripe. So when the event has any slip at all,
+    // the slips set the window and slipless passes ride along — one long
+    // timer region must not stretch every strip.
+    const lengths = slipLens.length > 0 ? slipLens : timerLens;
     if (lengths.length === 0) return undefined;
     return { preRace: PASS_PAD_S, postRace: Math.max(...lengths) + PASS_PAD_S };
   }, [files, slipStats, raceTimings]);
@@ -454,18 +474,14 @@ export function FileList({
               <div
                 key={file._id}
                 data-file-idx={i}
-                draggable
+                draggable={armedIdx === i}
                 onDragStart={(e) => {
-                  const tag = (e.target as HTMLElement).tagName;
-                  if (tag === "INPUT" || tag === "TEXTAREA") {
-                    e.preventDefault();
-                    return;
-                  }
                   setDragIdx(i);
                   dragIdxRef.current = i;
                   e.dataTransfer.effectAllowed = "move";
                 }}
                 onDragEnd={() => {
+                  setArmedIdx(null);
                   setDragIdx(null);
                   setDropIdx(null);
                   dragIdxRef.current = null;
@@ -483,6 +499,7 @@ export function FileList({
                 <PassCard
                   file={file}
                   passNumber={i + 1}
+                  onArmDrag={() => armDrag(i)}
                   isBest={file._id === bestFileId}
                   eventBests={eventBests}
                   estimate={estimates[file._id]}
@@ -513,6 +530,7 @@ function PassCard({
   eventBests,
   estimate,
   onEstScopeChange,
+  onArmDrag,
   onDelete,
   onRaceTiming,
   onSlipStats,
@@ -525,6 +543,7 @@ function PassCard({
   eventBests: MetricBests;
   estimate?: PassEstimate;
   onEstScopeChange: (scope: "event" | "all") => void;
+  onArmDrag: () => void;
   onDelete: () => void;
   onRaceTiming?: (info: RaceTimingInfo | null) => void;
   onSlipStats: (fileId: string, info: FileSlipStats) => void;
@@ -534,6 +553,7 @@ function PassCard({
   const url = useQuery(api.files.getUrl, { fileId: file._id });
   const timeslips = useQuery(api.timeslips.listByFile, { fileId: file._id });
   const updateNotes = useMutation(api.files.updateNotes);
+  const updateRound = useMutation(api.files.updateRound);
   const renameFile = useMutation(api.files.rename);
   const removeTimeslip = useMutation(api.timeslips.remove);
   const [editingName, setEditingName] = useState(false);
@@ -541,6 +561,8 @@ function PassCard({
   const [fileName, setFileName] = useState(file.fileName);
   const [editingNotes, setEditingNotes] = useState(false);
   const [notes, setNotes] = useState(file.notes ?? "");
+  const [editingRound, setEditingRound] = useState(false);
+  const [roundDraft, setRoundDraft] = useState("");
   const [showTimeslipForm, setShowTimeslipForm] = useState(false);
   const [editingTimeslip, setEditingTimeslip] = useState<Doc<"timeslips"> | null>(null);
 
@@ -614,6 +636,9 @@ function PassCard({
   // The card's headline numbers come from its first slip: full ET when the
   // slip has one, otherwise the eighth-mile pair.
   const firstSlip = timeslips?.[0];
+  // The round lives on the file so it exists before any slip; slips entered
+  // before that field existed carry it as a fallback.
+  const passRound = file.round ?? firstSlip?.round;
   let heroKind: "quarter" | "eighth" | null = null;
   let heroEt: number | undefined;
   let heroMph: number | undefined;
@@ -665,6 +690,15 @@ function PassCard({
           : ""
       }`}
     >
+      {/* The only place a drag can start. */}
+      <div
+        className="flex h-4 shrink-0 cursor-grab items-center justify-center border-b bg-muted/40 text-muted-foreground/40 transition-colors hover:text-muted-foreground active:cursor-grabbing"
+        onMouseDown={onArmDrag}
+        title="Drag to reorder"
+      >
+        <GripHorizontalIcon className="size-3.5" />
+      </div>
+
       {/* RPM trace strip — race-aligned across the event's passes.
           Clicking it opens the log, same as the button at the bottom. */}
       <div
@@ -687,10 +721,40 @@ function PassCard({
             <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
               Pass {passNumber}
             </span>
-            {firstSlip?.round && (
-              <span className="font-mono text-[10px] font-semibold uppercase tracking-wider text-foreground/90">
-                {firstSlip.round}
-              </span>
+            {editingRound ? (
+              <input
+                className="w-14 border-b border-primary bg-transparent font-mono text-[10px] font-semibold uppercase outline-none"
+                value={roundDraft}
+                autoFocus
+                placeholder="Q1"
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setRoundDraft(e.target.value.toUpperCase())}
+                onBlur={() => {
+                  void updateRound({
+                    id: file._id,
+                    round: roundDraft.trim().toUpperCase() || undefined,
+                  });
+                  setEditingRound(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  if (e.key === "Escape") setEditingRound(false);
+                }}
+              />
+            ) : (
+              passRound && (
+                <span
+                  className="cursor-text font-mono text-[10px] font-semibold uppercase tracking-wider text-foreground/90 hover:underline decoration-muted-foreground/50"
+                  title="Click to change the round"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRoundDraft(passRound);
+                    setEditingRound(true);
+                  }}
+                >
+                  {passRound}
+                </span>
+              )
             )}
             {isBest && (
               // The win light: solid green, black text, like the bulb at the stripe.
@@ -800,8 +864,20 @@ function PassCard({
             <DropdownMenuItem
               onClick={(e) => {
                 e.stopPropagation();
+                setRoundDraft(passRound ?? "");
+                // After the menu closes — it hands focus back to its trigger,
+                // which would blur the editor shut the moment it mounts.
+                setTimeout(() => setEditingRound(true), 120);
+              }}
+            >
+              <PencilIcon />
+              Set round
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
                 setFileName(file.fileName.replace(/\.[^.]+$/, ""));
-                setEditingName(true);
+                setTimeout(() => setEditingName(true), 120);
               }}
             >
               <PencilIcon />
@@ -811,7 +887,7 @@ function PassCard({
               onClick={(e) => {
                 e.stopPropagation();
                 setNotes(file.notes ?? "");
-                setEditingNotes(true);
+                setTimeout(() => setEditingNotes(true), 120);
               }}
             >
               <PencilIcon />
@@ -1079,6 +1155,7 @@ function PassCard({
       open={showTimeslipForm}
       onOpenChange={setShowTimeslipForm}
       fileId={file._id}
+      round={passRound}
       timeslip={editingTimeslip ?? undefined}
       onDone={() => {
         setShowTimeslipForm(false);
@@ -1227,8 +1304,11 @@ function SlipLines({
       <Separator className="my-1.5" />
 
       <TimeslipLine label="1000'" value={ts.thousandFt} valueClassName={bestClass("thousandFt")} />
+
+      <Separator className="my-1.5" />
+
       <TimeslipLine
-        label="E.T."
+        label="1/4"
         value={ts.et}
         bold
         valueClassName={breakout ? "text-red-400" : bestClass("et")}

@@ -19,6 +19,8 @@ interface TimeslipFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   fileId: Id<"files">;
+  /** The pass's current round — lives on the file, not the slip. */
+  round?: string;
   timeslip?: Doc<"timeslips">;
   onDone: () => void;
 }
@@ -31,11 +33,13 @@ export function TimeslipForm({
   open,
   onOpenChange,
   fileId,
+  round,
   timeslip,
   onDone,
 }: TimeslipFormProps) {
   const createTimeslip = useMutation(api.timeslips.create);
   const updateTimeslip = useMutation(api.timeslips.update);
+  const updateRound = useMutation(api.files.updateRound);
   const generateUploadUrl = useMutation(api.files.generateUploadUrl);
   const claimTempUpload = useMutation(api.timeslips.claimTempUpload);
   const parseTimeslipImage = useAction(api.timeslips.parseTimeslipImage);
@@ -91,19 +95,23 @@ export function TimeslipForm({
         const val = timeslip?.[key];
         initial[key] = val !== undefined ? String(val) : "";
       }
-      initial.round = timeslip?.round ?? "";
+      initial.round = round ?? timeslip?.round ?? "";
       setValues(initial);
     }
-  }, [open, timeslip]);
+  }, [open, timeslip, round]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const parsed: Record<string, number | string | undefined> = {};
+    const parsed: Record<string, number | undefined> = {};
     for (const key of fieldKeys) {
       const v = values[key]?.trim();
       parsed[key] = v ? parseFloat(v) : undefined;
     }
-    parsed.round = values.round?.trim() ? values.round.trim().toUpperCase() : undefined;
+    // The round belongs to the pass, not the slip.
+    await updateRound({
+      id: fileId,
+      round: values.round?.trim() ? values.round.trim().toUpperCase() : undefined,
+    });
     if (isEdit) {
       await updateTimeslip({
         id: timeslip._id,
@@ -248,7 +256,7 @@ export function TimeslipForm({
             <Separator className="my-2" />
 
             <TimeslipField
-              label="E.T."
+              label="1/4"
               id="ts-et"
               value={values.et ?? ""}
 
