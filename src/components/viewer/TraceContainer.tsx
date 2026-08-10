@@ -611,10 +611,15 @@ export function TraceContainer({
   const collapsed = trace.collapsed ?? false;
 
   // Identifies the trace in the (sticky) header and when collapsed — the header
-  // otherwise carries no label at all.
+  // otherwise carries no label at all. Renamed channels show their display name.
   const traceTitle = useMemo(
-    () => Array.from(new Set(trace.channels.map((c) => c.channelName))).join(" · "),
-    [trace.channels],
+    () =>
+      Array.from(
+        new Set(
+          trace.channels.map((c) => channelDisplayNames.get(c.channelName) ?? c.channelName),
+        ),
+      ).join(" · "),
+    [trace.channels, channelDisplayNames],
   );
 
   // Evaluate highlight zones
@@ -995,13 +1000,15 @@ export function TraceContainer({
       }
     }
     return [...byName.entries()].map(([name, rows]) => ({
-      name,
+      // Grouped by the logged name; shown under the display name when the
+      // channel has been renamed.
+      name: channelDisplayNames.get(name) ?? name,
       // Stable log order, so a value sits in the same position in every group
       // even when one log is missing that channel.
       rows: [...rows].sort((a, b) => a.logIndex - b.logIndex),
       unitLabel: rows.find((r) => r.unitLabel)?.unitLabel ?? "",
     }));
-  }, [legendGroups]);
+  }, [legendGroups, channelDisplayNames]);
 
   /**
    * The logs represented on this trace, in log order. When there's more than
@@ -1767,6 +1774,8 @@ export function TraceContainer({
                         {rows.map(({ chKey, ch, indent, isChHidden, color, opacity, valueStr, unitLabel }) => {
                           const isHovered = hoveredChannel === chKey;
                           const isDimmed = hoveredChannel !== null && !isHovered;
+                          const shownName =
+                            channelDisplayNames.get(ch.channelName) ?? ch.channelName;
                           return (
                             <div
                               key={chKey}
@@ -1776,7 +1785,7 @@ export function TraceContainer({
                               onDragOver={channelDragProps(ch.channelName).onDragOver}
                               onDrop={channelDragProps(ch.channelName).onDrop}
                               draggable
-                              title={`${ch.channelName} — click to style, drag to reorder or to another trace`}
+                              title={`${shownName} — click to style, drag to reorder or to another trace`}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setContextMenu({ logFileId: ch.logFileId, channelName: ch.channelName });
@@ -1805,12 +1814,12 @@ export function TraceContainer({
                               <Switch
                                 checked={!isChHidden}
                                 onChange={() => onSetChannelsHidden?.([chKey], !isChHidden)}
-                                title={isChHidden ? `Show ${ch.channelName}` : `Hide ${ch.channelName}`}
+                                title={isChHidden ? `Show ${shownName}` : `Hide ${shownName}`}
                                 color={color}
                                 opacity={opacity}
                               />
                               <span className="min-w-0 flex-1 truncate text-white/70">
-                                {ch.channelName}
+                                {shownName}
                               </span>
                               <span className="font-mono font-medium text-white ml-auto pl-2 w-16 text-right tabular-nums">
                                 {valueStr ?? "---"}
