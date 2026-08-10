@@ -1057,13 +1057,14 @@ function PassCard({
                           }
                         >
                           <EstimateExplainer
-                            title={`Estimated E.T. ≈ ${estimate.et.value.toFixed(3)}`}
-                            intro={`The driver lifted ${(passLen - lift.finalLift).toFixed(2)}s before the finish, so the final clock reads slower than the car was running. This rebuilds the finish from the ${estimate.et.splitLabel} — the last clock the car passed at full throttle.`}
-                            ratioIntro={`On flat passes, this car's finish E.T. is a steady multiple of its ${estimate.et.splitLabel} time:`}
+                            metric="E.T."
+                            value={estimate.et.value.toFixed(3)}
+                            intro={`The driver lifted ${(passLen - lift.finalLift).toFixed(2)}s before the finish, so the final clock reads slow. The math rebuilds it from the ${estimate.et.splitLabel} — the last clock the car passed at full throttle.`}
+                            step1={`Take the car's no-lift passes. Divide each finish E.T. by its ${estimate.et.splitLabel} time — the ratio barely moves:`}
                             refs={estimate.et.refs}
                             ratio={estimate.et.ratio}
-                            applyIntro={`This pass clocked ${estimate.et.splitValue} at the ${estimate.et.splitLabel}. Apply the ratio:`}
-                            calc={`${estimate.et.splitValue} × ${estimate.et.ratio.toFixed(4)} ≈ ${estimate.et.value.toFixed(3)}`}
+                            step2={`Multiply this pass's ${estimate.et.splitLabel} time by that ratio:`}
+                            calcLeft={`${estimate.et.splitValue} × ${estimate.et.ratio.toFixed(4)}`}
                             scope={estimate.scope}
                           />
                         </EstimateLine>
@@ -1078,13 +1079,14 @@ function PassCard({
                           }
                         >
                           <EstimateExplainer
-                            title={`Estimated MPH ≈ ${estimate.mph.value.toFixed(2)}`}
-                            intro="The lift killed the charge to the stripe, so the trap speed reads slow. This rebuilds it from the 1/8-mile speed, trapped before the lift."
-                            ratioIntro="On flat passes, this car's finish speed is a steady multiple of its 1/8-mile speed:"
+                            metric="MPH"
+                            value={estimate.mph.value.toFixed(2)}
+                            intro="The lift killed the charge to the stripe, so the trap speed reads slow. The math rebuilds it from the 1/8-mile speed, trapped before the lift."
+                            step1="Take the car's no-lift passes. Divide each trap speed by its 1/8-mile speed — the ratio barely moves:"
                             refs={estimate.mph.refs}
                             ratio={estimate.mph.ratio}
-                            applyIntro={`This pass trapped ${estimate.mph.eighthMph} at the 1/8. Apply the ratio:`}
-                            calc={`${estimate.mph.eighthMph} × ${estimate.mph.ratio.toFixed(4)} ≈ ${estimate.mph.value.toFixed(2)}`}
+                            step2="Multiply this pass's 1/8-mile speed by that ratio:"
+                            calcLeft={`${estimate.mph.eighthMph} × ${estimate.mph.ratio.toFixed(4)}`}
                             scope={estimate.scope}
                           />
                         </EstimateLine>
@@ -1191,57 +1193,94 @@ function EstimateLine({
   );
 }
 
-/** The full working behind one estimated number, spelled out step by step. */
+/** One numbered step marker in the estimate lesson. */
+function StepBadge({ n }: { n: number }) {
+  return (
+    <span className="mt-px flex size-4 shrink-0 items-center justify-center rounded-full bg-primary font-mono text-[10px] font-bold text-primary-foreground">
+      {n}
+    </span>
+  );
+}
+
+/** The full working behind one estimated number, spelled out step by step:
+ *  the ratio each no-lift pass teaches, their average, and the multiply. */
 function EstimateExplainer({
-  title,
+  metric,
+  value,
   intro,
-  ratioIntro,
+  step1,
   refs,
   ratio,
-  applyIntro,
-  calc,
+  step2,
+  calcLeft,
   scope,
 }: {
-  title: string;
+  metric: string;
+  value: string;
   intro: string;
-  ratioIntro: string;
+  step1: string;
   refs: RefDetail[];
   ratio: number;
-  applyIntro: string;
-  calc: string;
+  step2: string;
+  calcLeft: string;
   scope: "event" | "all";
 }) {
   const SHOW = 4;
   return (
-    <div className="space-y-2.5">
-      <p className="font-semibold">{title}</p>
-      <p className="text-xs text-muted-foreground">{intro}</p>
-      <div className="text-xs">
-        <p className="mb-1">{ratioIntro}</p>
-        <div className="space-y-0.5 rounded-md bg-muted/50 p-2 font-mono">
+    <div className="space-y-3">
+      <div>
+        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          No-lift estimate · {metric}
+        </div>
+        <div className="font-mono text-2xl font-semibold tabular-nums text-green-400">
+          ≈ {value}
+        </div>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{intro}</p>
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-start gap-2 text-xs leading-relaxed">
+          <StepBadge n={1} />
+          <p>{step1}</p>
+        </div>
+        <div className="rounded-md border bg-muted/40 px-2.5 py-1.5 font-mono text-xs tabular-nums">
           {refs.slice(0, SHOW).map((r, i) => (
-            <div key={i}>
-              {r.final} ÷ {r.split} = {r.ratio.toFixed(4)}
+            <div key={i} className="flex items-center justify-between py-0.5">
+              <span className="text-muted-foreground">
+                {r.final} ÷ {r.split}
+              </span>
+              <span className="text-amber-300">{r.ratio.toFixed(4)}</span>
             </div>
           ))}
           {refs.length > SHOW && (
-            <div className="text-muted-foreground">
+            <div className="py-0.5 text-muted-foreground/60">
               …and {refs.length - SHOW} more
             </div>
           )}
-          <div className="mt-1 border-t border-border/60 pt-1">
-            average → {ratio.toFixed(4)}
+          <div className="mt-1 flex items-center justify-between border-t border-border/60 py-1">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              Average
+            </span>
+            <span className="font-semibold text-amber-300">{ratio.toFixed(4)}</span>
           </div>
         </div>
       </div>
-      <div className="text-xs">
-        <p className="mb-1">{applyIntro}</p>
-        <div className="rounded-md bg-muted/50 p-2 font-mono">{calc}</div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-start gap-2 text-xs leading-relaxed">
+          <StepBadge n={2} />
+          <p>{step2}</p>
+        </div>
+        <div className="flex items-center justify-between rounded-md border bg-muted/40 px-2.5 py-2 font-mono text-xs tabular-nums">
+          <span className="text-muted-foreground">{calcLeft}</span>
+          <span className="font-semibold text-green-400">≈ {value}</span>
+        </div>
       </div>
-      <p className="text-[11px] text-muted-foreground">
+
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
         {scope === "event"
-          ? `Ratios come from ${refs.length} flat ${refs.length === 1 ? "pass" : "passes"} at this event.`
-          : `Ratios come from this car's last ${refs.length} flat ${refs.length === 1 ? "pass" : "passes"}, any event.`}{" "}
+          ? `Built from ${refs.length} no-lift ${refs.length === 1 ? "pass" : "passes"} at this event.`
+          : `Built from the car's last ${refs.length} no-lift ${refs.length === 1 ? "pass" : "passes"}, any event.`}{" "}
         It is an estimate — the car, the air and the track decide the real
         number.
       </p>
