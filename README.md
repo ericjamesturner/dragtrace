@@ -1,73 +1,41 @@
-# React + TypeScript + Vite
+# DragTrace
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The datalog viewer that has your back.
 
-Currently, two official plugins are available:
+Load the run. The view you set up last time is already there, your passes line up
+side by side, and anything you told it to watch for is flagged before you go
+looking.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Simple enough for a racer between rounds. Deep enough for whoever tunes the car.
 
-## React Compiler
+## What it does
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Your view persists.** The chart you build is saved per car. Open any pass,
+  on any weekend, and it opens into the same chart — channels remap by name.
+- **It watches for you.** Describe what matters in plain English ("fuel pressure
+  dropping fast during the run"). DragTrace checks every run from then on and
+  shows a count of what fired.
+- **Runs compare themselves.** Add a second pass and it draws on the same chart,
+  aligned at the launch, with the same channels and its own colour.
+- **It knows what a pass is.** Automatic launch detection, time rebased to zero
+  at the hit, and your timeslip drawn on the chart — 60 ft, 330 ft, 660 ft,
+  1000 ft, 1320 ft — with feet-down-track at the cursor.
+- **Everything stays organized.** Car → event → pass, with best ET on every
+  weekend and a preview on every pass card.
+- **Trackside.** Touch and pinch work, so it runs on a tablet in the trailer.
 
-## Expanding the ESLint configuration
+## ECU support
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+Right now, Haltech only. We are adding more later — Holley, AEM, MoTeC and Fueltech.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## Development
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev          # Vite dev server
+npm run dev:convex   # Convex functions (see the warning in .env.local first)
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Stack: React 19, Vite, Convex, uPlot, Tailwind 4, shadcn/base-ui.
+Claude features (highlight zones, math channels, scatter suggestions, timeslip
+photo OCR) run server-side as Convex actions.
