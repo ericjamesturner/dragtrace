@@ -133,19 +133,71 @@ function buildSuspensionData(logs: LoadedLog[]): SuspensionData | null {
     if (channels.some((c) => !c)) continue;
 
     const t0 = log.raceStartTime;
+
+    // Static ride height. The last second before launch is the WRONG place
+    // to zero: the car is loaded against the brake there and already
+    // squatting. Instead scan every pre-launch window and zero on the
+    // quietest one — the stillest the truck ever sat is its ride height.
+    let preEnd = 0;
+    while (preEnd < ts.length && ts[preEnd] <= t0 - 0.1) preEnd++;
+    const WIN = 0.6;
+    let bestStart = -1;
+    let bestVar = Infinity;
+    for (let i = 0; i < preEnd; i++) {
+      const wStart = ts[i];
+      if (wStart + WIN > t0 - 0.1) break;
+      let j = i;
+      let totalVar = 0;
+      let ok = true;
+      for (const ch of channels) {
+        let sum = 0;
+        let sum2 = 0;
+        let count = 0;
+        for (j = i; j < preEnd && ts[j] <= wStart + WIN; j++) {
+          const v = ch![j];
+          if (Number.isFinite(v)) {
+            sum += v;
+            sum2 += v * v;
+            count++;
+          }
+        }
+        if (count < 5) {
+          ok = false;
+          break;
+        }
+        totalVar += sum2 / count - (sum / count) * (sum / count);
+      }
+      if (ok && totalVar < bestVar) {
+        bestVar = totalVar;
+        bestStart = i;
+      }
+      // Slide by ~0.1s worth of samples, not one sample at a time.
+      while (i + 1 < preEnd && ts[i + 1] < wStart + 0.1) i++;
+    }
+
     const corners: Record<string, CornerData> = {};
     let maxDelta = 0;
     for (let ci = 0; ci < CORNERS.length; ci++) {
       const data = channels[ci]!;
-      // Static ride height: the second before the launch, car staged.
       let sum = 0;
       let count = 0;
-      for (let i = 0; i < ts.length; i++) {
-        if (ts[i] < t0 - 1.2 || ts[i] > t0 - 0.1) continue;
-        const v = data[i];
-        if (Number.isFinite(v)) {
-          sum += v;
-          count++;
+      if (bestStart >= 0) {
+        for (let i = bestStart; i < preEnd && ts[i] <= ts[bestStart] + WIN; i++) {
+          const v = data[i];
+          if (Number.isFinite(v)) {
+            sum += v;
+            count++;
+          }
+        }
+      } else {
+        // No quiet window found — fall back to the last second before launch.
+        for (let i = 0; i < ts.length; i++) {
+          if (ts[i] < t0 - 1.2 || ts[i] > t0 - 0.1) continue;
+          const v = data[i];
+          if (Number.isFinite(v)) {
+            sum += v;
+            count++;
+          }
         }
       }
       if (count === 0) break;
