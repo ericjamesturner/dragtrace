@@ -22,8 +22,13 @@ export const listByVehicle = query({
           .collect();
         let timeslipCount = 0;
         // The weekend's best run, which is how anyone remembers a weekend.
+        // bestMph belongs to the quickest pass. topMph is the fastest trap
+        // speed of the weekend, which is often a different pass.
         let bestEt: number | undefined;
         let bestMph: number | undefined;
+        let bestSixtyFt: number | undefined;
+        let bestEighthEt: number | undefined;
+        let topMph: number | undefined;
         for (const file of files) {
           const ts = await ctx.db
             .query("timeslips")
@@ -31,14 +36,37 @@ export const listByVehicle = query({
             .collect();
           timeslipCount += ts.length;
           for (const slip of ts) {
-            if (slip.et === undefined) continue;
-            if (bestEt === undefined || slip.et < bestEt) {
+            if (slip.et !== undefined && (bestEt === undefined || slip.et < bestEt)) {
               bestEt = slip.et;
               bestMph = slip.mph;
             }
+            if (
+              slip.sixtyFt !== undefined &&
+              (bestSixtyFt === undefined || slip.sixtyFt < bestSixtyFt)
+            ) {
+              bestSixtyFt = slip.sixtyFt;
+            }
+            if (
+              slip.eighthEt !== undefined &&
+              (bestEighthEt === undefined || slip.eighthEt < bestEighthEt)
+            ) {
+              bestEighthEt = slip.eighthEt;
+            }
+            if (slip.mph !== undefined && (topMph === undefined || slip.mph > topMph)) {
+              topMph = slip.mph;
+            }
           }
         }
-        return { ...event, fileCount: files.length, timeslipCount, bestEt, bestMph };
+        return {
+          ...event,
+          fileCount: files.length,
+          timeslipCount,
+          bestEt,
+          bestMph,
+          bestSixtyFt,
+          bestEighthEt,
+          topMph,
+        };
       })
     );
     // Sort by date descending
