@@ -8,7 +8,7 @@ import { TraceChannelsDialog } from "./TraceChannelsDialog";
 import { findValueAtTime, formatValue, formatChannelValue, computeRangeStats, statusNote } from "@/lib/cursor-utils";
 import { convertForDisplay, convertFromDisplay, getDisplayUnit, getDisplayPrecision, getUnitOptions, resolveUnitKey, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
-import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon, MoveHorizontalIcon, HighlighterIcon, ListPlusIcon } from "lucide-react";
+import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon, MoveHorizontalIcon, HighlighterIcon, ListPlusIcon, BoxIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
@@ -406,6 +406,10 @@ interface Props {
   mathVersion: number;
   onSetUnit: (quantitySlug: string, unitKey: string) => void;
   onToggleTimeslip?: () => void;
+  /** Set only for traces carrying shock channels: whether the 3D suspension
+   *  card is showing. Undefined hides the button entirely. */
+  suspensionOpen?: boolean;
+  onToggleSuspension?: () => void;
   onToggleZones?: () => void;
   /** Shared across every trace — the panel is one column down the page. */
   legendWidth?: number;
@@ -494,6 +498,8 @@ export function TraceContainer({
   mathVersion,
   onSetUnit,
   onToggleTimeslip,
+  suspensionOpen,
+  onToggleSuspension,
   onToggleZones,
   legendWidth,
   legendCollapsed = false,
@@ -1330,6 +1336,21 @@ export function TraceContainer({
               >
                 <TimerIcon className="size-3.5 shrink-0" />
                 Timeslip
+              </button>
+            </Tip>
+          )}
+
+          {/* Only on traces carrying shock-travel channels — the data the
+              3D card animates lives right here. */}
+          {suspensionOpen !== undefined && onToggleSuspension && (
+            <Tip content={suspensionOpen ? "Hide the 3D suspension view" : "Show the 3D suspension view — the corners ride these shock channels"}>
+              <button
+                onClick={(e) => { e.stopPropagation(); onToggleSuspension(); }}
+                className={`${HDR_PILL} ${suspensionOpen ? HDR_PILL_ON : HDR_PILL_OFF}`}
+                aria-pressed={suspensionOpen}
+              >
+                <BoxIcon className="size-3.5 shrink-0" />
+                Suspension
               </button>
             </Tip>
           )}

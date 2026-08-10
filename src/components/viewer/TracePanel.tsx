@@ -9,7 +9,7 @@ import { ScatterContainer } from "./ScatterContainer";
 import { ScatterConfigDialog } from "./ScatterConfigDialog";
 import { HeatmapContainer } from "./HeatmapContainer";
 import { HeatmapConfigDialog } from "./HeatmapConfigDialog";
-import { SuspensionPanel } from "./SuspensionPanel";
+import { SuspensionPanel, SHOCK_CHANNEL_NAMES } from "./SuspensionPanel";
 import { OverviewBar } from "./OverviewBar";
 import { PlusIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
@@ -199,6 +199,20 @@ export function TracePanel({
   // otherwise the live cursor drives them.
   const effectiveCursorTime =
     selection && selection[0] === selection[1] ? selection[0] : cursorTime;
+
+  // The 3D suspension card. Closing it sticks; the Suspension button on any
+  // trace carrying shock channels brings it back.
+  const [suspensionHidden, setSuspensionHiddenState] = useState(
+    () => localStorage.getItem("dragtrace:suspension-hidden") === "1",
+  );
+  const setSuspensionHidden = useCallback((h: boolean) => {
+    setSuspensionHiddenState(h);
+    try {
+      localStorage.setItem("dragtrace:suspension-hidden", h ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // Union range of every lambda-family channel on any rendered trace, so
   // lambda scales match ACROSS charts — two AFR traces on different charts
@@ -669,6 +683,12 @@ export function TracePanel({
                 onCursorTime={handleCursorTime}
                 onZoom={handleZoom}
                 onResetZoom={handleResetZoom}
+                suspensionOpen={
+                  trace.channels.some((ch) => SHOCK_CHANNEL_NAMES.includes(ch.channelName))
+                    ? !suspensionHidden
+                    : undefined
+                }
+                onToggleSuspension={() => setSuspensionHidden(!suspensionHidden)}
                 wheelZoomEnabled={wheelZoomEnabled}
                 wheelZoomFactor={wheelZoomFactor}
                 wheelMode={wheelMode}
@@ -811,9 +831,15 @@ export function TracePanel({
         )}
       </div>
 
-      {/* The little truck that moves like the pass did — only shows itself
+      {/* The wireframe that moves like the pass did — only shows itself
           when a loaded log carries all four shock-travel channels. */}
-      <SuspensionPanel logs={logs} offsets={offsets} cursorTime={effectiveCursorTime} />
+      <SuspensionPanel
+        logs={logs}
+        offsets={offsets}
+        cursorTime={effectiveCursorTime}
+        hidden={suspensionHidden}
+        onSetHidden={setSuspensionHidden}
+      />
 
       {/* Overview minimap (timeslip strip also renders here) */}
       <OverviewBar

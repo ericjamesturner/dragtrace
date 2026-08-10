@@ -83,6 +83,9 @@ function loadLayout(): PanelLayout {
   return { x: null, y: null, w: 300, h: 260 };
 }
 
+/** The channels that make a trace (and the panel) suspension-aware. */
+export const SHOCK_CHANNEL_NAMES: readonly string[] = CORNERS.map((c) => c.channel);
+
 interface CornerData {
   data: Float64Array;
   baseline: number;
@@ -421,13 +424,16 @@ export function SuspensionPanel({
   logs,
   offsets,
   cursorTime,
+  hidden,
+  onSetHidden,
 }: {
   logs: LoadedLog[];
   offsets: Map<Id<"files">, number>;
   cursorTime: number | null;
+  hidden: boolean;
+  onSetHidden: (hidden: boolean) => void;
 }) {
   const data = useMemo(() => buildSuspensionData(logs), [logs]);
-  const [hidden, setHidden] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [layout, setLayout] = useState<PanelLayout>(loadLayout);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -684,8 +690,8 @@ export function SuspensionPanel({
           </button>
           <button
             className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground"
-            title="Hide"
-            onClick={() => setHidden(true)}
+            title="Hide — the Suspension button on the shock trace brings it back"
+            onClick={() => onSetHidden(true)}
           >
             <XIcon className="size-3.5" />
           </button>
