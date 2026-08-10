@@ -11,6 +11,8 @@ import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
 
 const timeslipFields = {
+  round: v.optional(v.string()),
+  delayBox: v.optional(v.number()),
   rt: v.optional(v.number()),
   sixtyFt: v.optional(v.number()),
   threeThirty: v.optional(v.number()),
@@ -49,6 +51,8 @@ export const create = mutation({
     return await ctx.db.insert("timeslips", {
       userId,
       fileId: args.fileId,
+      round: args.round,
+      delayBox: args.delayBox,
       rt: args.rt,
       sixtyFt: args.sixtyFt,
       threeThirty: args.threeThirty,
@@ -74,6 +78,8 @@ export const update = mutation({
     const ts = await ctx.db.get(args.id);
     if (!ts || ts.userId !== userId) throw new Error("Not found");
     await ctx.db.patch(args.id, {
+      round: args.round,
+      delayBox: args.delayBox,
       rt: args.rt,
       sixtyFt: args.sixtyFt,
       threeThirty: args.threeThirty,
@@ -187,6 +193,7 @@ export const parseTimeslipImage = action({
                 text: `This is a drag racing timeslip. Extract the numeric values and return ONLY a JSON object with these fields (omit any field not visible on the slip):
 
 {
+  "round": <the round label printed on the slip, as a short string like "Q1", "E2" or "TEST" — omit if not shown>,
   "dialIn": <dial-in time>,
   "rt": <reaction time>,
   "sixtyFt": <60 foot time>,
@@ -227,13 +234,16 @@ Return ONLY valid JSON, no other text.`,
       storageId: args.storageId,
     });
 
-    // Return only valid numeric fields
+    // Return only well-typed fields
     const fields = ["dialIn", "rt", "sixtyFt", "threeThirty", "eighthEt", "eighthMph", "thousandFt", "et", "mph"] as const;
-    const cleaned: Record<string, number> = {};
+    const cleaned: Record<string, number | string> = {};
     for (const key of fields) {
       if (typeof parsed[key] === "number" && !isNaN(parsed[key])) {
         cleaned[key] = parsed[key];
       }
+    }
+    if (typeof parsed.round === "string" && parsed.round.trim()) {
+      cleaned.round = parsed.round.trim().toUpperCase();
     }
     return cleaned;
   },

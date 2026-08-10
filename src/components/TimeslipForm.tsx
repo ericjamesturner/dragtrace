@@ -23,9 +23,9 @@ interface TimeslipFormProps {
   onDone: () => void;
 }
 
-type FieldKey = "dialIn" | "rt" | "sixtyFt" | "threeThirty" | "eighthEt" | "eighthMph" | "thousandFt" | "et" | "mph";
+type FieldKey = "dialIn" | "delayBox" | "rt" | "sixtyFt" | "threeThirty" | "eighthEt" | "eighthMph" | "thousandFt" | "et" | "mph";
 
-const fieldKeys: FieldKey[] = ["dialIn", "rt", "sixtyFt", "threeThirty", "eighthEt", "eighthMph", "thousandFt", "et", "mph"];
+const fieldKeys: FieldKey[] = ["dialIn", "delayBox", "rt", "sixtyFt", "threeThirty", "eighthEt", "eighthMph", "thousandFt", "et", "mph"];
 
 export function TimeslipForm({
   open,
@@ -70,6 +70,8 @@ export function TimeslipForm({
           for (const [key, val] of Object.entries(parsed)) {
             if (typeof val === "number") {
               next[key] = String(val);
+            } else if (key === "round" && typeof val === "string" && val.trim()) {
+              next.round = val.trim().toUpperCase();
             }
           }
           return next;
@@ -89,17 +91,19 @@ export function TimeslipForm({
         const val = timeslip?.[key];
         initial[key] = val !== undefined ? String(val) : "";
       }
+      initial.round = timeslip?.round ?? "";
       setValues(initial);
     }
   }, [open, timeslip]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const parsed: Record<string, number | undefined> = {};
+    const parsed: Record<string, number | string | undefined> = {};
     for (const key of fieldKeys) {
       const v = values[key]?.trim();
       parsed[key] = v ? parseFloat(v) : undefined;
     }
+    parsed.round = values.round?.trim() ? values.round.trim().toUpperCase() : undefined;
     if (isEdit) {
       await updateTimeslip({
         id: timeslip._id,
@@ -152,12 +156,41 @@ export function TimeslipForm({
         </Button>
         <form onSubmit={handleSubmit}>
           <div className="rounded-md border bg-muted/30 px-4 py-3 font-mono text-sm space-y-1">
+            {/* The round is free text — T1, Q2, E3, whatever the track calls it. */}
+            <div className="flex items-center justify-between gap-3">
+              <Label
+                htmlFor="ts-round"
+                className="text-xs text-muted-foreground shrink-0 w-10"
+              >
+                ROUND
+              </Label>
+              <Input
+                id="ts-round"
+                type="text"
+                placeholder="Q1"
+                value={values.round ?? ""}
+                onChange={(e) =>
+                  setValues((p) => ({ ...p, round: e.target.value.toUpperCase() }))
+                }
+                className="w-24 text-right font-mono uppercase"
+              />
+            </div>
+
+            <Separator className="my-2" />
+
             <TimeslipField
               label="DIAL"
               id="ts-dialIn"
               value={values.dialIn ?? ""}
 
               onChange={(v) => setValues((p) => ({ ...p, dialIn: v }))}
+            />
+            <TimeslipField
+              label="BOX"
+              id="ts-delayBox"
+              value={values.delayBox ?? ""}
+
+              onChange={(v) => setValues((p) => ({ ...p, delayBox: v }))}
             />
 
             <TimeslipField

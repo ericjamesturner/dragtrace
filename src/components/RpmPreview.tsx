@@ -21,7 +21,7 @@ export interface RaceTimingInfo {
   logDuration: number; // total log duration in seconds
 }
 
-interface PreviewPayload {
+export interface PreviewPayload {
   version: number;
   timestamps: number[];
   rpm: (number | null)[];
@@ -30,6 +30,70 @@ interface PreviewPayload {
   raceStart: number | null;
   raceEnd: number | null;
   logDuration: number;
+}
+
+/** A file's stored preview, or null when absent or from an older version. */
+export function parsePreviewPayload(
+  preview: string | undefined
+): PreviewPayload | null {
+  if (!preview) return null;
+  try {
+    const p = JSON.parse(preview) as PreviewPayload;
+    return p.version === PREVIEW_VERSION ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+const WOT_TPS = 90; // throttle counts as flat-out above this
+const LIFT_TPS = 80; // ...and as lifted once it falls back under this
+
+export interface LiftAnalysis {
+  /** Seconds after launch of the lift the car finished on — the last drop out
+   *  of wide-open throttle that never came back. Null: flat at the stripe. */
+  finalLift: number | null;
+  /** Mid-pass lifts where the driver got back to wide open — pedals, in
+   *  seconds after launch. */
+  pedals: number[];
+}
+
+/**
+ * How the driver worked the throttle during the pass, from the preview's
+ * throttle trace, scanning launch → finish (`passLen` from the slip's last
+ * split; the race-timer region when there is no slip). A drop out of
+ * wide-open that returns is a pedal; one that doesn't is the lift. Times are
+ * estimates, read off the downsampled preview. Null when there is no
+ * throttle data to read.
+ */
+export function detectLift(
+  p: PreviewPayload,
+  passLen: number | null
+): LiftAnalysis | null {
+  if (!p.tps || p.raceStart === null) return null;
+  const len = passLen ?? (p.raceEnd !== null ? p.raceEnd - p.raceStart : null);
+  if (len === null || len <= 0) return null;
+  const end = p.raceStart + len;
+  let sawWot = false;
+  let liftedAt: number | null = null;
+  const pedals: number[] = [];
+  for (let i = 0; i < p.timestamps.length; i++) {
+    const t = p.timestamps[i];
+    if (t < p.raceStart) continue;
+    if (t > end) break;
+    const v = p.tps[i];
+    if (v === null) continue;
+    if (v >= WOT_TPS) {
+      if (liftedAt !== null) {
+        pedals.push(liftedAt);
+        liftedAt = null;
+      }
+      sawWot = true;
+    } else if (sawWot && liftedAt === null && v <= LIFT_TPS) {
+      liftedAt = t - p.raceStart;
+    }
+  }
+  if (!sawWot) return null;
+  return { finalLift: liftedAt, pedals };
 }
 
 type Status =
@@ -41,6 +105,8 @@ interface RpmPreviewProps {
   file: Doc<"files">;
   onRaceTiming?: (info: RaceTimingInfo | null) => void;
   alignWindow?: { preRace: number; postRace: number };
+  /** Chart height in px; the pass gallery uses a short strip. */
+  height?: number;
 }
 
 function computePreview(text: string): PreviewPayload | string {
@@ -111,16 +177,11 @@ function computePreview(text: string): PreviewPayload | string {
   };
 }
 
-export function RpmPreview({ file, onRaceTiming, alignWindow }: RpmPreviewProps) {
-  const stored = useMemo<PreviewPayload | null>(() => {
-    if (!file.preview) return null;
-    try {
-      const p = JSON.parse(file.preview) as PreviewPayload;
-      return p.version === PREVIEW_VERSION ? p : null;
-    } catch {
-      return null;
-    }
-  }, [file.preview]);
+export function RpmPreview({ file, onRaceTiming, alignWindow, height = 176 }: RpmPreviewProps) {
+  const stored = useMemo<PreviewPayload | null>(
+    () => parsePreviewPayload(file.preview),
+    [file.preview]
+  );
 
   // Only fetch the raw log when there is no stored preview to reuse.
   const url = useQuery(api.files.getUrl, stored ? "skip" : { fileId: file._id });
@@ -275,7 +336,7 @@ export function RpmPreview({ file, onRaceTiming, alignWindow }: RpmPreviewProps)
     const plot = new uPlot(
       {
         width,
-        height: 176,
+        height,
         cursor: { show: false },
         select: { show: false, left: 0, top: 0, width: 0, height: 0 },
         legend: { show: false },
@@ -295,7 +356,7 @@ export function RpmPreview({ file, onRaceTiming, alignWindow }: RpmPreviewProps)
       uplotRef.current = null;
       el.innerHTML = "";
     };
-  }, [status, alignReady, alignWindow]);
+  }, [status, alignReady, alignWindow, height]);
 
   if (status.kind === "loading") {
     return (

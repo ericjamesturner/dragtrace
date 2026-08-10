@@ -135,6 +135,10 @@ export default defineSchema({
   timeslips: defineTable({
     userId: v.id("users"),
     fileId: v.id("files"),
+    /** Which round the pass was — free text the racer types: T1, Q2, E3... */
+    round: v.optional(v.string()),
+    /** The delay box setting used on this pass. */
+    delayBox: v.optional(v.number()),
     rt: v.optional(v.number()),
     sixtyFt: v.optional(v.number()),
     threeThirty: v.optional(v.number()),
