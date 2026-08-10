@@ -10,17 +10,18 @@ import { canonicalAlternate, getQuantity } from "@/lib/ecu/quantities";
  * The chassis as an old-school wireframe grid, seen from the back: each
  * corner of a glowing plane rides its shock-travel channel, warping the mesh
  * the way the body moved — launch squat, front rise, side-to-side rock, and
- * corner-to-corner twist a rigid model can't show. A dim ghost grid holds the
- * staged ride height so every deviation reads against it.
+ * corner-to-corner twist a rigid model can't show. A dim ghost frame holds
+ * the staged ride height so every deviation reads against it.
+ *
+ * With several logs loaded, every log carrying shock channels gets its own
+ * wireframe in that run's chart color, all riding the shared cursor — the
+ * same run-identity colors the legend uses. One log alone stays phosphor
+ * green with left-red/right-blue corner readouts.
  *
  * Motion is TRUE TO SCALE when the shock channels carry a known length unit:
  * travel converts to real inches and maps through the grid's proportions
- * (its length standing in for a ~112" wheelbase). Only when the channels
- * carry no known unit does it fall back to auto-scaling, and the footer says
- * which one you're looking at.
- *
- * The card drags by its header, resizes from the corner grip (both stick in
- * localStorage), orbits by dragging the scene, and can replay the pass.
+ * (its length standing in for a ~112" wheelbase), drawn at a stated vertical
+ * gain sized over all loaded runs so they stay comparable.
  */
 
 const CORNERS = [
@@ -30,13 +31,18 @@ const CORNERS = [
   { key: "rr", label: "RR", channel: "Shock Travel Rear Right", x: -1.4, z: 0.85 },
 ] as const;
 
-/** Chart colors: left channels red, right channels blue — same as the traces. */
+/** The channels that make a trace (and the panel) suspension-aware. */
+export const SHOCK_CHANNEL_NAMES: readonly string[] = CORNERS.map((c) => c.channel);
+
+/** Single-log corner colors, matching the shock traces: left red, right blue. */
 const CORNER_COLORS: Record<string, string> = {
   fl: "#f87171",
   fr: "#60a5fa",
   rl: "#f87171",
   rr: "#60a5fa",
 };
+const SINGLE_GRID_COLOR = 0x39ff6a;
+const TITLE_GREY = "#9aa0a8";
 
 /** Fallback only: biggest visual corner deflection when units are unknown. */
 const MAX_DEFLECT = 0.45;
@@ -83,28 +89,31 @@ function loadLayout(): PanelLayout {
   return { x: null, y: null, w: 300, h: 260 };
 }
 
-/** The channels that make a trace (and the panel) suspension-aware. */
-export const SHOCK_CHANNEL_NAMES: readonly string[] = CORNERS.map((c) => c.channel);
-
 interface CornerData {
   data: Float64Array;
   baseline: number;
 }
 
-interface SuspensionData {
+interface PerLogData {
   fileId: Id<"files">;
   fileName: string;
+  color: string;
   timestamps: Float64Array;
   corners: Record<string, CornerData>;
-  /** Travel units per scene unit — shared so corners stay comparable. */
+  raceStart: number;
+  tsEnd: number;
+}
+
+interface SuspensionData {
+  perLog: PerLogData[];
+  /** Travel units per scene unit — shared across logs so motion compares. */
   scale: number;
   /** Inches per canonical travel unit, when the unit is known. */
   inchesPerCanon: number | null;
   /** Vertical drawing gain — labels stay real inches, geometry draws ×gain. */
   gain: number;
-  playStart: number;
-  playEnd: number;
-  raceStart: number;
+  /** Race-relative playback window: [-1s .. longest run]. */
+  playMax: number;
 }
 
 /** Linear interp of a channel at time t (log timebase), NaN-tolerant. */
@@ -126,8 +135,85 @@ function valueAt(ts: Float64Array, data: Float64Array, t: number): number | null
   return span > 0 ? a + ((b - a) * (t - ts[lo])) / span : a;
 }
 
-/** First loaded log carrying all four shock channels, prepped for animation. */
+/** Baselines from the quietest pre-launch window — the car loaded on the
+ *  brake in the final second is NOT ride height. Returns null when the log
+ *  can't support it. */
+function findBaselines(
+  ts: Float64Array,
+  channels: (Float64Array | undefined)[],
+  t0: number,
+): number[] | null {
+  let preEnd = 0;
+  while (preEnd < ts.length && ts[preEnd] <= t0 - 0.1) preEnd++;
+  const WIN = 0.6;
+  let bestStart = -1;
+  let bestVar = Infinity;
+  for (let i = 0; i < preEnd; i++) {
+    const wStart = ts[i];
+    if (wStart + WIN > t0 - 0.1) break;
+    let totalVar = 0;
+    let ok = true;
+    for (const ch of channels) {
+      let sum = 0;
+      let sum2 = 0;
+      let count = 0;
+      for (let j = i; j < preEnd && ts[j] <= wStart + WIN; j++) {
+        const v = ch![j];
+        if (Number.isFinite(v)) {
+          sum += v;
+          sum2 += v * v;
+          count++;
+        }
+      }
+      if (count < 5) {
+        ok = false;
+        break;
+      }
+      totalVar += sum2 / count - (sum / count) * (sum / count);
+    }
+    if (ok && totalVar < bestVar) {
+      bestVar = totalVar;
+      bestStart = i;
+    }
+    // Slide by ~0.1s worth of samples, not one sample at a time.
+    while (i + 1 < preEnd && ts[i + 1] < wStart + 0.1) i++;
+  }
+
+  const out: number[] = [];
+  for (const ch of channels) {
+    let sum = 0;
+    let count = 0;
+    if (bestStart >= 0) {
+      for (let i = bestStart; i < preEnd && ts[i] <= ts[bestStart] + 0.6; i++) {
+        const v = ch![i];
+        if (Number.isFinite(v)) {
+          sum += v;
+          count++;
+        }
+      }
+    } else {
+      // No quiet window found — fall back to the last second before launch.
+      for (let i = 0; i < ts.length; i++) {
+        if (ts[i] < t0 - 1.2 || ts[i] > t0 - 0.1) continue;
+        const v = ch![i];
+        if (Number.isFinite(v)) {
+          sum += v;
+          count++;
+        }
+      }
+    }
+    if (count === 0) return null;
+    out.push(sum / count);
+  }
+  return out;
+}
+
+/** Every loaded log carrying all four shock channels, on one shared scale. */
 function buildSuspensionData(logs: LoadedLog[]): SuspensionData | null {
+  const perLog: PerLogData[] = [];
+  let maxDelta = 0;
+  let inchesPerCanon: number | null = null;
+
   for (const log of logs) {
     const session = log.parsed.sessions[log.activeSessionIndex];
     if (!session || log.raceStartTime === null) continue;
@@ -136,75 +222,13 @@ function buildSuspensionData(logs: LoadedLog[]): SuspensionData | null {
     if (channels.some((c) => !c)) continue;
 
     const t0 = log.raceStartTime;
-
-    // Static ride height. The last second before launch is the WRONG place
-    // to zero: the car is loaded against the brake there and already
-    // squatting. Instead scan every pre-launch window and zero on the
-    // quietest one — the stillest the truck ever sat is its ride height.
-    let preEnd = 0;
-    while (preEnd < ts.length && ts[preEnd] <= t0 - 0.1) preEnd++;
-    const WIN = 0.6;
-    let bestStart = -1;
-    let bestVar = Infinity;
-    for (let i = 0; i < preEnd; i++) {
-      const wStart = ts[i];
-      if (wStart + WIN > t0 - 0.1) break;
-      let j = i;
-      let totalVar = 0;
-      let ok = true;
-      for (const ch of channels) {
-        let sum = 0;
-        let sum2 = 0;
-        let count = 0;
-        for (j = i; j < preEnd && ts[j] <= wStart + WIN; j++) {
-          const v = ch![j];
-          if (Number.isFinite(v)) {
-            sum += v;
-            sum2 += v * v;
-            count++;
-          }
-        }
-        if (count < 5) {
-          ok = false;
-          break;
-        }
-        totalVar += sum2 / count - (sum / count) * (sum / count);
-      }
-      if (ok && totalVar < bestVar) {
-        bestVar = totalVar;
-        bestStart = i;
-      }
-      // Slide by ~0.1s worth of samples, not one sample at a time.
-      while (i + 1 < preEnd && ts[i + 1] < wStart + 0.1) i++;
-    }
+    const baselines = findBaselines(ts, channels, t0);
+    if (!baselines) continue;
 
     const corners: Record<string, CornerData> = {};
-    let maxDelta = 0;
     for (let ci = 0; ci < CORNERS.length; ci++) {
       const data = channels[ci]!;
-      let sum = 0;
-      let count = 0;
-      if (bestStart >= 0) {
-        for (let i = bestStart; i < preEnd && ts[i] <= ts[bestStart] + WIN; i++) {
-          const v = data[i];
-          if (Number.isFinite(v)) {
-            sum += v;
-            count++;
-          }
-        }
-      } else {
-        // No quiet window found — fall back to the last second before launch.
-        for (let i = 0; i < ts.length; i++) {
-          if (ts[i] < t0 - 1.2 || ts[i] > t0 - 0.1) continue;
-          const v = data[i];
-          if (Number.isFinite(v)) {
-            sum += v;
-            count++;
-          }
-        }
-      }
-      if (count === 0) break;
-      const baseline = sum / count;
+      const baseline = baselines[ci];
       corners[CORNERS[ci].key] = { data, baseline };
       for (let i = 0; i < ts.length; i++) {
         if (ts[i] < t0) continue;
@@ -212,43 +236,47 @@ function buildSuspensionData(logs: LoadedLog[]): SuspensionData | null {
         if (Number.isFinite(v)) maxDelta = Math.max(maxDelta, Math.abs(v - baseline));
       }
     }
-    if (Object.keys(corners).length < 4 || maxDelta === 0) continue;
 
-    // Real units when the channel carries a length quantity that can speak
-    // inches. Deltas are linear in the same raw integer, so a delta converts
-    // by the ratio of the alternates' scales; offsets cancel.
-    let scale = maxDelta / MAX_DEFLECT;
-    let inchesPerCanon: number | null = null;
-    let gain = 1;
-    const slug = log.parsed.channelDefs.find(
-      (d) => d.name === CORNERS[0].channel,
-    )?.quantitySlug;
-    const inchAlt = getQuantity(slug)?.alternates.find((a) => a.key === "inches");
-    const canonAlt = canonicalAlternate(slug);
-    if (inchAlt && canonAlt && canonAlt.scale > 0) {
-      inchesPerCanon = inchAlt.scale / canonAlt.scale;
-      // An inch is real-scale tiny on screen, so vertical geometry draws at a
-      // stated gain — a clean number sized so the pass's biggest excursion
-      // reads clearly. The corner labels always print the real inches.
-      const maxInches = maxDelta * inchesPerCanon;
-      gain = Math.min(8, Math.max(1, Math.round(0.3 / (maxInches * UNITS_PER_INCH))));
-      scale = 1 / (inchesPerCanon * UNITS_PER_INCH * gain);
+    if (inchesPerCanon === null) {
+      const slug = log.parsed.channelDefs.find(
+        (d) => d.name === CORNERS[0].channel,
+      )?.quantitySlug;
+      const inchAlt = getQuantity(slug)?.alternates.find((a) => a.key === "inches");
+      const canonAlt = canonicalAlternate(slug);
+      if (inchAlt && canonAlt && canonAlt.scale > 0) {
+        inchesPerCanon = inchAlt.scale / canonAlt.scale;
+      }
     }
 
-    return {
+    perLog.push({
       fileId: log.fileId,
       fileName: log.fileName.replace(/\.[^.]+$/, ""),
+      color: log.logColor,
       timestamps: ts,
       corners,
-      scale,
-      inchesPerCanon,
-      gain,
-      playStart: Math.max(ts[0], t0 - 1),
-      playEnd: ts[ts.length - 1],
       raceStart: t0,
-    };
+      tsEnd: ts[ts.length - 1],
+    });
   }
-  return null;
+  if (perLog.length === 0 || maxDelta === 0) return null;
+
+  // One shared scale over every run, so the same inch moves the same amount
+  // on every wireframe.
+  let scale = maxDelta / MAX_DEFLECT;
+  let gain = 1;
+  if (inchesPerCanon !== null) {
+    const maxInches = maxDelta * inchesPerCanon;
+    gain = Math.min(8, Math.max(1, Math.round(0.3 / (maxInches * UNITS_PER_INCH))));
+    scale = 1 / (inchesPerCanon * UNITS_PER_INCH * gain);
+  }
+
+  return {
+    perLog,
+    scale,
+    inchesPerCanon,
+    gain,
+    playMax: Math.max(...perLog.map((l) => l.tsEnd - l.raceStart)),
+  };
 }
 
 /** A clean grid of line segments (no triangle diagonals) over the plane. */
@@ -284,32 +312,44 @@ function makeGridGeometry(): {
   return { geometry, basePositions };
 }
 
-/** Canvas-backed text sprite with a cheap redraw hook. */
-function makeLabel(color: string): { sprite: THREE.Sprite; update: (text: string) => void } {
+interface LabelLine {
+  text: string;
+  color: string;
+}
+
+/** Canvas-backed text sprite that draws one colored line per entry. */
+function makeLabel(): { sprite: THREE.Sprite; update: (lines: LabelLine[]) => void } {
   const canvas = document.createElement("canvas");
   canvas.width = 256;
-  canvas.height = 128;
+  canvas.height = 192;
   const ctx = canvas.getContext("2d")!;
   const tex = new THREE.CanvasTexture(canvas);
   tex.anisotropy = 2;
-  const update = (text: string) => {
-    ctx.clearRect(0, 0, 256, 128);
-    ctx.font = "bold 46px ui-monospace, SFMono-Regular, Menlo, monospace";
+  const update = (lines: LabelLine[]) => {
+    ctx.clearRect(0, 0, 256, 192);
+    ctx.font = "bold 42px ui-monospace, SFMono-Regular, Menlo, monospace";
     ctx.textAlign = "center";
-    ctx.fillStyle = color;
-    const lines = text.split("\n");
-    lines.forEach((ln, i) => ctx.fillText(ln, 128, 54 + i * 54));
+    lines.forEach((ln, i) => {
+      ctx.fillStyle = ln.color;
+      ctx.fillText(ln.text, 128, 48 + i * 46);
+    });
     tex.needsUpdate = true;
   };
   const sprite = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }),
   );
-  sprite.scale.set(0.52, 0.26, 1);
+  sprite.scale.set(0.52, 0.39, 1);
   return { sprite, update };
 }
 
-/** The retro scene: ground, ghost grid at ride height, live warping grid. */
-function buildScene(canvas: HTMLCanvasElement) {
+interface LogGrid {
+  positions: THREE.BufferAttribute;
+  base: { x: number; z: number }[];
+  ticks: Record<string, THREE.Line>;
+}
+
+/** The retro scene: ground, ghost frame, one warping grid per log. */
+function buildScene(canvas: HTMLCanvasElement, logsMeta: { color: string }[]) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
@@ -336,14 +376,12 @@ function buildScene(canvas: HTMLCanvasElement) {
   controls.maxPolarAngle = Math.PI / 2 - 0.04;
   controls.update();
 
-  // Wireframes don't need light, but sprites render nicer with a little.
   scene.add(new THREE.AmbientLight(0xffffff, 1));
 
   const ground = new THREE.GridHelper(14, 28, 0x232327, 0x18181b);
   scene.add(ground);
 
-  // Staged ride height, as a crisp static reference frame: the rectangle
-  // outline the live grid left behind when the car moved.
+  // Staged ride height, as a crisp static reference frame.
   const baselineRect = [
     new THREE.Vector3(-GRID_L / 2, BASE_HEIGHT, -GRID_W / 2),
     new THREE.Vector3(GRID_L / 2, BASE_HEIGHT, -GRID_W / 2),
@@ -356,18 +394,47 @@ function buildScene(canvas: HTMLCanvasElement) {
   );
   scene.add(baseline);
 
-  // Live: phosphor green, warped by the corner heights each frame.
-  const live = makeGridGeometry();
-  const liveLines = new THREE.LineSegments(
-    live.geometry,
-    new THREE.LineBasicMaterial({ color: 0x39ff6a }),
-  );
-  scene.add(liveLines);
+  const multi = logsMeta.length > 1;
 
-  // Corner posts tie the plane to the ground: a dim stilt up to the staged
-  // height, then a bright colored segment covering the live deviation.
-  const posts: Record<string, THREE.Line> = {};
-  const cornerLabels: Record<string, ReturnType<typeof makeLabel>> = {};
+  // One warping grid per log. Alone: phosphor green. Compared: run colors,
+  // the same identity colors the legend uses.
+  const grids: LogGrid[] = [];
+  for (const meta of logsMeta) {
+    const g = makeGridGeometry();
+    const lines = new THREE.LineSegments(
+      g.geometry,
+      new THREE.LineBasicMaterial({
+        color: multi ? new THREE.Color(meta.color) : SINGLE_GRID_COLOR,
+        transparent: multi,
+        opacity: multi ? 0.9 : 1,
+      }),
+    );
+    scene.add(lines);
+
+    // Per-corner deviation ticks, baseline to live, in the grid's color.
+    const ticks: Record<string, THREE.Line> = {};
+    for (const c of CORNERS) {
+      const tg = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(c.x, BASE_HEIGHT, c.z),
+        new THREE.Vector3(c.x, BASE_HEIGHT, c.z),
+      ]);
+      const tick = new THREE.Line(
+        tg,
+        new THREE.LineBasicMaterial({
+          color: multi ? new THREE.Color(meta.color) : new THREE.Color(CORNER_COLORS[c.key]),
+        }),
+      );
+      scene.add(tick);
+      ticks[c.key] = tick;
+    }
+    grids.push({
+      positions: g.geometry.getAttribute("position") as THREE.BufferAttribute,
+      base: g.basePositions,
+      ticks,
+    });
+  }
+
+  // Stilts tie the reference frame to the ground.
   for (const c of CORNERS) {
     const stilt = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints([
@@ -377,47 +444,27 @@ function buildScene(canvas: HTMLCanvasElement) {
       new THREE.LineBasicMaterial({ color: 0x33363b }),
     );
     scene.add(stilt);
+  }
 
-    const g = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(c.x, BASE_HEIGHT, c.z),
-      new THREE.Vector3(c.x, BASE_HEIGHT, c.z),
-    ]);
-    const line = new THREE.Line(
-      g,
-      new THREE.LineBasicMaterial({
-        color: new THREE.Color(CORNER_COLORS[c.key]),
-        linewidth: 2,
-      }),
-    );
-    scene.add(line);
-    posts[c.key] = line;
-
-    const label = makeLabel(CORNER_COLORS[c.key]);
+  // Corner labels: name line plus one inches line per log.
+  const cornerLabels: Record<string, ReturnType<typeof makeLabel>> = {};
+  for (const c of CORNERS) {
+    const label = makeLabel();
     // Pushed outward along the length so front and rear never stack when
     // viewed end-on from behind; the rear pair stays closer in because it's
     // nearest the default camera and grows fast in perspective.
     label.sprite.position.set(c.x * (c.x > 0 ? 1.3 : 1.05), BASE_HEIGHT + 0.45, c.z * 1.12);
-    label.update(c.label);
+    label.update([{ text: c.label, color: TITLE_GREY }]);
     scene.add(label.sprite);
     cornerLabels[c.key] = label;
   }
 
-  // Which way is forward — readable from any orbit.
-  const frontLabel = makeLabel("#8b8f96");
-  frontLabel.update("FRONT");
+  const frontLabel = makeLabel();
+  frontLabel.update([{ text: "FRONT", color: "#8b8f96" }]);
   frontLabel.sprite.position.set(GRID_L / 2 + 0.55, BASE_HEIGHT + 0.05, 0);
   scene.add(frontLabel.sprite);
 
-  return {
-    renderer,
-    scene,
-    camera,
-    controls,
-    livePositions: live.geometry.getAttribute("position") as THREE.BufferAttribute,
-    liveBase: live.basePositions,
-    posts,
-    cornerLabels,
-  };
+  return { renderer, scene, camera, controls, grids, cornerLabels };
 }
 
 export function SuspensionPanel({
@@ -442,11 +489,10 @@ export function SuspensionPanel({
   const playingRef = useRef(false);
   const playheadRef = useRef<number | null>(null);
   const clockLabelRef = useRef<HTMLSpanElement>(null);
+  const offsetsRef = useRef(offsets);
+  offsetsRef.current = offsets;
 
-  // The chart cursor is in display time; this log's samples are in its own
-  // timebase, one alignment offset apart.
-  const offset = data ? (offsets.get(data.fileId) ?? 0) : 0;
-  cursorRef.current = cursorTime !== null ? cursorTime - offset : null;
+  cursorRef.current = cursorTime;
   playingRef.current = playing;
 
   const persistLayout = useCallback((l: PanelLayout) => {
@@ -544,8 +590,11 @@ export function SuspensionPanel({
   useEffect(() => {
     if (!data || hidden || !canvasRef.current) return;
     const canvas = canvasRef.current;
-    const { renderer, scene, camera, controls, livePositions, liveBase, posts, cornerLabels } =
-      buildScene(canvas);
+    const { renderer, scene, camera, controls, grids, cornerLabels } = buildScene(
+      canvas,
+      data.perLog,
+    );
+    const multi = data.perLog.length > 1;
     const t0Wall = performance.now();
     let raf = 0;
     const lastShown: Record<string, string> = {};
@@ -561,72 +610,99 @@ export function SuspensionPanel({
     });
     ro.observe(canvas);
 
-    const poseAt = (t: number) => {
-      const h: Record<string, number> = {};
-      const inches: Record<string, number | null> = {};
+    /** Per-log sample time for this frame: race-relative during playback,
+     *  display-time minus the log's alignment offset when scrubbing. */
+    const logTime = (li: number, t: number, raceRelative: boolean): number => {
+      const log = data.perLog[li];
+      return raceRelative ? log.raceStart + t : t - (offsetsRef.current.get(log.fileId) ?? 0);
+    };
+
+    const poseAt = (t: number, raceRelative: boolean) => {
+      const labelLines: Record<string, LabelLine[]> = {};
       for (const c of CORNERS) {
-        const corner = data.corners[c.key];
-        const v = valueAt(data.timestamps, corner.data, t);
-        const delta = v === null ? 0 : v - corner.baseline;
-        h[c.key] = delta / data.scale;
-        inches[c.key] =
-          v === null || data.inchesPerCanon === null ? null : delta * data.inchesPerCanon;
+        labelLines[c.key] = [
+          {
+            text: c.label,
+            color: multi ? TITLE_GREY : CORNER_COLORS[c.key],
+          },
+        ];
       }
-      // Bilinear warp: every grid vertex blends the four corner heights.
-      for (let i = 0; i < liveBase.length; i++) {
-        const { x, z } = liveBase[i];
-        const u = (x + GRID_L / 2) / GRID_L; // 0 rear -> 1 front
-        const w = (z + GRID_W / 2) / GRID_W; // 0 left -> 1 right
-        const rear = h.rl * (1 - w) + h.rr * w;
-        const front = h.fl * (1 - w) + h.fr * w;
-        livePositions.setY(i, BASE_HEIGHT + rear * (1 - u) + front * u);
+
+      for (let li = 0; li < data.perLog.length; li++) {
+        const log = data.perLog[li];
+        const grid = grids[li];
+        const tLog = logTime(li, t, raceRelative);
+        const h: Record<string, number> = {};
+        for (const c of CORNERS) {
+          const corner = log.corners[c.key];
+          const v = valueAt(log.timestamps, corner.data, tLog);
+          const delta = v === null ? 0 : v - corner.baseline;
+          h[c.key] = delta / data.scale;
+          const inch =
+            v === null || data.inchesPerCanon === null
+              ? null
+              : (v - corner.baseline) * data.inchesPerCanon;
+          labelLines[c.key].push({
+            text: inch === null ? "—" : `${inch >= 0 ? "+" : ""}${inch.toFixed(2)}"`,
+            color: multi ? log.color : CORNER_COLORS[c.key],
+          });
+        }
+        // Bilinear warp: every grid vertex blends the four corner heights.
+        for (let i = 0; i < grid.base.length; i++) {
+          const { x, z } = grid.base[i];
+          const u = (x + GRID_L / 2) / GRID_L; // 0 rear -> 1 front
+          const w = (z + GRID_W / 2) / GRID_W; // 0 left -> 1 right
+          const rear = h.rl * (1 - w) + h.rr * w;
+          const front = h.fl * (1 - w) + h.fr * w;
+          grid.positions.setY(i, BASE_HEIGHT + rear * (1 - u) + front * u);
+        }
+        grid.positions.needsUpdate = true;
+        for (const c of CORNERS) {
+          const pos = grid.ticks[c.key].geometry.getAttribute(
+            "position",
+          ) as THREE.BufferAttribute;
+          pos.setY(1, BASE_HEIGHT + h[c.key]);
+          pos.needsUpdate = true;
+        }
       }
-      livePositions.needsUpdate = true;
 
       for (const c of CORNERS) {
-        const y = BASE_HEIGHT + h[c.key];
-        const post = posts[c.key];
-        const pos = post.geometry.getAttribute("position") as THREE.BufferAttribute;
-        pos.setY(1, y);
-        pos.needsUpdate = true;
-        const inch = inches[c.key];
-        const text =
-          inch === null
-            ? c.label
-            : `${c.label}\n${inch >= 0 ? "+" : ""}${inch.toFixed(2)}"`;
-        if (lastShown[c.key] !== text) {
-          lastShown[c.key] = text;
-          cornerLabels[c.key].update(text);
+        const lines = labelLines[c.key];
+        // Single log: fold the one value into the name line's color scheme.
+        const key = lines.map((l) => l.text + l.color).join("|");
+        if (lastShown[c.key] !== key) {
+          lastShown[c.key] = key;
+          cornerLabels[c.key].update(lines);
         }
-        cornerLabels[c.key].sprite.position.y = BASE_HEIGHT + h[c.key] + 0.45;
       }
     };
 
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      let t: number | null;
+      let t: number | null = null;
+      let raceRelative = false;
       if (playingRef.current) {
-        if (playheadRef.current === null) playheadRef.current = data.playStart;
+        raceRelative = true;
+        if (playheadRef.current === null) playheadRef.current = -1;
         playheadRef.current += 1 / 60;
-        if (playheadRef.current >= data.playEnd) {
+        if (playheadRef.current >= data.playMax) {
           playheadRef.current = null;
           playingRef.current = false;
           setPlaying(false);
-          t = data.playEnd;
+          t = data.playMax;
         } else {
           t = playheadRef.current;
         }
         if (clockLabelRef.current && t !== null) {
-          const raceT = t - data.raceStart;
           clockLabelRef.current.textContent =
-            raceT >= 0 ? `+${raceT.toFixed(2)}s` : `${raceT.toFixed(2)}s`;
+            t >= 0 ? `+${t.toFixed(2)}s` : `${t.toFixed(2)}s`;
         }
       } else {
         t = cursorRef.current;
         if (clockLabelRef.current) clockLabelRef.current.textContent = "";
       }
-      if (t !== null) poseAt(t);
-      else if (performance.now() - t0Wall < 500) poseAt(data.playStart);
+      if (t !== null) poseAt(t, raceRelative);
+      else if (performance.now() - t0Wall < 500) poseAt(-1, true);
       controls.update();
       renderer.render(scene, camera);
     };
@@ -652,6 +728,7 @@ export function SuspensionPanel({
   if (!data || hidden) return null;
 
   const anchored = layout.x === null || layout.y === null;
+  const multi = data.perLog.length > 1;
 
   return (
     <div
@@ -673,6 +750,20 @@ export function SuspensionPanel({
         <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
           Suspension
         </span>
+        {multi && (
+          <span className="flex min-w-0 items-center gap-1.5 truncate">
+            {data.perLog.map((l) => (
+              <span
+                key={l.fileId}
+                className="max-w-24 truncate text-[10px]"
+                style={{ color: l.color }}
+                title={l.fileName}
+              >
+                {l.fileName}
+              </span>
+            ))}
+          </span>
+        )}
         <span
           ref={clockLabelRef}
           className="font-mono text-[10px] tabular-nums text-amber-300/90"
