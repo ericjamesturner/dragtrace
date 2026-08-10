@@ -225,7 +225,39 @@ function FileRow({
   const renameFile = useMutation(api.files.rename);
   const removeTimeslip = useMutation(api.timeslips.remove);
   const [editingName, setEditingName] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [fileName, setFileName] = useState(file.fileName);
+
+  /**
+   * Opening the signed URL hands back a storage-id filename, and a browser will
+   * often render a CSV in the tab instead of saving it. Pull the blob and save
+   * it under the name the racer uploaded.
+   */
+  const downloadFile = async () => {
+    if (!url || downloading) return;
+    setDownloading(true);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Download failed (${res.status})`);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = file.fileName.endsWith(".csv")
+        ? file.fileName
+        : `${file.fileName}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      // Big logs on a bad connection are the usual cause; the tab fallback
+      // still gets the file even if it lands with the storage id as its name.
+      window.open(url, "_blank");
+    } finally {
+      setDownloading(false);
+    }
+  };
   const [editingNotes, setEditingNotes] = useState(false);
   const [notes, setNotes] = useState(file.notes ?? "");
   const [showTimeslipForm, setShowTimeslipForm] = useState(false);
@@ -294,13 +326,14 @@ function FileRow({
         </div>
         <div className="flex gap-1">
           {url && (
-            <Tip content="Download">
+            <Tip content={downloading ? "Downloading…" : "Download the log"}>
               <Button
                 variant="ghost"
                 size="icon-sm"
-                onClick={() => window.open(url, "_blank")}
+                disabled={downloading}
+                onClick={() => void downloadFile()}
               >
-                <DownloadIcon />
+                <DownloadIcon className={downloading ? "animate-pulse" : ""} />
               </Button>
             </Tip>
           )}

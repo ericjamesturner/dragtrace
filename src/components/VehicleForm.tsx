@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import type { Doc } from "../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,7 +18,8 @@ interface VehicleFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   vehicle?: Doc<"vehicles">;
-  onDone: () => void;
+  /** Receives the new vehicle id on create, so callers can jump straight in. */
+  onDone: (createdId?: Id<"vehicles">) => void;
 }
 
 export function VehicleForm({
@@ -50,13 +51,14 @@ export function VehicleForm({
         name: name.trim(),
         description: description.trim() || undefined,
       });
+      onDone();
     } else {
-      await createVehicle({
+      const createdId = await createVehicle({
         name: name.trim(),
         description: description.trim() || undefined,
       });
+      onDone(createdId);
     }
-    onDone();
   };
 
   return (
@@ -72,7 +74,7 @@ export function VehicleForm({
               id="vehicle-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. 2018 Miata ND2"
+              placeholder="e.g. Sonoma Truck"
               autoFocus
             />
           </div>

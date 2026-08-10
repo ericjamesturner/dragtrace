@@ -2,13 +2,20 @@ import { createContext, useContext, useState, useCallback, useEffect, lazy, Susp
 import { useAuthActions } from "@convex-dev/auth/react";
 import type { Id } from "../../convex/_generated/dataModel";
 import { VehicleSidebar } from "./VehicleSidebar";
+import { Home } from "./Home";
 import { EventList } from "./EventList";
 import { FileList } from "./FileList";
 import { ChannelManager } from "./ChannelManager";
-import { Preferences } from "./Preferences";
+import { Settings, type SettingsSection } from "./Settings";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { MenuIcon, LogOutIcon, SettingsIcon, SlidersHorizontalIcon } from "lucide-react";
+import { ChevronsUpDownIcon, LogOutIcon, MenuIcon, SettingsIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { AdminMenu } from "./AdminControls";
 import { useQuery } from "convex/react";
@@ -22,7 +29,7 @@ type NavState =
   | { view: "files"; vehicleId: Id<"vehicles">; eventId: Id<"events"> }
   | { view: "viewer"; vehicleId: Id<"vehicles">; eventId: Id<"events">; fileIds: Id<"files">[] }
   | { view: "channel-manager" }
-  | { view: "preferences" };
+  | { view: "settings"; section: SettingsSection };
 
 interface NavContextValue {
   nav: NavState;
@@ -31,7 +38,7 @@ interface NavContextValue {
   goToFiles: (vehicleId: Id<"vehicles">, eventId: Id<"events">) => void;
   goToViewer: (vehicleId: Id<"vehicles">, eventId: Id<"events">, fileIds: Id<"files">[]) => void;
   goToChannelManager: () => void;
-  goToPreferences: () => void;
+  openSettings: (section?: SettingsSection) => void;
 }
 
 const NavContext = createContext<NavContextValue | null>(null);
@@ -47,8 +54,15 @@ function parseNavFromUrl(): NavState {
   if (params.has("channels")) {
     return { view: "channel-manager" };
   }
-  if (params.has("preferences")) {
-    return { view: "preferences" };
+  if (params.has("settings") || params.has("account") || params.has("preferences")) {
+    const value = params.get("settings");
+    const section: SettingsSection =
+      value === "units" || params.has("preferences")
+        ? "units"
+        : value === "billing" || params.has("account")
+          ? "billing"
+          : "profile";
+    return { view: "settings", section };
   }
   const vehicleId = params.get("vehicle");
   const eventId = params.get("event");
@@ -83,8 +97,8 @@ function navToUrl(nav: NavState): string {
     params.set("channels", "");
     return `?${params.toString()}`;
   }
-  if (nav.view === "preferences") {
-    params.set("preferences", "");
+  if (nav.view === "settings") {
+    params.set("settings", nav.section);
     return `?${params.toString()}`;
   }
   if (nav.view === "events" || nav.view === "files" || nav.view === "viewer") {
@@ -104,7 +118,6 @@ export function Layout() {
   const { signOut } = useAuthActions();
   const [nav, setNav] = useState<NavState>(parseNavFromUrl);
   const [mobileOpen, setMobileOpen] = useState(false);
-
   // Sync nav state to URL
   useEffect(() => {
     const url = navToUrl(nav);
@@ -136,8 +149,13 @@ export function Layout() {
     []
   );
   const goToChannelManager = useCallback(() => setNav({ view: "channel-manager" }), []);
-  const goToPreferences = useCallback(() => setNav({ view: "preferences" }), []);
+  const openSettings = useCallback(
+    (section: SettingsSection = "profile") =>
+      setNav({ view: "settings", section }),
+    []
+  );
 
+  const me = useQuery(api.users.me);
   // The channel taxonomy is shared reference data, so only admins may edit it.
   const adminState = useQuery(api.admin.state);
   const isAdmin = adminState?.isAdmin ?? false;
@@ -149,18 +167,53 @@ export function Layout() {
     goToFiles,
     goToViewer,
     goToChannelManager,
-    goToPreferences,
+    openSettings,
   };
 
   const sidebarContent = <VehicleSidebar onSelect={() => setMobileOpen(false)} />;
 
-  if (nav.view === "preferences") {
-    return (
-      <NavContext value={contextValue}>
-        <Preferences />
-      </NavContext>
-    );
-  }
+  // Standard account area at the bottom of the sidebar: who you are, and the
+  // one word "Settings".
+  const settingsButton = (
+    <div className="border-t">
+      <button
+        onClick={() => {
+          setMobileOpen(false);
+          openSettings();
+        }}
+        className={`flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-sm transition-colors hover:bg-muted ${
+          nav.view === "settings"
+            ? "text-foreground font-medium"
+            : "text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        <SettingsIcon className="size-4" />
+        Settings
+      </button>
+      {/* Your email is the account menu, like everywhere else. */}
+      {me?.email && (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button className="flex w-full cursor-pointer items-center gap-2.5 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" />
+            }
+          >
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold uppercase text-foreground">
+              {(me.name || me.email)[0]}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-left">{me.name || me.email}</span>
+            <ChevronsUpDownIcon className="size-4 shrink-0" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-48">
+            <DropdownMenuItem onClick={() => void signOut()}>
+              <LogOutIcon />
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
+  );
 
   // Channel Manager takes over the full screen
   if (nav.view === "channel-manager" && isAdmin) {
@@ -193,38 +246,12 @@ export function Layout() {
         <aside className="hidden w-64 shrink-0 border-r bg-muted/30 md:flex md:flex-col">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <h1 className="text-sm font-semibold tracking-tight">DragTrace</h1>
-            <div className="flex items-center gap-1">
-              <AdminMenu />
-              <Tip content="Preferences">
-                <Button variant="ghost" size="icon-sm" onClick={goToPreferences}>
-                  <SlidersHorizontalIcon />
-                </Button>
-              </Tip>
-              {isAdmin && (
-                <Tip content="Channel Manager">
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={goToChannelManager}
-                  >
-                    <SettingsIcon />
-                  </Button>
-                </Tip>
-              )}
-              <Tip content="Sign out">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => void signOut()}
-                >
-                  <LogOutIcon />
-                </Button>
-              </Tip>
-            </div>
+            <AdminMenu />
           </div>
           <div className="flex-1 overflow-hidden">
             {sidebarContent}
           </div>
+          {settingsButton}
         </aside>
 
         {/* Mobile header + sheet sidebar */}
@@ -240,19 +267,22 @@ export function Layout() {
                     DragTrace
                   </h1>
                 </div>
-                {sidebarContent}
+                <div className="flex h-full flex-col">
+                  <div className="flex-1 overflow-hidden">{sidebarContent}</div>
+                  {settingsButton}
+                </div>
               </SheetContent>
             </Sheet>
             <h1 className="text-sm font-semibold tracking-tight">DragTrace</h1>
             <div className="ml-auto flex items-center gap-1">
               <AdminMenu />
-              <Tip content="Sign out">
+              <Tip content="Settings">
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => void signOut()}
+                  onClick={() => openSettings()}
                 >
-                  <LogOutIcon />
+                  <SettingsIcon />
                 </Button>
               </Tip>
             </div>
@@ -266,6 +296,7 @@ export function Layout() {
         <main className="hidden flex-1 overflow-auto md:block">
           <ContentArea />
         </main>
+
       </div>
     </NavContext>
   );
@@ -276,15 +307,13 @@ function ContentArea() {
 
   switch (nav.view) {
     case "vehicles":
-      return (
-        <div className="flex h-full items-center justify-center text-muted-foreground">
-          <p>Select a vehicle from the sidebar</p>
-        </div>
-      );
+      return <Home />;
     case "events":
       return <EventList vehicleId={nav.vehicleId} />;
     case "files":
       return <FileList vehicleId={nav.vehicleId} eventId={nav.eventId} />;
+    case "settings":
+      return <Settings section={nav.section} />;
     case "channel-manager":
       return null; // Handled above as full-screen view
   }

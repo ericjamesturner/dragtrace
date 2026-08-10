@@ -99,7 +99,7 @@ export function EventForm({
               id="event-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Track Day at Laguna Seca"
+              placeholder="e.g. Sonoma Divisional"
               autoFocus
             />
           </div>

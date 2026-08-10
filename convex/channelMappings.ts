@@ -319,7 +319,7 @@ export const categorizeChannels = action({
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
           max_tokens: 4096,
-          system: `You categorize Haltech ECU datalog channels. These are real channel names from Haltech Elite ECUs used in drag racing.
+          system: `You categorize Haltech ECU datalog channels. These are real channel names from Haltech ECUs used in drag racing.
 
 Existing categories:
 ${treeDesc}

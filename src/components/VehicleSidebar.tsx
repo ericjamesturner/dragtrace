@@ -53,7 +53,7 @@ export function VehicleSidebar({ onSelect }: { onSelect?: () => void }) {
           <p className="px-4 py-2 text-xs text-muted-foreground">Loading...</p>
         ) : vehicles.length === 0 ? (
           <p className="px-4 py-2 text-xs text-muted-foreground">
-            No vehicles yet. Add one above.
+            No cars yet.
           </p>
         ) : (
           <div className="px-2">

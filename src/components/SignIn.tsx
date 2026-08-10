@@ -11,17 +11,38 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export function SignIn() {
+export function SignIn({
+  initialFlow = "signIn",
+  onBack,
+}: {
+  initialFlow?: "signIn" | "signUp";
+  /** Present when the landing page is behind us, so there is somewhere to go. */
+  onBack?: () => void;
+} = {}) {
   const { signIn } = useAuthActions();
-  const [flow, setFlow] = useState<"signIn" | "signUp">("signIn");
+  const [flow, setFlow] = useState<"signIn" | "signUp">(initialFlow);
   const [error, setError] = useState("");
 
   return (
     <div className="flex min-h-dvh items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-6">
-        <h1 className="text-center text-3xl font-bold tracking-tight">
-          DragTrace
-        </h1>
+        <div className="space-y-1.5">
+          <h1 className="text-center text-3xl font-bold tracking-tight">
+            {onBack ? (
+              <button
+                onClick={onBack}
+                className="cursor-pointer transition-opacity hover:opacity-70"
+              >
+                DragTrace
+              </button>
+            ) : (
+              "DragTrace"
+            )}
+          </h1>
+          <p className="text-center text-sm text-muted-foreground">
+            The datalog viewer that has your back.
+          </p>
+        </div>
         <Card>
           <CardHeader>
             <CardTitle>{flow === "signIn" ? "Sign In" : "Sign Up"}</CardTitle>
@@ -59,6 +80,8 @@ export function SignIn() {
                   name="email"
                   type="email"
                   placeholder="you@example.com"
+                  autoComplete="email"
+                  autoFocus
                   required
                 />
               </div>
@@ -69,6 +92,7 @@ export function SignIn() {
                   name="password"
                   type="password"
                   placeholder="Password"
+                  autoComplete={flow === "signIn" ? "current-password" : "new-password"}
                   required
                 />
               </div>
