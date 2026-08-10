@@ -28,7 +28,6 @@ import {
   detectLift,
   type RaceTimingInfo,
 } from "./RpmPreview";
-import { Tip } from "@/components/ui/tooltip";
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -671,15 +670,39 @@ function PassCard({
             render={
               <Button
                 variant="ghost"
-                size="icon-xs"
-                className="opacity-0 group-hover/card:opacity-100"
+                size="icon-sm"
+                className="text-muted-foreground hover:text-foreground"
                 onClick={(e) => e.stopPropagation()}
               />
             }
           >
-            <MoreVerticalIcon />
+            <MoreVerticalIcon className="size-5" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+          <DropdownMenuContent
+            align="end"
+            className="w-auto min-w-44"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                setFileName(file.fileName.replace(/\.[^.]+$/, ""));
+                setEditingName(true);
+              }}
+            >
+              <PencilIcon />
+              Rename pass
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                setNotes(file.notes ?? "");
+                setEditingNotes(true);
+              }}
+            >
+              <PencilIcon />
+              Edit note
+            </DropdownMenuItem>
             <DropdownMenuItem
               disabled={!url || downloading}
               onClick={(e) => {
@@ -690,16 +713,43 @@ function PassCard({
               <DownloadIcon />
               {downloading ? "Downloading…" : "Download log"}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={(e) => {
-                e.stopPropagation();
-                setEditingTimeslip(null);
-                setShowTimeslipForm(true);
-              }}
-            >
-              <PlusIcon />
-              Add timeslip
-            </DropdownMenuItem>
+            {firstSlip ? (
+              <>
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditingTimeslip(firstSlip);
+                    setShowTimeslipForm(true);
+                  }}
+                >
+                  <PencilIcon />
+                  Edit timeslip
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm("Delete this timeslip?")) {
+                      void removeTimeslip({ id: firstSlip._id });
+                    }
+                  }}
+                >
+                  <TrashIcon />
+                  Delete timeslip
+                </DropdownMenuItem>
+              </>
+            ) : (
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditingTimeslip(null);
+                  setShowTimeslipForm(true);
+                }}
+              >
+                <PlusIcon />
+                Add timeslip
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               variant="destructive"
               onClick={(e) => {
@@ -776,41 +826,12 @@ function PassCard({
                         <TimeslipLine label="E.T." value={`≈ ${estimate.et.toFixed(3)}`} />
                       )}
                       {estimate.mph !== undefined && (
-                        <TimeslipLine label="MPH" value={`≈ ${estimate.mph.toFixed(1)}`} />
+                        <TimeslipLine label="MPH" value={`≈ ${estimate.mph.toFixed(2)}`} />
                       )}
                     </>
                   )}
                 </>
               )}
-              <div className="flex justify-end gap-0.5 opacity-0 transition-opacity group-hover/card:opacity-100">
-                <Tip content="Edit timeslip">
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingTimeslip(ts);
-                      setShowTimeslipForm(true);
-                    }}
-                  >
-                    <PencilIcon />
-                  </Button>
-                </Tip>
-                <Tip content="Delete timeslip">
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (window.confirm("Delete this timeslip?")) {
-                        void removeTimeslip({ id: ts._id });
-                      }
-                    }}
-                  >
-                    <TrashIcon className="text-destructive" />
-                  </Button>
-                </Tip>
-              </div>
             </div>
           ))
         )}
