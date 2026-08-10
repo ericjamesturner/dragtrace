@@ -1,6 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import { useAction } from "convex/react";
-import { api } from "../../convex/_generated/api";
+import { useMemo, useState } from "react";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import {
   Dialog,
@@ -35,8 +33,6 @@ export interface CompareSlipRef {
   /** No-lift projections, when the pass lifted and the math had references. */
   estEt?: number;
   estMph?: number;
-  /** The pass note ("Spun down low") — context the analysis should hear. */
-  notes?: string;
 }
 
 interface CompareRow {
@@ -55,30 +51,6 @@ interface CompareRow {
 
 function fmt(v: number | undefined, dp: number, approx?: boolean): string {
   return v !== undefined ? `${approx ? "≈" : ""}${v.toFixed(dp)}` : "—";
-}
-
-/** Flatten one side into what the analysis action wants to hear about. */
-function toAnalysisInput(s: CompareSlipRef) {
-  const t = s.slip;
-  return {
-    name: s.passName,
-    event: s.eventName,
-    date: s.eventDate,
-    notes: s.notes,
-    estEt: s.estEt,
-    estMph: s.estMph,
-    round: s.round,
-    delayBox: t.delayBox,
-    rt: t.rt,
-    sixtyFt: t.sixtyFt,
-    threeThirty: t.threeThirty,
-    eighthEt: t.eighthEt,
-    eighthMph: t.eighthMph,
-    thousandFt: t.thousandFt,
-    et: t.et,
-    mph: t.mph,
-    dialIn: t.dialIn,
-  };
 }
 
 /** Which side takes the line, if either: null on fouls, dashes and dead heats. */
@@ -151,11 +123,6 @@ export function SlipCompareDialog({
 }) {
   const [pickedId, setPickedId] = useState<Id<"timeslips"> | null>(null);
 
-  const compareAnalysis = useAction(api.timeslips.compareAnalysis);
-  const [analysis, setAnalysis] = useState<string | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analysisError, setAnalysisError] = useState(false);
-
   const current = slips.find((s) => s.slip._id === currentId);
   const others = useMemo(
     () => slips.filter((s) => s.slip._id !== currentId),
@@ -177,30 +144,6 @@ export function SlipCompareDialog({
   }, [others, current]);
 
   const other = others.find((s) => s.slip._id === pickedId) ?? fallback;
-
-  // A new opponent is a new comparison — the old breakdown no longer applies.
-  const otherId = other?.slip._id ?? null;
-  useEffect(() => {
-    setAnalysis(null);
-    setAnalysisError(false);
-  }, [otherId, currentId]);
-
-  const handleAnalyze = async () => {
-    if (!current || !other || analyzing) return;
-    setAnalyzing(true);
-    setAnalysisError(false);
-    try {
-      const text = await compareAnalysis({
-        current: toAnalysisInput(current),
-        other: toAnalysisInput(other),
-      });
-      setAnalysis(text);
-    } catch {
-      setAnalysisError(true);
-    } finally {
-      setAnalyzing(false);
-    }
-  };
 
   // The picker, grouped by event in the order the slips already carry
   // (newest event first, passes in run order).
@@ -421,27 +364,7 @@ export function SlipCompareDialog({
               >
                 Open both logs
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1"
-                disabled={analyzing}
-                onClick={() => void handleAnalyze()}
-              >
-                {analyzing ? "Analyzing…" : "Analyze"}
-              </Button>
             </div>
-
-            {analysisError && (
-              <p className="pt-2 font-sans text-[11px] text-red-400">
-                The analysis failed. Try again.
-              </p>
-            )}
-            {analysis && (
-              <div className="mt-3 rounded-md border bg-muted/40 px-3 py-2.5 font-sans text-xs leading-relaxed whitespace-pre-wrap">
-                {analysis}
-              </div>
-            )}
 
             <p className="pt-3 font-sans text-[11px] leading-relaxed text-muted-foreground">
               The middle number is the gap on that line; the arrow points at

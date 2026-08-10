@@ -414,7 +414,6 @@ export function FileList({
       eventDate: ev?.date ?? "",
       estEt: estimates[f._id]?.et?.value,
       estMph: estimates[f._id]?.mph?.value,
-      notes: f.notes,
     }));
   }, [vehicleSlips, vehicleFiles, vehicleEvents, estimates]);
 
