@@ -5,6 +5,8 @@ import type { Id, Doc } from "../../convex/_generated/dataModel";
 import { useNav } from "./Layout";
 import { FileUpload } from "./FileUpload";
 import { TimeslipForm } from "./TimeslipForm";
+import { SlipCompareDialog, type CompareSlipRef } from "./SlipCompareDialog";
+import { SEGMENTS, segmentTimes, type SegmentKey } from "@/lib/timeslip-segments";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
@@ -15,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  ArrowLeftRightIcon,
   ChevronLeftIcon,
   DownloadIcon,
   TrashIcon,
@@ -46,29 +49,8 @@ function formatFileSize(bytes: number): string {
 const LOW_METRICS = ["rt", "sixtyFt", "threeThirty", "eighthEt", "thousandFt", "et"] as const;
 /** Where higher is faster. */
 const HIGH_METRICS = ["eighthMph", "mph"] as const;
-/** Marker-to-marker splits derived from the slip's cumulative clocks. */
-const SEGMENTS = [
-  { key: "seg60_330", label: "60-330", from: "sixtyFt", to: "threeThirty" },
-  { key: "seg330_660", label: "330-660", from: "threeThirty", to: "eighthEt" },
-  { key: "seg660_1000", label: "660-1000", from: "eighthEt", to: "thousandFt" },
-  { key: "seg1000_1320", label: "1000-1320", from: "thousandFt", to: "et" },
-] as const;
-type SegmentKey = (typeof SEGMENTS)[number]["key"];
 type MetricKey = (typeof LOW_METRICS)[number] | (typeof HIGH_METRICS)[number];
 type MetricBests = Partial<Record<MetricKey | SegmentKey, number>>;
-
-/** Each segment time a slip's clocks can support, rounded to slip precision so
- *  equal splits compare equal for the best-of-event highlight. */
-function segmentTimes(ts: Doc<"timeslips">): Partial<Record<SegmentKey, number>> {
-  const out: Partial<Record<SegmentKey, number>> = {};
-  for (const s of SEGMENTS) {
-    const from = ts[s.from];
-    const to = ts[s.to];
-    if (from === undefined || to === undefined || from <= 0 || to <= from) continue;
-    out[s.key] = parseFloat((to - from).toFixed(3));
-  }
-  return out;
-}
 
 /** One flat pass's contribution to a ratio: its finish clock, the earlier
  *  split it is divided by, and the ratio those two make. */
@@ -122,6 +104,7 @@ export function FileList({
   // event when the racer asks for "all data".
   const vehicleFiles = useQuery(api.files.listByVehicle, { vehicleId });
   const vehicleSlips = useQuery(api.timeslips.listByVehicle, { vehicleId });
+  const vehicleEvents = useQuery(api.events.listByVehicle, { vehicleId });
   const [estScope, setEstScope] = useState<"event" | "all">("event");
   // Stored order is newest-first (uploads land at position 0). The gallery
   // reads like the weekend went: first pass on the left, latest on the right.
@@ -254,7 +237,7 @@ export function FileList({
   const MAX_REFS = 8;
 
   const estimates = useMemo(() => {
-    if (!files || !vehicleFiles || !vehicleSlips) return {};
+    if (!vehicleFiles || !vehicleSlips) return {};
 
     const slipsByFile = new Map<string, Doc<"timeslips">[]>();
     for (const s of vehicleSlips) {
@@ -337,8 +320,10 @@ export function FileList({
       ? { ratio: avg(mphRefs.map(r => r.ratio)), refs: mphRefs }
       : null;
 
+    // Every pass of the car gets a projection, not just this event's — the
+    // compare dialog reaches across events.
     const out: Record<string, PassEstimate> = {};
-    for (const f of files) {
+    for (const f of vehicleFiles) {
       const info = infos.get(f._id);
       if (!info || info.lift === null || info.lift.finalLift === null) continue;
       const finalLift = info.lift.finalLift;
@@ -392,7 +377,39 @@ export function FileList({
       if (est.et !== undefined || est.mph !== undefined) out[f._id] = est;
     }
     return out;
-  }, [files, vehicleFiles, vehicleSlips, estScope, eventId]);
+  }, [vehicleFiles, vehicleSlips, estScope, eventId]);
+
+  // Every slip the car has, named well enough to stand outside its own event —
+  // the compare dialog's menu of opponents, projections riding along.
+  const slipRefs = useMemo<CompareSlipRef[]>(() => {
+    if (!vehicleSlips || !vehicleFiles || !vehicleEvents) return [];
+    const fileById = new Map(vehicleFiles.map((f) => [f._id, f] as const));
+    const eventById = new Map(vehicleEvents.map((e) => [e._id, e] as const));
+    const entries = vehicleSlips.flatMap((slip) => {
+      const f = fileById.get(slip.fileId);
+      if (!f) return [];
+      return [{ slip, file: f, ev: eventById.get(f.eventId) }];
+    });
+    // Newest event first; inside an event, the order the weekend ran. Stored
+    // file order is newest-first, so run order reads it backwards.
+    entries.sort((x, y) => {
+      const byDate = (y.ev?.date ?? "").localeCompare(x.ev?.date ?? "");
+      if (byDate !== 0) return byDate;
+      return (
+        (y.file.order ?? -Infinity) - (x.file.order ?? -Infinity) ||
+        x.file.uploadedAt - y.file.uploadedAt
+      );
+    });
+    return entries.map(({ slip, file: f, ev }) => ({
+      slip,
+      passName: f.fileName.replace(/\.[^.]+$/, ""),
+      round: f.round ?? slip.round,
+      eventName: ev?.name ?? "Unknown event",
+      eventDate: ev?.date ?? "",
+      estEt: estimates[f._id]?.et?.value,
+      estMph: estimates[f._id]?.mph?.value,
+    }));
+  }, [vehicleSlips, vehicleFiles, vehicleEvents, estimates]);
 
   // The event's best value per metric, drawn in green on whichever card
   // holds it. With a single slip in the event everything would be "best",
@@ -535,6 +552,7 @@ export function FileList({
                   onSlipStats={handleSlipStats}
                   alignWindow={alignWindow}
                   onOpenViewer={() => handleOpenViewer(file._id)}
+                  slipRefs={slipRefs}
                 />
               </div>
             );
@@ -558,6 +576,7 @@ function PassCard({
   onSlipStats,
   alignWindow,
   onOpenViewer,
+  slipRefs,
 }: {
   file: Doc<"files">;
   passNumber: number;
@@ -571,6 +590,7 @@ function PassCard({
   onSlipStats: (fileId: string, info: FileSlipStats) => void;
   alignWindow?: { preRace: number; postRace: number };
   onOpenViewer: () => void;
+  slipRefs: CompareSlipRef[];
 }) {
   const url = useQuery(api.files.getUrl, { fileId: file._id });
   const timeslips = useQuery(api.timeslips.listByFile, { fileId: file._id });
@@ -587,6 +607,7 @@ function PassCard({
   const [roundDraft, setRoundDraft] = useState("");
   const [showTimeslipForm, setShowTimeslipForm] = useState(false);
   const [editingTimeslip, setEditingTimeslip] = useState<Doc<"timeslips"> | null>(null);
+  const [showCompare, setShowCompare] = useState(false);
 
   useEffect(() => {
     if (!timeslips) return;
@@ -945,6 +966,17 @@ function PassCard({
                   Edit timeslip
                 </DropdownMenuItem>
                 <DropdownMenuItem
+                  // One slip is this one; a second gives it an opponent.
+                  disabled={slipRefs.length < 2}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowCompare(true);
+                  }}
+                >
+                  <ArrowLeftRightIcon />
+                  Compare slip
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   variant="destructive"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1193,6 +1225,14 @@ function PassCard({
         setEditingTimeslip(null);
       }}
     />
+    {firstSlip && (
+      <SlipCompareDialog
+        open={showCompare}
+        onOpenChange={setShowCompare}
+        currentId={firstSlip._id}
+        slips={slipRefs}
+      />
+    )}
     </>
   );
 }
