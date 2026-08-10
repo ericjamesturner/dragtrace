@@ -38,6 +38,31 @@ export const listByFile = query({
   },
 });
 
+/** Every slip the car has, for stats that reach across events. */
+export const listByVehicle = query({
+  args: { vehicleId: v.id("vehicles") },
+  handler: async (ctx, args) => {
+    const userId = await getEffectiveUserId(ctx);
+    if (!userId) return [];
+    const vehicle = await ctx.db.get(args.vehicleId);
+    if (!vehicle || vehicle.userId !== userId) return [];
+    const files = await ctx.db
+      .query("files")
+      .withIndex("by_vehicle", (q) => q.eq("vehicleId", args.vehicleId))
+      .collect();
+    const slips = [];
+    for (const file of files) {
+      slips.push(
+        ...(await ctx.db
+          .query("timeslips")
+          .withIndex("by_file", (q) => q.eq("fileId", file._id))
+          .collect())
+      );
+    }
+    return slips;
+  },
+});
+
 export const create = mutation({
   args: {
     fileId: v.id("files"),

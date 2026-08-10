@@ -71,7 +71,7 @@ function Tip({
   side,
 }: {
   children: React.ReactElement
-  content: string
+  content: React.ReactNode
   side?: "top" | "bottom" | "left" | "right"
 }) {
   return (
