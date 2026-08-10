@@ -59,23 +59,25 @@ function winnerOf(row: CompareRow): "a" | "b" | null {
   return (row.better === "low" ? d < 0 : d > 0) ? "a" : "b";
 }
 
-/** The margin between the lanes: size only, arrow at the winner. */
+/** The margin between the lanes: size only, arrow at the winner. The arrow
+ *  slots are always reserved, so the numbers stack in one straight column. */
 function GapCell({ row }: { row: CompareRow }) {
-  if (
+  const dead =
     row.a === undefined ||
     row.b === undefined ||
-    (row.redLight && (row.a < 0 || row.b < 0))
-  ) {
-    return <span className="text-center text-muted-foreground/40">—</span>;
-  }
-  const win = winnerOf(row);
-  if (win === null) {
-    return <span className="text-center text-muted-foreground/50">=</span>;
-  }
-  const mag = Math.abs(row.a - row.b).toFixed(row.dp);
+    (row.redLight && (row.a < 0 || row.b < 0));
+  const win = dead ? null : winnerOf(row);
+  const mag = dead
+    ? "—"
+    : win === null
+      ? "="
+      : Math.abs(row.a! - row.b!).toFixed(row.dp);
+  const cls = win === null ? "text-muted-foreground/40" : "text-green-400/90";
   return (
-    <span className="text-center text-green-400/90">
-      {win === "a" ? `◀ ${mag}` : `${mag} ▶`}
+    <span className="grid grid-cols-[0.7rem_1fr_0.7rem] items-baseline">
+      <span className={win === "a" ? cls : "invisible"}>◀</span>
+      <span className={`text-right ${cls}`}>{mag}</span>
+      <span className={`justify-self-end ${win === "b" ? cls : "invisible"}`}>▶</span>
     </span>
   );
 }
