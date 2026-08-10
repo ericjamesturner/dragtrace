@@ -59,27 +59,23 @@ function winnerOf(row: CompareRow): "a" | "b" | null {
   return (row.better === "low" ? d < 0 : d > 0) ? "a" : "b";
 }
 
-/** Signed, colored gap between the two slips on one line. */
-function DeltaCell({ row }: { row: CompareRow }) {
+/** The margin between the lanes: size only, arrow at the winner. */
+function GapCell({ row }: { row: CompareRow }) {
   if (
     row.a === undefined ||
     row.b === undefined ||
     (row.redLight && (row.a < 0 || row.b < 0))
   ) {
-    return <span className="text-right text-muted-foreground/40">—</span>;
+    return <span className="text-center text-muted-foreground/40">—</span>;
   }
-  const d = Number((row.a - row.b).toFixed(row.dp));
   const win = winnerOf(row);
-  const cls =
-    win === null
-      ? "text-muted-foreground/50"
-      : win === "a"
-        ? "text-green-400"
-        : "text-red-400";
+  if (win === null) {
+    return <span className="text-center text-muted-foreground/50">=</span>;
+  }
+  const mag = Math.abs(row.a - row.b).toFixed(row.dp);
   return (
-    <span className={`text-right ${cls}`}>
-      {d > 0 ? "+" : ""}
-      {d.toFixed(row.dp)}
+    <span className="text-center text-green-400/90">
+      {win === "a" ? `◀ ${mag}` : `${mag} ▶`}
     </span>
   );
 }
@@ -226,8 +222,8 @@ export function SlipCompareDialog({
           </p>
         ) : (
           <div className="font-mono text-xs tabular-nums">
-            {/* Column headings: the fixed pass, the picked pass, the gap. */}
-            <div className="grid grid-cols-[4.5rem_1fr_1fr_3.5rem] items-end gap-x-3 pb-2">
+            {/* Column headings: the two lanes, the margin between them. */}
+            <div className="grid grid-cols-[4.5rem_1fr_4rem_1fr] items-end gap-x-3 pb-2">
               <span />
               <div className="min-w-0 text-right">
                 <div className="pb-0.5 font-sans text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
@@ -235,6 +231,7 @@ export function SlipCompareDialog({
                 </div>
                 <SlipHeading s={current} />
               </div>
+              <span />
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
@@ -276,9 +273,6 @@ export function SlipCompareDialog({
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-              <span className="text-right font-sans text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                Gap
-              </span>
             </div>
 
             <Separator />
@@ -296,15 +290,15 @@ export function SlipCompareDialog({
                 return (
                   <div key={r.label}>
                     {i === splitStart && splitStart > 0 && <Separator className="my-1.5" />}
-                    <div className="grid grid-cols-[4.5rem_1fr_1fr_3.5rem] gap-x-3 py-0.5">
+                    <div className="grid grid-cols-[4.5rem_1fr_4rem_1fr] gap-x-3 py-0.5">
                       <span className="text-muted-foreground">{r.label}</span>
                       <span className={`text-right ${cellClass(r.a, "a")}`}>
                         {fmt(r.a, r.dp, r.approxA)}
                       </span>
+                      <GapCell row={r} />
                       <span className={`text-right ${cellClass(r.b, "b")}`}>
                         {fmt(r.b, r.dp, r.approxB)}
                       </span>
-                      <DeltaCell row={r} />
                     </div>
                   </div>
                 );
@@ -312,8 +306,8 @@ export function SlipCompareDialog({
             </div>
 
             <p className="pt-3 font-sans text-[11px] leading-relaxed text-muted-foreground">
-              Green means this pass wins that line. The gap is this pass minus
-              the other one.
+              The middle number is the gap on that line; the arrow points at
+              the pass that took it.
               {rows.some((r) => r.approxA || r.approxB) &&
                 " An ≈ number is the no-lift estimate for a lifted pass."}
             </p>
