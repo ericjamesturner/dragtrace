@@ -8,7 +8,7 @@ import { TraceChannelsDialog } from "./TraceChannelsDialog";
 import { findValueAtTime, formatValue, formatChannelValue, computeRangeStats, statusNote } from "@/lib/cursor-utils";
 import { convertForDisplay, convertFromDisplay, getDisplayUnit, getDisplayPrecision, getUnitOptions, resolveUnitKey, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
-import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon, MoveHorizontalIcon, HighlighterIcon } from "lucide-react";
+import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon, MoveHorizontalIcon, HighlighterIcon, ListPlusIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
@@ -1472,15 +1472,64 @@ export function TraceContainer({
                 title="Drag to resize every channels panel"
               />
             )}
-            <div className="flex shrink-0 items-center gap-1 px-1.5 py-0.5 border-b border-white/10">
+            {/* The header is also the door channels come in through. Building a
+                trace is a different job from reading one, so it gets a door of
+                its own rather than one-channel-at-a-time from the sidebar. */}
+            <div className="flex shrink-0 items-center gap-1 px-1 py-1 border-b border-white/10">
               {!legendCollapsed && (
-                <span className="flex-1 truncate pl-1 text-[10px] text-white/40">
-                  Channels{avgRange ? ` · ${statsScopeLabel}` : ""}
-                </span>
+                <button
+                  onClick={() => setChannelsDialogOpen(true)}
+                  // Same button, the other direction: the door channels come in
+                  // through is also the door they go out through. Drop a channel
+                  // on it and it leaves the trace.
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.dataTransfer.dropEffect = "move";
+                    setDropToRemove(true);
+                  }}
+                  onDragLeave={() => setDropToRemove(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    // Without this the trace's own drop handler runs next and
+                    // puts the channel straight back.
+                    e.stopPropagation();
+                    setDropToRemove(false);
+                    let parsed: { logFileId?: Id<"files">; channelName?: string; sourceTraceId?: string };
+                    try {
+                      parsed = JSON.parse(e.dataTransfer.getData("text/plain"));
+                    } catch {
+                      return; // not a channel — a trace being reordered, say
+                    }
+                    if (!parsed.logFileId || !parsed.channelName) return;
+                    if (parsed.sourceTraceId && parsed.sourceTraceId !== trace.id) {
+                      onMoveChannel(parsed.sourceTraceId, parsed.logFileId, parsed.channelName);
+                    } else {
+                      pinAutoColors();
+                      onRemoveChannel(parsed.logFileId, parsed.channelName);
+                    }
+                  }}
+                  title="Add or remove channels — or drop a channel here to take it off this trace"
+                  className={`flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded px-1.5 py-0.5 text-xs transition-colors ${
+                    dropToRemove
+                      ? "bg-destructive/30 text-white"
+                      : "text-white/70 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  <ListPlusIcon className="size-3.5 shrink-0" />
+                  <span className="min-w-0 truncate font-medium">
+                    {dropToRemove ? "Drop to remove" : "Channels"}
+                  </span>
+                  {!dropToRemove && (
+                    <span className="ml-auto shrink-0 truncate text-[10px] text-white/40">
+                      {avgRange ? statsScopeLabel : trace.channels.length || ""}
+                    </span>
+                  )}
+                </button>
               )}
               <Tip content={legendCollapsed ? "Show channels on every trace" : "Hide channels on every trace"}>
                 <button
-                  className="text-white/40 hover:text-white/70 cursor-pointer"
+                  className="shrink-0 text-white/40 hover:text-white/70 cursor-pointer"
                   onClick={() => onToggleLegendCollapsed?.()}
                 >
                   {legendCollapsed
@@ -1759,51 +1808,6 @@ export function TraceContainer({
               </div>
             )}
 
-            {/* Building a trace is a different job from reading one, so it gets
-                a door of its own rather than one-channel-at-a-time from the
-                sidebar. */}
-            {!legendCollapsed && (
-              <button
-                onClick={() => setChannelsDialogOpen(true)}
-                // Same button, the other direction: it is the door channels come
-                // in through, so it is also the door they go out through. Drop a
-                // channel on it and it leaves the trace.
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  e.dataTransfer.dropEffect = "move";
-                  setDropToRemove(true);
-                }}
-                onDragLeave={() => setDropToRemove(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  // Without this the trace's own drop handler runs next and puts
-                  // the channel straight back.
-                  e.stopPropagation();
-                  setDropToRemove(false);
-                  let parsed: { logFileId?: Id<"files">; channelName?: string; sourceTraceId?: string };
-                  try {
-                    parsed = JSON.parse(e.dataTransfer.getData("text/plain"));
-                  } catch {
-                    return; // not a channel — a trace being reordered, say
-                  }
-                  if (!parsed.logFileId || !parsed.channelName) return;
-                  if (parsed.sourceTraceId && parsed.sourceTraceId !== trace.id) {
-                    onMoveChannel(parsed.sourceTraceId, parsed.logFileId, parsed.channelName);
-                  } else {
-                    pinAutoColors();
-                    onRemoveChannel(parsed.logFileId, parsed.channelName);
-                  }
-                }}
-                className={`shrink-0 cursor-pointer border-t px-2 py-1 text-xs transition-colors ${
-                  dropToRemove
-                    ? "border-destructive bg-destructive/30 text-white"
-                    : "border-white/10 bg-black/30 text-white/50 hover:bg-white/10 hover:text-white/80"
-                }`}
-              >
-                {dropToRemove ? "Drop to remove" : "Channels…"}
-              </button>
-            )}
           </div>
         )}
       </div>
