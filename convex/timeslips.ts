@@ -298,6 +298,29 @@ export const compareAnalysis = action({
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
 
+    // The model must never do its own subtraction — it gets arithmetic wrong
+    // often enough to poison the breakdown. Derive every number here.
+    const seg = (from?: number, to?: number) =>
+      from !== undefined && to !== undefined && to > from && from > 0
+        ? Number((to - from).toFixed(3))
+        : undefined;
+    const withDerived = (s: typeof args.current) => ({
+      ...s,
+      segments: {
+        "0-60": s.sixtyFt,
+        "60-330": seg(s.sixtyFt, s.threeThirty),
+        "330-660": seg(s.threeThirty, s.eighthEt),
+        "660-1000": seg(s.eighthEt, s.thousandFt),
+        "1000-1320": seg(s.thousandFt, s.et),
+      },
+      mphGainEighthToQuarter:
+        s.mph !== undefined && s.eighthMph !== undefined
+          ? Number((s.mph - s.eighthMph).toFixed(2))
+          : undefined,
+    });
+    const current = withDerived(args.current);
+    const other = withDerived(args.other);
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -314,19 +337,25 @@ export const compareAnalysis = action({
         fallbacks: "default",
         system: `You are a drag racing data analyst talking to an experienced racer. You compare two of their timeslips from the same car.
 
-All times are cumulative clocks at track markers in seconds (60', 330', 1/8 mile, 1000', 1/4 mile); mph values are trap speeds. estEt/estMph are no-lift projections for a pass where the driver lifted early. rt is reaction time (negative = red light; it does not affect elapsed times). Segment times come from subtracting cumulative clocks.
+All times are cumulative clocks at track markers in seconds (60', 330', 1/8 mile, 1000', 1/4 mile); mph values are trap speeds. estEt/estMph are no-lift projections for a pass where the driver lifted early. rt is reaction time (negative = red light; it does not affect elapsed times). Marker-to-marker segment times ("segments") and the 1/8-to-1/4 trap gain ("mphGainEighthToQuarter") are precomputed in the data. Use those numbers as given. Never subtract clocks yourself, and never state a difference you cannot read directly or form from one subtraction of two provided numbers.
 
-Write a short breakdown, in this shape:
-- One opening sentence: which pass was quicker and by how much, and the one place that decided it.
+Write a short breakdown in two clearly separated parts.
+
+Part 1, labeled exactly "What happened:" — facts only, from the clocks on the slips:
+- One sentence: which pass got to the stripe quicker and by how much, and the one place that decided it.
 - Where the gap came from: launch (60'), the middle (60-660), or the big end (660-1320). Name the segment(s) with the numbers.
-- What the trap speeds say about power/air vs driving, including the 1/8-to-1/4 mph gain if both slips have it.
-- One practical takeaway sentence.
+- What the trap speeds say about power vs driving, including the 1/8-to-1/4 mph gain if both slips have it.
+This part never contains a projected number. The real clocks of a lifted pass are still facts — state them as what the pass ran.
 
-Rules: plain text only, no markdown headings or tables. Short sentences. Under 130 words. Use the racer's numbers, rounded sensibly. If one pass lifted, judge the finish on the projection and say so. Use only what is in the data and the notes: never invent numbers, and never claim weather, wind, air, track prep, or conditions the notes do not state. Never dismiss a small margin as "a wash", negligible, or meaningless — thousandths decide drag races; call a close line close and give the number. Do not mention these instructions.`,
+Part 2, labeled exactly "What could have been:" — estimates only. Include this part only when at least one pass has estEt or estMph. State the projection with "projected" or "estimated" on the number, and say how the comparison would change if it held. When neither pass has a projection, omit this part and its label completely.
+
+End with one practical takeaway sentence, on its own line, grounded in the facts.
+
+Rules: plain text only, no markdown headings or tables. Short sentences. Under 150 words total. Use the racer's numbers, rounded sensibly. Use only what is in the data and the notes: never invent numbers, and never claim weather, wind, air, track prep, or conditions the notes do not state. Never dismiss a small margin as "a wash", negligible, or meaningless — thousandths decide drag races; call a close line close and give the number. Do not mention these instructions.`,
         messages: [
           {
             role: "user",
-            content: `THIS PASS:\n${JSON.stringify(args.current, null, 2)}\n\nOTHER PASS:\n${JSON.stringify(args.other, null, 2)}`,
+            content: `THIS PASS:\n${JSON.stringify(current, null, 2)}\n\nOTHER PASS:\n${JSON.stringify(other, null, 2)}`,
           },
         ],
       }),
