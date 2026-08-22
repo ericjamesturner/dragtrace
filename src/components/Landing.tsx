@@ -107,9 +107,11 @@ const SECTIONS = [
 export function Landing({
   onSignIn,
   onLegal,
+  onOpenLog,
 }: {
   onSignIn: (flow: "signIn" | "signUp") => void;
   onLegal: (page: "privacy" | "terms") => void;
+  onOpenLog: () => void;
 }) {
   const cta =
     "rounded-lg bg-white px-6 py-3 text-base font-semibold text-black transition-colors hover:bg-white/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white";
@@ -119,6 +121,7 @@ export function Landing({
       <SiteHeader
         onHome={() => window.scrollTo({ top: 0, behavior: "smooth" })}
         onSignIn={onSignIn}
+        onOpenLog={onOpenLog}
         links={NAV}
       />
 
@@ -139,6 +142,12 @@ export function Landing({
           <div className="mt-9 flex flex-wrap items-center gap-5">
             <button onClick={() => onSignIn("signUp")} className={cta}>
               Get started
+            </button>
+            <button
+              onClick={onOpenLog}
+              className="rounded-lg border border-white/20 px-5 py-3 text-base font-medium text-white/80 transition-colors hover:border-white/40 hover:text-white"
+            >
+              Open a datalog — no account
             </button>
             <p className="text-base text-white/60">$100 a year. Every car you own.</p>
           </div>

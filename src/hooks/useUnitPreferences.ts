@@ -40,9 +40,15 @@ export interface UnitPreferences {
  * Display units resolved for a vehicle: the user's preferences, with that
  * vehicle's overrides on top. Pass no vehicle to work with user-level only.
  */
-export function useUnitPreferences(vehicleId?: Id<"vehicles">): UnitPreferences {
-  const prefs = useQuery(api.userPreferences.get, {});
-  const vehicle = useQuery(api.vehicles.get, vehicleId ? { id: vehicleId } : "skip");
+export function useUnitPreferences(
+  vehicleId?: Id<"vehicles">,
+  enabled = true,
+): UnitPreferences {
+  const prefs = useQuery(api.userPreferences.get, enabled ? {} : "skip");
+  const vehicle = useQuery(
+    api.vehicles.get,
+    enabled && vehicleId ? { id: vehicleId } : "skip",
+  );
 
   const setUnits = useMutation(api.userPreferences.setUnits);
   const setVehicleUnits = useMutation(api.vehicles.setUnitOverrides);
@@ -60,26 +66,28 @@ export function useUnitPreferences(vehicleId?: Id<"vehicles">): UnitPreferences 
 
   const setUserSystem = useCallback(
     (system: UnitSystem) => {
+      if (!enabled) return;
       // Switching preset means "show me imperial", so per-quantity choices made
       // against the old preset are cleared rather than silently surviving it.
       void setUnits({ unitSystem: system, unitOverrides: "{}" });
     },
-    [setUnits],
+    [enabled, setUnits],
   );
 
   const setUserOverrides = useCallback(
     (overrides: UnitOverrides) => {
+      if (!enabled) return;
       void setUnits({ unitOverrides: JSON.stringify(overrides) });
     },
-    [setUnits],
+    [enabled, setUnits],
   );
 
   const setVehicleOverrides = useCallback(
     (overrides: UnitOverrides) => {
-      if (!vehicleId) return;
+      if (!enabled || !vehicleId) return;
       void setVehicleUnits({ id: vehicleId, unitOverrides: JSON.stringify(overrides) });
     },
-    [setVehicleUnits, vehicleId],
+    [enabled, setVehicleUnits, vehicleId],
   );
 
   const setQuantity = useCallback(
@@ -107,7 +115,9 @@ export function useUnitPreferences(vehicleId?: Id<"vehicles">): UnitPreferences 
     userOverrides,
     vehicleOverrides,
     resolved,
-    loading: prefs === undefined || (vehicleId !== undefined && vehicle === undefined),
+    loading:
+      enabled &&
+      (prefs === undefined || (vehicleId !== undefined && vehicle === undefined)),
     setUserSystem,
     setUserOverrides,
     setVehicleOverrides,

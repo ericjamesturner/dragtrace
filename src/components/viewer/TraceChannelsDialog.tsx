@@ -91,7 +91,7 @@ export function TraceChannelsDialog({
   onAdd: (names: string[]) => void;
   onRemove: (names: string[]) => void;
   onReorder: (channelNames: string[]) => void;
-  vehicleId: Id<"vehicles">;
+  vehicleId?: Id<"vehicles">;
   mathChannels: Doc<"mathChannels">[];
   /** Bumped when math channels are recomputed into the logs. The parsed defs
    *  are mutated in place, so nothing else tells this list they changed. */
@@ -419,10 +419,12 @@ export function TraceChannelsDialog({
 
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Button size="sm" variant="outline" onClick={() => setMathDialog({ editing: null })}>
-              <PlusIcon className="size-3.5" />
-              Math channel
-            </Button>
+            {vehicleId && (
+              <Button size="sm" variant="outline" onClick={() => setMathDialog({ editing: null })}>
+                <PlusIcon className="size-3.5" />
+                Math channel
+              </Button>
+            )}
             <p className="text-[11px] text-muted-foreground">
               Double-click or drag to move a channel across. Reorder with the
               arrows, or by dragging within the right list.
@@ -433,7 +435,7 @@ export function TraceChannelsDialog({
           </Button>
         </div>
       </DialogContent>
-      {mathDialog && (
+      {mathDialog && vehicleId && (
         <MathChannelDialog
           open
           onOpenChange={(o) => { if (!o) setMathDialog(null); }}

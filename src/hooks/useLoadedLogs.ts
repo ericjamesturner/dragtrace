@@ -2,57 +2,8 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useQueries } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { detectHaltech, detectRaceStartIndex, parseHaltech } from "@/lib/haltech-parser";
-import { addComputedChannels } from "@/lib/computed-channels";
-import { enrichWithDefinitions } from "@/lib/ecu/enrich";
-import { DEFAULT_ECU_TYPE } from "@/lib/ecu/registry";
-import type { ParsedLog } from "@/lib/log-types";
 import { CHART_COLORS, type LoadedLog } from "@/lib/viewer-types";
-
-function detectRaceStart(parsed: ParsedLog, sessionIndex: number): number | null {
-  const session = parsed.sessions[sessionIndex];
-  if (!session) return null;
-  const raceTimer =
-    session.channels.get("Race Timer") ?? session.channels.get("Race Time");
-  if (!raceTimer) return null;
-  const idx = detectRaceStartIndex(raceTimer);
-  return idx === null ? null : session.timestamps[idx];
-}
-
-// Seconds of data kept before the race start when opening a log.
-const CLIP_PRE_RACE_S = 2;
-
-/**
- * Drop everything before CLIP_PRE_RACE_S seconds ahead of the race start so
- * the viewer opens on the pull, and rebase timestamps to the clip point.
- * Returns the race start time in the new (rebased) timebase.
- */
-function clipSessionBeforeRace(
-  parsed: ParsedLog,
-  sessionIndex: number,
-  raceStartTime: number,
-): number {
-  const session = parsed.sessions[sessionIndex];
-  const clipStart = raceStartTime - CLIP_PRE_RACE_S;
-  if (!session || clipStart <= session.timestamps[0]) return raceStartTime;
-
-  let lo = 0;
-  while (lo < session.timestamps.length && session.timestamps[lo] < clipStart) lo++;
-  if (lo === 0 || lo >= session.timestamps.length) return raceStartTime;
-
-  const base = session.timestamps[lo];
-  const rowCount = session.timestamps.length - lo;
-  const timestamps = new Float64Array(rowCount);
-  for (let i = 0; i < rowCount; i++) {
-    timestamps[i] = session.timestamps[lo + i] - base;
-  }
-  const channels = new Map<string, Float64Array>();
-  for (const [name, arr] of session.channels) {
-    channels.set(name, arr.subarray(lo));
-  }
-  parsed.sessions[sessionIndex] = { ...session, timestamps, channels, rowCount };
-  return raceStartTime - base;
-}
+import { loadHaltechLog } from "@/lib/load-haltech-log";
 
 /**
  * Hook to load multiple log files for the viewer.
@@ -146,35 +97,13 @@ export function useLoadedLogs(fileIds: Id<"files">[]) {
             const text = await res.text();
             if (cancelled) return;
 
-            if (!detectHaltech(text)) {
-              errs.push(`${fileName}: Not a Haltech log`);
-              return;
-            }
-
-            const parsed = parseHaltech(text);
-            if (parsed.sessions.length === 0) {
-              errs.push(`${fileName}: No sessions`);
-              return;
-            }
-
-            const activeSessionIndex = 0;
-            let raceStartTime = detectRaceStart(parsed, activeSessionIndex);
-            if (raceStartTime !== null) {
-              raceStartTime = clipSessionBeforeRace(parsed, activeSessionIndex, raceStartTime);
-            }
-            await enrichWithDefinitions(parsed, DEFAULT_ECU_TYPE);
-            if (cancelled) return;
-            addComputedChannels(parsed);
-
-            const log: LoadedLog = {
+            const log = await loadHaltechLog({
+              text,
               fileId,
               fileName,
-              parsed,
-              activeSessionIndex,
-              raceStartTime,
-              logColor: CHART_COLORS[index % CHART_COLORS.length],
-              logIndex: index,
-            };
+              index,
+            });
+            if (cancelled) return;
 
             cache.set(fileId, log);
             results[index] = log;

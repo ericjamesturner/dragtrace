@@ -401,7 +401,7 @@ interface Props {
   onSetChannelOrder?: (channelNames: string[]) => void;
   /** Open the picker as soon as this trace appears — it was just created. */
   autoOpenChannels?: boolean;
-  vehicleId: Id<"vehicles">;
+  vehicleId?: Id<"vehicles">;
   mathChannels: Doc<"mathChannels">[];
   mathVersion: number;
   onSetUnit: (quantitySlug: string, unitKey: string) => void;
@@ -558,7 +558,10 @@ export function TraceContainer({
   const [channelsDialogOpen, setChannelsDialogOpen] = useState(false);
   /** A channel is being dragged over the Channels… button, which removes it. */
   const [dropToRemove, setDropToRemove] = useState(false);
-  const channelOverrides = useQuery(api.vehicleChannelOverrides.listByVehicle, { vehicleId });
+  const channelOverrides = useQuery(
+    api.vehicleChannelOverrides.listByVehicle,
+    vehicleId ? { vehicleId } : "skip",
+  );
   const channelDisplayNames = useMemo(() => {
     const map = new Map<string, string>();
     for (const o of channelOverrides ?? []) {
@@ -1393,14 +1396,16 @@ export function TraceContainer({
             </Tip>
           )}
 
-          <Tip content={allZones.length > 0 ? "Edit the highlight zones" : "Add a highlight zone"}>
-            <button
-              onClick={(e) => { e.stopPropagation(); setSettingsOpen(true); }}
-              className={`${HDR_ICON} cursor-pointer text-muted-foreground hover:bg-foreground/10 hover:text-foreground`}
-            >
-              <SlidersHorizontalIcon className="size-3.5" />
-            </button>
-          </Tip>
+          {onAddZone && (
+            <Tip content={allZones.length > 0 ? "Edit the highlight zones" : "Add a highlight zone"}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setSettingsOpen(true); }}
+                className={`${HDR_ICON} cursor-pointer text-muted-foreground hover:bg-foreground/10 hover:text-foreground`}
+              >
+                <SlidersHorizontalIcon className="size-3.5" />
+              </button>
+            </Tip>
+          )}
 
           <span className="h-4 w-px shrink-0 bg-border" />
 
@@ -2209,25 +2214,34 @@ export function TraceContainer({
                   <div className={cardCls}>
                     <div className={`${cardTitle} mb-2`}>Channel</div>
                     <div className="space-y-2">
-                      <label className="block">
-                        <span className={`${fieldLabel} mb-1 block`}>Name</span>
-                        <input
-                          key={cmKey}
-                          defaultValue={cmDisplayName}
-                          placeholder={contextMenu.channelName}
-                          onBlur={(e) => {
-                            const next = e.target.value.trim();
-                            if (next === cmDisplayName) return;
-                            if (next && next !== contextMenu.channelName) {
-                              void setChannelOverride({ vehicleId, channelName: contextMenu.channelName, displayName: next });
-                            } else {
-                              void removeChannelOverride({ vehicleId, channelName: contextMenu.channelName });
-                            }
-                          }}
-                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                          className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
-                        />
-                      </label>
+                      {vehicleId ? (
+                        <label className="block">
+                          <span className={`${fieldLabel} mb-1 block`}>Name</span>
+                          <input
+                            key={cmKey}
+                            defaultValue={cmDisplayName}
+                            placeholder={contextMenu.channelName}
+                            onBlur={(e) => {
+                              const next = e.target.value.trim();
+                              if (next === cmDisplayName) return;
+                              if (next && next !== contextMenu.channelName) {
+                                void setChannelOverride({ vehicleId, channelName: contextMenu.channelName, displayName: next });
+                              } else {
+                                void removeChannelOverride({ vehicleId, channelName: contextMenu.channelName });
+                              }
+                            }}
+                            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                            className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
+                          />
+                        </label>
+                      ) : (
+                        <div>
+                          <span className={`${fieldLabel} mb-1 block`}>Channel</span>
+                          <div className="rounded-md border bg-muted/40 px-2 py-1.5 text-sm">
+                            {cmDisplayName}
+                          </div>
+                        </div>
+                      )}
                       {cmUnitOptions.length > 1 && (
                         <label className="block">
                           <span className={`${fieldLabel} mb-1 block`}>Units</span>
@@ -2243,7 +2257,9 @@ export function TraceContainer({
                         </label>
                       )}
                       <p className="text-[11px] leading-snug text-muted-foreground/80">
-                        The name and the units apply to this channel on every log for this vehicle.
+                        {vehicleId
+                          ? "The name and the units apply to this channel on every log for this vehicle."
+                          : "Unit changes last only until you close this guest viewer."}
                       </p>
                     </div>
                     {cmStatus && (
@@ -2388,19 +2404,21 @@ export function TraceContainer({
       })()}
 
       {/* Highlight zones panel */}
-      <TraceSettingsPanel
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        logs={logs}
-        highlightZones={trace.highlightZones}
-        onAddZone={onAddZone}
-        onUpdateZone={onUpdateZone}
-        onRemoveZone={onRemoveZone}
-        onToggleZone={onToggleZone}
-        unitSystem={unitSystem}
-        unitOverrides={unitOverrides}
-        evaluatedZones={evaluatedZones}
-      />
+      {onAddZone && (
+        <TraceSettingsPanel
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          logs={logs}
+          highlightZones={trace.highlightZones}
+          onAddZone={onAddZone}
+          onUpdateZone={onUpdateZone}
+          onRemoveZone={onRemoveZone}
+          onToggleZone={onToggleZone}
+          unitSystem={unitSystem}
+          unitOverrides={unitOverrides}
+          evaluatedZones={evaluatedZones}
+        />
+      )}
     </div>
   );
 }

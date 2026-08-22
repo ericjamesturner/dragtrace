@@ -57,7 +57,7 @@ function saveConfigLocal(eventId: Id<"events">, config: ViewerConfig) {
 }
 
 export default function LogViewer({ vehicleId, eventId, fileIds: initialFileIds }: Props) {
-  const { goToFiles } = useNav();
+  const { goToFiles, goToViewer } = useNav();
 
   const [fileIds, setFileIds] = useState<Id<"files">[]>(initialFileIds);
 
@@ -122,21 +122,31 @@ export default function LogViewer({ vehicleId, eventId, fileIds: initialFileIds 
       logs={logs}
       errors={errors}
       workspace={activeWorkspace}
+      goToFiles={goToFiles}
+      goToViewer={goToViewer}
     />
   );
 }
 
 interface ReadyProps {
-  vehicleId: Id<"vehicles">;
-  eventId: Id<"events">;
+  vehicleId?: Id<"vehicles">;
+  eventId?: Id<"events">;
   fileIds: Id<"files">[];
-  setFileIds: React.Dispatch<React.SetStateAction<Id<"files">[]>>;
+  setFileIds?: React.Dispatch<React.SetStateAction<Id<"files">[]>>;
   logs: LoadedLog[];
   errors: string[];
   workspace: Doc<"workspaces"> | null;
+  publicMode?: boolean;
+  onBack?: () => void;
+  goToFiles?: (vehicleId: Id<"vehicles">, eventId: Id<"events">) => void;
+  goToViewer?: (
+    vehicleId: Id<"vehicles">,
+    eventId: Id<"events">,
+    fileIds: Id<"files">[],
+  ) => void;
 }
 
-function LogViewerReady({
+export function LogViewerReady({
   vehicleId,
   eventId,
   fileIds,
@@ -144,8 +154,11 @@ function LogViewerReady({
   logs,
   errors,
   workspace,
+  publicMode = false,
+  onBack,
+  goToFiles,
+  goToViewer,
 }: ReadyProps) {
-  const { goToFiles, goToViewer } = useNav();
   const sync = useViewerSync();
 
   // A vehicle has one layout and it saves itself, so this is only ever the id
@@ -155,7 +168,7 @@ function LogViewerReady({
   // Computed before the channel map below, which mirror sync reads to decide
   // what each log has: a math channel added afterwards would be invisible to it
   // and never appear on the overlaid log.
-  const math = useMathChannels(vehicleId, logs);
+  const math = useMathChannels(vehicleId, logs, !publicMode);
 
   // Build available channels map for mirror sync
   const channelsByLogRef = useRef<Map<string, Set<string>>>(new Map());
@@ -176,9 +189,9 @@ function LogViewerReady({
     []
   );
 
-  // Initialize config: DB workspace > localStorage > default
+  // Guest layouts always start from defaults and remain in memory only.
   const [config, dispatch] = useReducer(reducerWithMirror, null, () => {
-    if (workspace) {
+    if (!publicMode && workspace) {
       try {
         const saved = migrateConfig(JSON.parse(workspace.config));
         return remapConfigToFiles(saved, logs);
@@ -186,17 +199,17 @@ function LogViewerReady({
         // invalid config, fall through
       }
     }
-    return loadSavedConfig(eventId) ?? buildDefaultConfig(logs);
+    return !publicMode && eventId ? loadSavedConfig(eventId) ?? buildDefaultConfig(logs) : buildDefaultConfig(logs);
   });
 
   // Display units come from the user's preferences with this vehicle's
   // overrides on top, so a choice made here follows them to every other log.
-  const units = useUnitPreferences(vehicleId);
+  const units = useUnitPreferences(vehicleId, !publicMode);
   const seedPrefs = useMutation(api.userPreferences.seedFromWorkspace);
   const seededRef = useRef(false);
   useEffect(() => {
     // One-time lift of unit choices that predate preferences existing.
-    if (seededRef.current || units.loading) return;
+    if (publicMode || seededRef.current || units.loading) return;
     seededRef.current = true;
     if (config.unitSystem || config.unitOverrides) {
       void seedPrefs({
@@ -204,7 +217,7 @@ function LogViewerReady({
         unitOverrides: config.unitOverrides ? JSON.stringify(config.unitOverrides) : undefined,
       });
     }
-  }, [units.loading, config.unitSystem, config.unitOverrides, seedPrefs]);
+  }, [publicMode, units.loading, config.unitSystem, config.unitOverrides, seedPrefs]);
 
   // Selected but not yet fetched and parsed. Adding a pass is not instant on a
   // multi-megabyte log, and without this the card checks itself immediately
@@ -223,9 +236,10 @@ function LogViewerReady({
   useScatterSuggestions(
     logs,
     config,
-    units.unitSystem,
-    units.resolved,
+    publicMode ? (config.unitSystem ?? "imperial") : units.unitSystem,
+    publicMode ? (config.unitOverrides ?? {}) : units.resolved,
     (suggestions, key) => dispatch({ type: "setScatterSuggestions", suggestions, key }),
+    !publicMode,
   );
 
   // Active trace tracking
@@ -239,8 +253,8 @@ function LogViewerReady({
 
   // Save to localStorage (immediate)
   useEffect(() => {
-    saveConfigLocal(eventId, config);
-  }, [eventId, config]);
+    if (!publicMode && eventId) saveConfigLocal(eventId, config);
+  }, [publicMode, eventId, config]);
 
   // Save to DB (debounced, flushed on unmount)
   const saveWorkspace = useMutation(api.workspaces.save);
@@ -260,6 +274,7 @@ function LogViewerReady({
   }, []);
 
   const flushSave = useCallback(() => {
+    if (publicMode || !vehicleId) return;
     clearTimeout(saveTimerRef.current);
     unsavedRef.current = false;
     if (isDestructiveSave()) {
@@ -286,9 +301,10 @@ function LogViewerReady({
         }
       }
     });
-  }, [vehicleId, saveWorkspace, isDestructiveSave]);
+  }, [publicMode, vehicleId, saveWorkspace, isDestructiveSave]);
 
   useEffect(() => {
+    if (publicMode) return;
     unsavedRef.current = true;
     clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
@@ -296,16 +312,17 @@ function LogViewerReady({
       flushSave();
     }, 2000);
     return () => clearTimeout(saveTimerRef.current);
-  }, [config, flushSave]);
+  }, [publicMode, config, flushSave]);
 
   // Flush save on unmount so navigating away doesn't lose changes
   useEffect(() => {
+    if (publicMode) return;
     return () => {
       if (unsavedRef.current) {
         flushSave();
       }
     };
-  }, [flushSave]);
+  }, [publicMode, flushSave]);
 
   // Opening a different pass swaps the loaded logs, but the layout still names
   // the old one — every channel on every trace is keyed to a file id that is no
@@ -314,6 +331,7 @@ function LogViewerReady({
   // leaves nothing stale, so this only fires on a genuine swap.
   const loadedLogKey = logs.map((l) => l.fileId as string).join(",");
   useEffect(() => {
+    if (publicMode) return;
     const here = new Set(logs.map((l) => l.fileId as string));
     if (here.size === 0) return;
     const stale = configRef.current.pages.some((page) =>
@@ -322,7 +340,7 @@ function LogViewerReady({
     if (!stale) return;
     dispatch({ type: "loadConfig", config: remapConfigToFiles(configRef.current, logs) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadedLogKey]);
+  }, [publicMode, loadedLogKey]);
 
   // Overlaying a pass is always about comparing the same channels, so every log
   // after the first mirrors the first rather than carrying its own selection.
@@ -349,6 +367,7 @@ function LogViewerReady({
 
   // Update URL when fileIds change
   useEffect(() => {
+    if (publicMode || !vehicleId || !eventId) return;
     const params = new URLSearchParams(window.location.search);
     const currentViewer = params.get("viewer");
     const newViewer = fileIds.join(",");
@@ -358,7 +377,7 @@ function LogViewerReady({
       params.set("viewer", newViewer);
       window.history.replaceState(null, "", `?${params.toString()}`);
     }
-  }, [fileIds, vehicleId, eventId]);
+  }, [publicMode, fileIds, vehicleId, eventId]);
 
   // Compute alignment
   const alignment = useMemo(() => {
@@ -368,7 +387,7 @@ function LogViewerReady({
 
   // Timeslip overlay strips: fetch per-file timeslips and build synthetic zones
   // anchored at each log's detected race-start (+ alignment offset).
-  const timeslipsByFile = useTimeslips(fileIds);
+  const timeslipsByFile = useTimeslips(fileIds, !publicMode);
   const showTimeslip = true;
   const timeslipZones = useMemo(
     () => buildTimeslipZones(logs, timeslipsByFile, alignment.offsets, showTimeslip),
@@ -376,11 +395,12 @@ function LogViewerReady({
   );
 
   const handleBack = useCallback(() => {
-    goToFiles(vehicleId, eventId);
-  }, [goToFiles, vehicleId, eventId]);
+    if (onBack) onBack();
+    else if (goToFiles && vehicleId && eventId) goToFiles(vehicleId, eventId);
+  }, [onBack, goToFiles, vehicleId, eventId]);
 
   const handleAddFile = useCallback((fileId: Id<"files">) => {
-    setFileIds((prev) => {
+    setFileIds?.((prev) => {
       if (prev.includes(fileId)) return prev;
       return [...prev, fileId];
     });
@@ -393,9 +413,12 @@ function LogViewerReady({
     // while the log stayed loaded — and since the file was still in fileIds,
     // re-selecting it did nothing.
     if (fileIds.length <= 1) return;
-    setFileIds((prev) => prev.filter((id) => id !== fileId));
+    setFileIds?.((prev) => prev.filter((id) => id !== fileId));
     dispatch({ type: "purgeFile", logFileId: fileId });
   }, [fileIds, setFileIds]);
+
+  const unitSystem = publicMode ? (config.unitSystem ?? "imperial") : units.unitSystem;
+  const unitOverrides = publicMode ? (config.unitOverrides ?? {}) : units.resolved;
 
   // A trace made from the toolbar has nothing on it, and the next thing anyone
   // wants is to say what goes on it — so the picker opens with it.
@@ -432,19 +455,26 @@ function LogViewerReady({
         onAddTrace={() => handleAddTrace()}
         onBack={handleBack}
         breadcrumb={
-          <ViewerBreadcrumb
-            vehicleId={vehicleId}
-            eventId={eventId}
-            loadedFileIds={fileIds}
-            pendingFileIds={pendingFileIds}
-            onOpen={(v, e, fileId) => goToViewer(v, e, [fileId])}
-            onCompare={handleAddFile}
-            onRemove={handleRemoveFile}
-            hiddenLogIds={config.hiddenLogIds ?? []}
-            onToggleVisibility={(logFileId) =>
-              dispatch({ type: "toggleLogVisibility", logFileId })
-            }
-          />
+          publicMode ? (
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">{logs[0]?.fileName}</div>
+              <div className="text-[10px] text-muted-foreground">Guest viewer · not saved</div>
+            </div>
+          ) : vehicleId && eventId ? (
+            <ViewerBreadcrumb
+              vehicleId={vehicleId}
+              eventId={eventId}
+              loadedFileIds={fileIds}
+              pendingFileIds={pendingFileIds}
+              onOpen={(v, e, fileId) => goToViewer?.(v, e, [fileId])}
+              onCompare={handleAddFile}
+              onRemove={handleRemoveFile}
+              hiddenLogIds={config.hiddenLogIds ?? []}
+              onToggleVisibility={(logFileId) =>
+                dispatch({ type: "toggleLogVisibility", logFileId })
+              }
+            />
+          ) : null
         }
       />
 
@@ -462,7 +492,7 @@ function LogViewerReady({
           avgOnSelection
           showAxes={!!config.showAxes}
           showAxisLabels={!!config.showAxisLabels}
-          unitSystem={units.unitSystem}
+          unitSystem={unitSystem}
           traces={effectiveTraces}
           pinnedFromOtherIds={pinnedFromOtherIds}
           pages={config.pages}
@@ -523,17 +553,24 @@ function LogViewerReady({
           onToggleZone={(traceId, zoneId) =>
             dispatch({ type: "toggleZone", traceId, zoneId })
           }
-            unitOverrides={units.resolved}
+            unitOverrides={unitOverrides}
                     onSetTraceHeights={(heights) => dispatch({ type: "setTraceHeights", heights })}
           onToggleTraceCollapsed={(traceId) => dispatch({ type: "toggleTraceCollapsed", traceId })}
           onToggleTraceTimeslip={(traceId) => dispatch({ type: "toggleTraceTimeslip", traceId })}
           onToggleTraceZones={(traceId) => dispatch({ type: "toggleTraceZones", traceId })}
           pickChannelsFor={pickChannelsFor}
           vehicleId={vehicleId}
+          accountFeatures={!publicMode}
           mathChannels={math.definitions}
           mathVersion={math.version}
           onSetUnit={(quantitySlug, unitKey) =>
-            units.setVehicleOverrides({ ...units.resolved, [quantitySlug]: unitKey })
+            publicMode
+              ? dispatch({
+                  type: "setUnitOverride",
+                  quantitySlug,
+                  alternateKey: unitKey,
+                })
+              : units.setVehicleOverrides({ ...units.resolved, [quantitySlug]: unitKey })
           }
           onSetTraceChannelOrder={(traceId, channelNames) =>
             dispatch({ type: "setTraceChannelOrder", traceId, channelNames })

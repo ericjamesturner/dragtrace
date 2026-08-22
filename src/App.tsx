@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { useConvexAuth, useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { SignIn } from "./components/SignIn";
@@ -15,7 +15,9 @@ import "./App.css";
  * matching how the rest of the app keeps its place in the query string. The
  * legal pages are reachable whether or not you are signed in.
  */
-type Route = null | "signIn" | "signUp" | "privacy" | "terms";
+const PublicLogPage = lazy(() => import("./components/PublicLogPage"));
+
+type Route = null | "signIn" | "signUp" | "privacy" | "terms" | "open";
 
 function readRoute(): Route {
   const params = new URLSearchParams(window.location.search);
@@ -23,14 +25,16 @@ function readRoute(): Route {
   if (params.has("terms")) return "terms";
   if (params.has("signup")) return "signUp";
   if (params.has("signin")) return "signIn";
+  if (window.location.pathname === "/open") return "open";
   return null;
 }
 
 const QUERY: Record<Exclude<Route, null>, string> = {
-  signIn: "?signin",
-  signUp: "?signup",
-  privacy: "?privacy",
-  terms: "?terms",
+  signIn: "/?signin",
+  signUp: "/?signup",
+  privacy: "/?privacy",
+  terms: "/?terms",
+  open: "/open",
 };
 
 function App() {
@@ -61,6 +65,14 @@ function App() {
     return <Legal page={route} onBack={goHome} onSignIn={go} onLegal={go} />;
   }
 
+  if (route === "open") {
+    return (
+      <Suspense fallback={<div className="loading">Loading viewer...</div>}>
+        <PublicLogPage onHome={goHome} onSignIn={() => go("signIn")} />
+      </Suspense>
+    );
+  }
+
   if (isLoading) {
     return <div className="loading">Loading...</div>;
   }
@@ -83,7 +95,7 @@ function App() {
   return route ? (
     <SignIn initialFlow={route} onBack={goHome} />
   ) : (
-    <Landing onSignIn={go} onLegal={go} />
+    <Landing onSignIn={go} onLegal={go} onOpenLog={() => go("open")} />
   );
 }
 

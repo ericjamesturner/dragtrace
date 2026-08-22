@@ -19,6 +19,7 @@ export function useScatterSuggestions(
   unitSystem: UnitSystem,
   unitOverrides: UnitOverrides | undefined,
   onSuggestions: (s: ScatterSuggestion[], key: string) => void,
+  enabled = true,
 ) {
   const generate = useAction(api.scatterSuggestions.generate);
 
@@ -36,7 +37,7 @@ export function useScatterSuggestions(
   const persistedKey = config.scatterSuggestionsKey;
 
   useEffect(() => {
-    if (logs.length === 0) return;
+    if (!enabled || logs.length === 0) return;
     const defs = unionChannelDefs(logs);
     const key = channelSetKey(defs);
 
@@ -62,6 +63,5 @@ export function useScatterSuggestions(
     };
     // Deliberately NOT depending on unit system/overrides — like halog, only
     // refetch when the channel set (logs) or the persisted key changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logs, persistedKey, generate]);
+  }, [logs, persistedKey, generate, enabled]);
 }

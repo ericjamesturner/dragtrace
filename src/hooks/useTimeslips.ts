@@ -8,25 +8,30 @@ import type { Doc, Id } from "../../convex/_generated/dataModel";
  * (one batched `listByFile` query per file, mirroring useLoadedLogs).
  * Returns a Map keyed by fileId.
  */
-export function useTimeslips(fileIds: Id<"files">[]): Map<Id<"files">, Doc<"timeslips">[]> {
+export function useTimeslips(
+  fileIds: Id<"files">[],
+  enabled = true,
+): Map<Id<"files">, Doc<"timeslips">[]> {
   const queries = useMemo(() => {
     const q: Record<string, { query: typeof api.timeslips.listByFile; args: { fileId: Id<"files"> } }> = {};
+    if (!enabled) return q;
     for (let i = 0; i < fileIds.length; i++) {
       q[`t${i}`] = { query: api.timeslips.listByFile, args: { fileId: fileIds[i] } };
     }
     return q;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileIds.join(",")]);
+  }, [fileIds.join(","), enabled]);
 
   const results = useQueries(queries);
 
   return useMemo(() => {
     const map = new Map<Id<"files">, Doc<"timeslips">[]>();
+    if (!enabled) return map;
     for (let i = 0; i < fileIds.length; i++) {
       const r = results[`t${i}`];
       if (r && !(r instanceof Error)) map.set(fileIds[i], r as Doc<"timeslips">[]);
     }
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileIds.join(","), results]);
+  }, [fileIds.join(","), results, enabled]);
 }

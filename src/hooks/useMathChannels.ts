@@ -20,10 +20,14 @@ export interface MathChannelError {
  * version behind.
  */
 export function useMathChannels(
-  vehicleId: Id<"vehicles">,
+  vehicleId: Id<"vehicles"> | undefined,
   logs: LoadedLog[],
+  enabled = true,
 ): { definitions: Doc<"mathChannels">[]; errors: MathChannelError[]; version: number } {
-  const definitions = useQuery(api.mathChannels.listByVehicle, { vehicleId });
+  const definitions = useQuery(
+    api.mathChannels.listByVehicle,
+    enabled && vehicleId ? { vehicleId } : "skip",
+  );
   const [state, setState] = useState<{ version: number; errors: MathChannelError[] }>({
     version: 0,
     errors: [],
@@ -35,7 +39,7 @@ export function useMathChannels(
   const logsKey = logs.map((l) => l.fileId).join(",");
 
   useEffect(() => {
-    if (!definitions) return;
+    if (!enabled || !definitions) return;
     const errors: MathChannelError[] = [];
     const wanted = new Set(definitions.map((d) => d.name));
 
@@ -97,7 +101,7 @@ export function useMathChannels(
 
     setState((prev) => ({ version: prev.version + 1, errors }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defsKey, logsKey]);
+  }, [defsKey, logsKey, enabled]);
 
   return { definitions: definitions ?? [], errors: state.errors, version: state.version };
 }

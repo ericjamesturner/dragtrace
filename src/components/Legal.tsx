@@ -3,15 +3,15 @@ import { SiteFooter, SiteHeader } from "./SiteChrome";
 
 /**
  * Privacy policy and terms, written to match what the code actually does:
- * data is per-account with no sharing between users, files live in Convex
- * storage, and the plain-English features send channel names, a small sample of
- * values, or a timeslip photo to Anthropic to get a result back.
+ * account data has no sharing between users, guest logs stay in the browser,
+ * uploaded files live in Convex storage, and the plain-English features send
+ * channel names, a small sample of values, or a timeslip photo to Anthropic.
  *
  * NOT LEGAL ADVICE. Eric shipped this without lawyer review on 2026-08-09;
  * worth a real review once there are paying customers.
  */
 
-const UPDATED = "9 August 2026";
+const UPDATED = "22 August 2026";
 
 /** Fill these in before launch. */
 const CO = {
@@ -109,6 +109,11 @@ function Privacy() {
       </P>
 
       <H2>Your logs are yours. We do not share them.</H2>
+      <P>
+        If you use the guest viewer, your selected datalog is read and parsed on
+        your device. We do not upload or store that file, its layout, or your
+        viewer changes. Reloading the page clears the guest session.
+      </P>
       <P>
         Your datalogs, your charts, your notes and your timeslips are private to
         your account. No other DragTrace customer can see them. There is no public

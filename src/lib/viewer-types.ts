@@ -265,6 +265,7 @@ export type ViewerAction =
   | { type: "toggleTracePin"; traceId: string }
   | { type: "setUnitSystem"; system: UnitSystem }
   | { type: "cycleUnit"; quantitySlug: string }
+  | { type: "setUnitOverride"; quantitySlug: string; alternateKey: string }
   | { type: "addZone"; traceId: string; zone: HighlightZoneConfig }
   | { type: "updateZone"; traceId: string; zoneId: string; updates: Partial<Omit<HighlightZoneConfig, "id">> }
   | { type: "removeZone"; traceId: string; zoneId: string }
@@ -603,6 +604,14 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
       const current = state.unitOverrides ?? {};
       return { ...state, unitOverrides: cycleUnitFn(action.quantitySlug, state.unitSystem ?? "imperial", current) };
     }
+    case "setUnitOverride":
+      return {
+        ...state,
+        unitOverrides: {
+          ...(state.unitOverrides ?? {}),
+          [action.quantitySlug]: action.alternateKey,
+        },
+      };
     case "addZone":
       return {
         ...state,

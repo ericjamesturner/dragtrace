@@ -10,10 +10,12 @@ const CTA =
 export function SiteHeader({
   onHome,
   onSignIn,
+  onOpenLog,
   links,
 }: {
   onHome: () => void;
   onSignIn: (flow: "signIn" | "signUp") => void;
+  onOpenLog?: () => void;
   /** In-page anchors, shown on the landing page so you can jump to a section. */
   links?: readonly { label: string; href: string }[];
 }) {
@@ -40,6 +42,14 @@ export function SiteHeader({
           </nav>
         )}
         <span className="ml-auto flex items-center gap-2">
+          {onOpenLog && (
+            <button
+              onClick={onOpenLog}
+              className="hidden rounded-md px-3 py-2 text-base text-white/70 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 sm:block"
+            >
+              Open a log
+            </button>
+          )}
           <button
             onClick={() => onSignIn("signIn")}
             className="rounded-md px-3 py-2 text-base text-white/70 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"

@@ -43,7 +43,8 @@ interface Props {
   onSetTraceChannelOrder: (traceId: string, channelNames: string[]) => void;
   /** Trace whose channel picker should open itself — a freshly made one. */
   pickChannelsFor?: string | null;
-  vehicleId: Id<"vehicles">;
+  vehicleId?: Id<"vehicles">;
+  accountFeatures?: boolean;
   mathChannels: Doc<"mathChannels">[];
   mathVersion: number;
   onSetUnit: (quantitySlug: string, unitKey: string) => void;
@@ -121,6 +122,7 @@ export function TracePanel({
   onSetTraceChannelOrder,
   pickChannelsFor,
   vehicleId,
+  accountFeatures = true,
   mathChannels,
   mathVersion,
   onSetUnit,
@@ -203,16 +205,17 @@ export function TracePanel({
   // The 3D suspension card. Closing it sticks; the Suspension button on any
   // trace carrying shock channels brings it back.
   const [suspensionHidden, setSuspensionHiddenState] = useState(
-    () => localStorage.getItem("dragtrace:suspension-hidden") === "1",
+    () => !accountFeatures || localStorage.getItem("dragtrace:suspension-hidden") === "1",
   );
   const setSuspensionHidden = useCallback((h: boolean) => {
     setSuspensionHiddenState(h);
+    if (!accountFeatures) return;
     try {
       localStorage.setItem("dragtrace:suspension-hidden", h ? "1" : "0");
     } catch {
       // ignore
     }
-  }, []);
+  }, [accountFeatures]);
 
   // Union range of every lambda-family channel on any rendered trace, so
   // lambda scales match ACROSS charts — two AFR traces on different charts
@@ -684,7 +687,7 @@ export function TracePanel({
                 onZoom={handleZoom}
                 onResetZoom={handleResetZoom}
                 suspensionOpen={
-                  trace.channels.some((ch) => SHOCK_CHANNEL_NAMES.includes(ch.channelName))
+                  accountFeatures && trace.channels.some((ch) => SHOCK_CHANNEL_NAMES.includes(ch.channelName))
                     ? !suspensionHidden
                     : undefined
                 }
@@ -695,7 +698,7 @@ export function TracePanel({
                 avgOnSelection={avgOnSelection}
                 onRemoveTrace={() => onRemoveTrace(trace.id)}
                 onToggleTimeslip={() => onToggleTraceTimeslip(trace.id)}
-                onToggleZones={() => onToggleTraceZones(trace.id)}
+                onToggleZones={accountFeatures ? () => onToggleTraceZones(trace.id) : undefined}
                 onSetChannelOrder={(names) => onSetTraceChannelOrder(trace.id, names)}
                 autoOpenChannels={pickChannelsFor === trace.id}
                 vehicleId={vehicleId}
@@ -755,10 +758,10 @@ export function TracePanel({
                 unitOverrides={unitOverrides}
                 groupYRanges={groupYRanges}
                 sharedZones={sharedZones}
-                onAddZone={(zone) => onAddZone(trace.id, zone)}
-                onUpdateZone={(zoneId, updates) => onUpdateZone(trace.id, zoneId, updates)}
-                onRemoveZone={(zoneId) => onRemoveZone(trace.id, zoneId)}
-                onToggleZone={(zoneId) => onToggleZone(trace.id, zoneId)}
+                onAddZone={accountFeatures ? (zone) => onAddZone(trace.id, zone) : undefined}
+                onUpdateZone={accountFeatures ? (zoneId, updates) => onUpdateZone(trace.id, zoneId, updates) : undefined}
+                onRemoveZone={accountFeatures ? (zoneId) => onRemoveZone(trace.id, zoneId) : undefined}
+                onToggleZone={accountFeatures ? (zoneId) => onToggleZone(trace.id, zoneId) : undefined}
                 timeslipZones={timeslipZones}
                 expandedTimeslipIds={expandedTimeslipIds}
                 onToggleTimeslipExpand={onToggleTimeslipExpand}
@@ -833,13 +836,15 @@ export function TracePanel({
 
       {/* The wireframe that moves like the pass did — only shows itself
           when a loaded log carries all four shock-travel channels. */}
-      <SuspensionPanel
-        logs={logs}
-        offsets={offsets}
-        cursorTime={effectiveCursorTime}
-        hidden={suspensionHidden}
-        onSetHidden={setSuspensionHidden}
-      />
+      {accountFeatures && (
+        <SuspensionPanel
+          logs={logs}
+          offsets={offsets}
+          cursorTime={effectiveCursorTime}
+          hidden={suspensionHidden}
+          onSetHidden={setSuspensionHidden}
+        />
+      )}
 
       {/* Overview minimap (timeslip strip also renders here) */}
       <OverviewBar
