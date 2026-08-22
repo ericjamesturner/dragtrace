@@ -22,6 +22,7 @@ export function Switch({
   onChange,
   title,
   className = "",
+  appearance = "channel",
 }: {
   checked: boolean;
   mixed?: boolean;
@@ -31,26 +32,40 @@ export function Switch({
   onChange: (next: boolean) => void;
   title?: string;
   className?: string;
+  /** `channel` is the compact chart control; `form` is a standard form toggle. */
+  appearance?: "channel" | "form";
 }) {
   const on = checked && !mixed;
   const lit = on || mixed;
+  const form = appearance === "form";
   return (
     <button
       type="button"
       role="switch"
       aria-checked={mixed ? "mixed" : checked}
+      aria-label={title}
       title={title}
       onClick={(e) => {
         e.stopPropagation();
         onChange(!checked);
       }}
-      className={`relative shrink-0 cursor-pointer rounded-full transition-colors ${
-        color && lit ? "" : on ? "bg-white/75" : mixed ? "bg-white/30" : "bg-white/15 hover:bg-white/25"
+      className={`relative shrink-0 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 ${
+        form
+          ? on
+            ? "bg-primary"
+            : "bg-muted-foreground/25 hover:bg-muted-foreground/35"
+          : color && lit
+            ? ""
+            : on
+              ? "bg-white/75"
+              : mixed
+                ? "bg-white/30"
+                : "bg-white/15 hover:bg-white/25"
       } ${className}`}
       style={{
-        width: 18,
-        height: 10,
-        ...(color && lit
+        width: form ? 36 : 18,
+        height: form ? 20 : 10,
+        ...(!form && color && lit
           ? { backgroundColor: color, opacity: mixed ? 0.45 : opacity }
           : null),
       }}
@@ -58,11 +73,16 @@ export function Switch({
       <span
         className="absolute top-1/2 block rounded-full transition-all"
         style={{
-          width: 6,
-          height: 6,
-          marginTop: -3,
-          left: on ? 10 : mixed ? 6 : 2,
-          backgroundColor: lit ? "#0a0a0a" : "rgba(255,255,255,0.6)",
+          width: form ? 16 : 6,
+          height: form ? 16 : 6,
+          marginTop: form ? -8 : -3,
+          left: form ? (on ? 18 : 2) : on ? 10 : mixed ? 6 : 2,
+          backgroundColor: form
+            ? "white"
+            : lit
+              ? "#0a0a0a"
+              : "rgba(255,255,255,0.6)",
+          boxShadow: form ? "0 1px 2px rgba(0,0,0,0.28)" : undefined,
         }}
       />
     </button>

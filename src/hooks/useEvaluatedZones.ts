@@ -1,7 +1,12 @@
 import { useMemo } from "react";
 import type { HighlightZoneConfig, LoadedLog } from "@/lib/viewer-types";
 import type { Id } from "../../convex/_generated/dataModel";
-import { convertForDisplay, type UnitSystem, type UnitOverrides } from "@/lib/units";
+import {
+  convertForDisplay,
+  type ChannelUnitOverrides,
+  type UnitSystem,
+  type UnitOverrides,
+} from "@/lib/units";
 import { evaluateZoneExpression, scanTrueRegions } from "@/lib/zone-evaluator";
 
 export interface EvaluatedZone {
@@ -27,6 +32,7 @@ export function useEvaluatedZones(
   offsets: Map<Id<"files">, number>,
   unitSystem: UnitSystem,
   unitOverrides?: UnitOverrides,
+  channelUnitOverrides?: ChannelUnitOverrides,
 ): EvaluatedZone[] {
   return useMemo(() => {
     if (!zones || zones.length === 0) return [];
@@ -61,7 +67,13 @@ export function useEvaluatedZones(
         const converter = (channelName: string, value: number): number => {
           const mu = quantitySlugByChannel.get(channelName);
           if (!mu) return value;
-          return convertForDisplay(value, mu, unitSystem, unitOverrides);
+          return convertForDisplay(
+            value,
+            mu,
+            unitSystem,
+            unitOverrides,
+            channelUnitOverrides?.[channelName],
+          );
         };
 
         try {
@@ -77,5 +89,5 @@ export function useEvaluatedZones(
       cache.set(zone.expression, result);
       return { config: zone, ...result };
     });
-  }, [zones, logs, offsets, unitSystem, unitOverrides]);
+  }, [zones, logs, offsets, unitSystem, unitOverrides, channelUnitOverrides]);
 }

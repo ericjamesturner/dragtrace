@@ -1,13 +1,31 @@
-import type { UnitSystem, UnitOverrides } from "./units";
+import type { ChannelUnitOverrides, UnitSystem, UnitOverrides } from "./units";
 import { quantitiesWithChoices, getDisplayUnit, convertForDisplay } from "./units";
 
 // Only quantities that actually offer a choice are worth spending prompt on —
 // the rest have exactly one unit and can't surprise the model.
-function buildUnitPreferences(unitSystem: UnitSystem, unitOverrides?: UnitOverrides): string {
+function buildUnitPreferences(
+  unitSystem: UnitSystem,
+  unitOverrides?: UnitOverrides,
+  channelUnitOverrides?: ChannelUnitOverrides,
+  channelSamples?: ChannelSample[],
+): string {
   const lines: string[] = [`Unit system: ${unitSystem}`];
   for (const q of quantitiesWithChoices()) {
     const display = getDisplayUnit(q.slug, unitSystem, unitOverrides);
     lines.push(`  ${q.name} → displayed as ${display}`);
+  }
+  const seen = new Set<string>();
+  for (const sample of channelSamples ?? []) {
+    const unitKey = channelUnitOverrides?.[sample.name];
+    if (!unitKey || seen.has(sample.name)) continue;
+    seen.add(sample.name);
+    const display = getDisplayUnit(
+      sample.quantitySlug,
+      unitSystem,
+      unitOverrides,
+      unitKey,
+    );
+    lines.push(`  Channel ${sample.name} → displayed as ${display}`);
   }
   return lines.join("\n");
 }
@@ -33,6 +51,7 @@ function buildSampleData(
   zoomRange: [number, number] | null,
   unitSystem: UnitSystem,
   unitOverrides?: UnitOverrides,
+  channelUnitOverrides?: ChannelUnitOverrides,
 ): string {
   if (samples.length === 0) return "";
 
@@ -61,7 +80,13 @@ function buildSampleData(
     }
     if (iEnd <= iStart) continue;
 
-    const displayUnit = getDisplayUnit(s.quantitySlug, unitSystem, unitOverrides);
+    const channelUnitKey = channelUnitOverrides?.[s.name];
+    const displayUnit = getDisplayUnit(
+      s.quantitySlug,
+      unitSystem,
+      unitOverrides,
+      channelUnitKey,
+    );
 
     const count = Math.min(20, iEnd - iStart);
     const step = Math.max(1, Math.floor((iEnd - iStart) / count));
@@ -71,7 +96,13 @@ function buildSampleData(
     for (let i = iStart; i < iEnd; i += step) {
       const raw = s.data[i];
       if (raw !== raw) continue;
-      const v = convertForDisplay(raw, s.quantitySlug, unitSystem, unitOverrides);
+      const v = convertForDisplay(
+        raw,
+        s.quantitySlug,
+        unitSystem,
+        unitOverrides,
+        channelUnitKey,
+      );
       if (v < min) min = v;
       if (v > max) max = v;
       vals.push(v.toFixed(2));
@@ -103,13 +134,25 @@ export function buildHighlightZoneInput(
   unitOverrides?: UnitOverrides,
   channelSamples?: ChannelSample[],
   zoomRange?: [number, number] | null,
+  channelUnitOverrides?: ChannelUnitOverrides,
 ): HighlightZoneInput {
   return {
     description,
     channelNames,
-    unitPrefs: buildUnitPreferences(unitSystem, unitOverrides),
+    unitPrefs: buildUnitPreferences(
+      unitSystem,
+      unitOverrides,
+      channelUnitOverrides,
+      channelSamples,
+    ),
     sampleData: channelSamples
-      ? buildSampleData(channelSamples, zoomRange ?? null, unitSystem, unitOverrides)
+      ? buildSampleData(
+          channelSamples,
+          zoomRange ?? null,
+          unitSystem,
+          unitOverrides,
+          channelUnitOverrides,
+        )
       : "",
   };
 }

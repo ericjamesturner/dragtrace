@@ -117,6 +117,8 @@ export default defineSchema({
     channelName: v.string(),
     categoryId: v.optional(v.id("channelCategories")),
     displayName: v.optional(v.string()),
+    /** Alternate unit key for this channel; other channels of the same quantity are unaffected. */
+    unitKey: v.optional(v.string()),
     hidden: v.optional(v.boolean()),
     createdAt: v.number(),
   }).index("by_vehicle", ["vehicleId"]),
@@ -178,6 +180,7 @@ export default defineSchema({
     /** 0 means the sender skipped the optional 1–5 star rating. */
     rating: v.optional(v.number()),
     message: v.string(),
+    contactEmail: v.optional(v.string()),
     /** Explicit permission to quote this response publicly. */
     allowTestimonial: v.optional(v.boolean()),
     testimonialName: v.optional(v.string()),

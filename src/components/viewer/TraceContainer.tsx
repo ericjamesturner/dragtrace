@@ -6,7 +6,17 @@ import { TraceChart } from "./TraceChart";
 import { TraceSettingsPanel, ChannelPicker } from "./TraceSettingsPanel";
 import { TraceChannelsDialog } from "./TraceChannelsDialog";
 import { findValueAtTime, formatValue, formatChannelValue, computeRangeStats, statusNote } from "@/lib/cursor-utils";
-import { convertForDisplay, convertFromDisplay, getDisplayUnit, getDisplayPrecision, getUnitOptions, resolveUnitKey, type UnitSystem, type UnitOverrides } from "@/lib/units";
+import {
+  convertForDisplay,
+  convertFromDisplay,
+  getDisplayUnit,
+  getDisplayPrecision,
+  getUnitOptions,
+  resolveUnitKey,
+  type ChannelUnitOverrides,
+  type UnitSystem,
+  type UnitOverrides,
+} from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon, MoveHorizontalIcon, HighlighterIcon, ListPlusIcon, BoxIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
@@ -404,7 +414,7 @@ interface Props {
   vehicleId?: Id<"vehicles">;
   mathChannels: Doc<"mathChannels">[];
   mathVersion: number;
-  onSetUnit: (quantitySlug: string, unitKey: string) => void;
+  onSetUnit: (channelName: string, unitKey: string) => void;
   onToggleTimeslip?: () => void;
   /** Set only for traces carrying shock channels: whether the 3D suspension
    *  card is showing. Undefined hides the button entirely. */
@@ -449,6 +459,7 @@ interface Props {
   cursorTime: number | null;
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
+  channelUnitOverrides?: ChannelUnitOverrides;
   onAddZone?: (zone: HighlightZoneConfig) => void;
   onUpdateZone?: (zoneId: string, updates: Partial<Omit<HighlightZoneConfig, "id">>) => void;
   onRemoveZone?: (zoneId: string) => void;
@@ -531,6 +542,7 @@ export function TraceContainer({
   cursorTime,
   unitSystem,
   unitOverrides,
+  channelUnitOverrides,
   onAddZone,
   onUpdateZone,
   onRemoveZone,
@@ -655,6 +667,7 @@ export function TraceContainer({
     offsets,
     unitSystem,
     unitOverrides,
+    channelUnitOverrides,
   );
 
   // Shared zones from other traces (showOnAllTraces), excluding ones this
@@ -672,6 +685,7 @@ export function TraceContainer({
     offsets,
     unitSystem,
     unitOverrides,
+    channelUnitOverrides,
   );
 
   // Timeslips don't go through the zone plugin — they get their own solid band
@@ -945,11 +959,16 @@ export function TraceContainer({
               valueStr = formatChannelValue(val, { enumValues: def.enumValues });
               unitLabel = "";
             } else {
-              const converted = mu ? convertForDisplay(val, mu, unitSystem, unitOverrides) : val;
+              const channelUnitKey = channelUnitOverrides?.[ch.channelName];
+              const converted = mu
+                ? convertForDisplay(val, mu, unitSystem, unitOverrides, channelUnitKey)
+                : val;
               valueStr = formatChannelValue(converted, {
-                decimals: getDisplayPrecision(mu, unitSystem, unitOverrides),
+                decimals: getDisplayPrecision(mu, unitSystem, unitOverrides, channelUnitKey),
               });
-              unitLabel = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
+              unitLabel = mu
+                ? getDisplayUnit(mu, unitSystem, unitOverrides, channelUnitKey)
+                : "";
             }
           }
         }
@@ -958,14 +977,19 @@ export function TraceContainer({
           const stats = computeRangeStats(log, ch.channelName, avgRange, offset);
           if (stats !== null) {
             const mu = def?.quantitySlug ?? "";
+            const channelUnitKey = channelUnitOverrides?.[ch.channelName];
             const conv = (v: number) =>
-              mu ? convertForDisplay(v, mu, unitSystem, unitOverrides) : v;
+              mu ? convertForDisplay(v, mu, unitSystem, unitOverrides, channelUnitKey) : v;
             avgStr = formatValue(conv(stats.avg));
             minStr = formatValue(conv(stats.min));
             maxStr = formatValue(conv(stats.max));
             minTime = stats.minTime;
             maxTime = stats.maxTime;
-            if (!unitLabel) unitLabel = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
+            if (!unitLabel) {
+              unitLabel = mu
+                ? getDisplayUnit(mu, unitSystem, unitOverrides, channelUnitKey)
+                : "";
+            }
           }
         }
 
@@ -983,7 +1007,7 @@ export function TraceContainer({
     });
   }, [
     trace.channels, logs, hiddenSet, hiddenChannels, avgRange,
-    cursorTime, offsets, unitSystem, unitOverrides,
+    cursorTime, offsets, unitSystem, unitOverrides, channelUnitOverrides,
   ]);
 
   // Compact mode puts the legend in the header, but the MIN/AVG/MAX/Δ table
@@ -1481,6 +1505,7 @@ export function TraceContainer({
             raceStartTimes={raceStartTimes}
             unitSystem={unitSystem}
             unitOverrides={unitOverrides}
+            channelUnitOverrides={channelUnitOverrides}
             selection={selection}
             onSelection={onSelection}
             onClearSelection={onClearSelection}
@@ -1941,9 +1966,14 @@ export function TraceContainer({
         const hasManualAxis = cmCh?.axisMin !== undefined || cmCh?.axisMax !== undefined;
         const cmDef = cmLog?.parsed.channelDefs.find((d) => d.name === contextMenu.channelName);
         const cmMu = cmDef?.quantitySlug ?? "";
+        const cmChannelUnitKey = channelUnitOverrides?.[contextMenu.channelName];
         const cmToDisplay = (v: number) =>
-          cmMu ? convertForDisplay(v, cmMu, unitSystem, unitOverrides) : v;
-        const cmDisplayUnit = cmMu ? getDisplayUnit(cmMu, unitSystem, unitOverrides) : "";
+          cmMu
+            ? convertForDisplay(v, cmMu, unitSystem, unitOverrides, cmChannelUnitKey)
+            : v;
+        const cmDisplayUnit = cmMu
+          ? getDisplayUnit(cmMu, unitSystem, unitOverrides, cmChannelUnitKey)
+          : "";
 
         const cmResolved = resolvedRanges.get(contextMenu.channelName);
         // What the line actually looks like right now, for the preview swatch.
@@ -1967,7 +1997,9 @@ export function TraceContainer({
           "Solid";
         const cmDisplayName = channelDisplayNames.get(contextMenu.channelName) ?? "";
         const cmUnitOptions = getUnitOptions(cmMu);
-        const cmUnitKey = cmMu ? resolveUnitKey(cmMu, unitSystem ?? "imperial", unitOverrides) : "";
+        const cmUnitKey = cmMu
+          ? resolveUnitKey(cmMu, unitSystem ?? "imperial", unitOverrides, cmChannelUnitKey)
+          : "";
         // A channel that spent the run reporting a fault is a dead sensor, and
         // that explains a flat line better than any amount of restyling.
         const cmStatus = cmLog?.parsed.sessions[cmLog.activeSessionIndex]?.channelStatus.get(
@@ -2212,7 +2244,17 @@ export function TraceContainer({
                       minPlaceholder={cmResolved ? formatValue(cmToDisplay(cmResolved[0])) : "Auto"}
                       maxPlaceholder={cmResolved ? formatValue(cmToDisplay(cmResolved[1])) : "Auto"}
                       toDisplay={cmToDisplay}
-                      fromDisplay={(v) => (cmMu ? convertFromDisplay(v, cmMu, unitSystem, unitOverrides) : v)}
+                      fromDisplay={(v) =>
+                        cmMu
+                          ? convertFromDisplay(
+                              v,
+                              cmMu,
+                              unitSystem,
+                              unitOverrides,
+                              cmChannelUnitKey,
+                            )
+                          : v
+                      }
                       onCommit={(min, max) =>
                         onSetChannelAxisRange(contextMenu.logFileId, contextMenu.channelName, min, max)
                       }
@@ -2303,7 +2345,7 @@ export function TraceContainer({
                           <span className={`${fieldLabel} mb-1 block`}>Units</span>
                           <select
                             value={cmUnitKey}
-                            onChange={(e) => onSetUnit(cmMu, e.target.value)}
+                            onChange={(e) => onSetUnit(contextMenu.channelName, e.target.value)}
                             className="h-9 w-full cursor-pointer rounded-md border bg-background px-2 text-sm"
                           >
                             {cmUnitOptions.map((a) => (
@@ -2472,6 +2514,7 @@ export function TraceContainer({
           onToggleZone={onToggleZone}
           unitSystem={unitSystem}
           unitOverrides={unitOverrides}
+          channelUnitOverrides={channelUnitOverrides}
           evaluatedZones={evaluatedZones}
         />
       )}

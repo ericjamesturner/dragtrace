@@ -1,6 +1,11 @@
 import type { Id } from "../../convex/_generated/dataModel";
 import type { ParsedLog } from "./log-types";
-import { cycleUnit as cycleUnitFn, type UnitSystem, type UnitOverrides } from "./units";
+import {
+  cycleUnit as cycleUnitFn,
+  type ChannelUnitOverrides,
+  type UnitSystem,
+  type UnitOverrides,
+} from "./units";
 
 export const CHART_COLORS = [
   "#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#8b5cf6",
@@ -213,6 +218,8 @@ export interface ViewerConfig {
   legendCollapsed?: boolean;
   unitSystem?: UnitSystem;
   unitOverrides?: UnitOverrides;
+  /** Guest/session-only choices keyed by channel name; account choices live on the vehicle. */
+  channelUnitOverrides?: ChannelUnitOverrides;
   // Cursor-centered mouse-wheel zoom (default on; factor default 1.25).
   wheelZoomEnabled?: boolean;
   wheelZoomFactor?: number;
@@ -268,6 +275,7 @@ export type ViewerAction =
   | { type: "setUnitSystem"; system: UnitSystem }
   | { type: "cycleUnit"; quantitySlug: string }
   | { type: "setUnitOverride"; quantitySlug: string; alternateKey: string }
+  | { type: "setChannelUnitOverride"; channelName: string; alternateKey: string }
   | { type: "addZone"; traceId: string; zone: HighlightZoneConfig }
   | { type: "updateZone"; traceId: string; zoneId: string; updates: Partial<Omit<HighlightZoneConfig, "id">> }
   | { type: "removeZone"; traceId: string; zoneId: string }
@@ -612,6 +620,14 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         unitOverrides: {
           ...(state.unitOverrides ?? {}),
           [action.quantitySlug]: action.alternateKey,
+        },
+      };
+    case "setChannelUnitOverride":
+      return {
+        ...state,
+        channelUnitOverrides: {
+          ...(state.channelUnitOverrides ?? {}),
+          [action.channelName]: action.alternateKey,
         },
       };
     case "addZone":

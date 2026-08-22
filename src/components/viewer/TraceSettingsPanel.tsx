@@ -3,7 +3,7 @@ import type { LoadedLog, HighlightZoneConfig } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import { useAction } from "convex/react";
 import { api } from "../../../convex/_generated/api";
-import type { UnitSystem, UnitOverrides } from "@/lib/units";
+import type { ChannelUnitOverrides, UnitSystem, UnitOverrides } from "@/lib/units";
 import { validateZoneExpression } from "@/lib/zone-evaluator";
 import { buildHighlightZoneInput, ZONE_COLORS, type ChannelSample } from "@/lib/ai-highlight-zone";
 import {
@@ -29,6 +29,7 @@ interface Props {
   onToggleZone?: (zoneId: string) => void;
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
+  channelUnitOverrides?: ChannelUnitOverrides;
   evaluatedZones?: EvaluatedZone[];
 }
 
@@ -184,6 +185,7 @@ function ZoneBuilder({
   logs,
   unitSystem,
   unitOverrides,
+  channelUnitOverrides,
 }: {
   onSubmit: (zone: {
     expression: string;
@@ -197,6 +199,7 @@ function ZoneBuilder({
   logs: LoadedLog[];
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
+  channelUnitOverrides?: ChannelUnitOverrides;
 }) {
   const channelNames = useMemo(() => {
     const names = logs.flatMap((l) => l.parsed.channelDefs.map((d) => d.name));
@@ -247,7 +250,15 @@ function ZoneBuilder({
         }
       }
       const result = await generateZone(
-        buildHighlightZoneInput(aiPrompt, channelNames, unitSystem, unitOverrides, samples),
+        buildHighlightZoneInput(
+          aiPrompt,
+          channelNames,
+          unitSystem,
+          unitOverrides,
+          samples,
+          undefined,
+          channelUnitOverrides,
+        ),
       );
       setExpression(result.expression);
       setLabel(result.label);
@@ -413,6 +424,7 @@ export function TraceSettingsPanel({
   onToggleZone,
   unitSystem,
   unitOverrides,
+  channelUnitOverrides,
   evaluatedZones,
 }: Props) {
   const [showZoneBuilder, setShowZoneBuilder] = useState(false);
@@ -450,6 +462,7 @@ export function TraceSettingsPanel({
                         logs={logs}
                         unitSystem={unitSystem}
                         unitOverrides={unitOverrides}
+                        channelUnitOverrides={channelUnitOverrides}
                       />
                     </div>
                   );
@@ -555,6 +568,7 @@ export function TraceSettingsPanel({
                     logs={logs}
                     unitSystem={unitSystem}
                     unitOverrides={unitOverrides}
+                    channelUnitOverrides={channelUnitOverrides}
                   />
                 </div>
               ) : (

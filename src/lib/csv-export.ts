@@ -1,5 +1,11 @@
 import type { LoadedLog } from "@/lib/viewer-types";
-import { convertForDisplay, getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
+import {
+  convertForDisplay,
+  getDisplayUnit,
+  type ChannelUnitOverrides,
+  type UnitSystem,
+  type UnitOverrides,
+} from "@/lib/units";
 
 const MAX_ROWS = 500;
 
@@ -26,6 +32,7 @@ export function buildSelectionCsv(
   offset: number,
   unitSystem: UnitSystem,
   unitOverrides: UnitOverrides | undefined,
+  channelUnitOverrides?: ChannelUnitOverrides,
 ): string {
   const session = log.parsed.sessions[log.activeSessionIndex];
   if (!session) return "";
@@ -52,7 +59,14 @@ export function buildSelectionCsv(
   const defs = log.parsed.channelDefs;
   const header = ["Time (s)"];
   for (const d of defs) {
-    const unit = d.quantitySlug ? getDisplayUnit(d.quantitySlug, unitSystem, unitOverrides) : "";
+    const unit = d.quantitySlug
+      ? getDisplayUnit(
+          d.quantitySlug,
+          unitSystem,
+          unitOverrides,
+          channelUnitOverrides?.[d.name],
+        )
+      : "";
     header.push(csvField(unit ? `${d.name} (${unit})` : d.name));
   }
   const lines = [header.join(",")];
@@ -66,7 +80,15 @@ export function buildSelectionCsv(
         cols.push("");
         continue;
       }
-      const cv = d.quantitySlug ? convertForDisplay(v, d.quantitySlug, unitSystem, unitOverrides) : v;
+      const cv = d.quantitySlug
+        ? convertForDisplay(
+            v,
+            d.quantitySlug,
+            unitSystem,
+            unitOverrides,
+            channelUnitOverrides?.[d.name],
+          )
+        : v;
       cols.push(fmtNum(cv));
     }
     lines.push(cols.join(","));

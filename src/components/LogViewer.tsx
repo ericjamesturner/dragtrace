@@ -211,9 +211,22 @@ export function LogViewerReady({
     return !publicMode && eventId ? loadSavedConfig(eventId) ?? buildDefaultConfig(logs) : buildDefaultConfig(logs);
   });
 
-  // Display units come from the user's preferences with this vehicle's
-  // overrides on top, so a choice made here follows them to every other log.
+  // Quantity preferences are the default. A channel can then choose its own
+  // alternate without changing every other channel of the same quantity.
   const units = useUnitPreferences(vehicleId, !publicMode);
+  const vehicleChannelOverrides = useQuery(
+    api.vehicleChannelOverrides.listByVehicle,
+    !publicMode && vehicleId ? { vehicleId } : "skip",
+  );
+  const setVehicleChannelOverride = useMutation(api.vehicleChannelOverrides.setOverride);
+  const channelUnitOverrides = useMemo(() => {
+    if (publicMode) return config.channelUnitOverrides ?? {};
+    return Object.fromEntries(
+      (vehicleChannelOverrides ?? [])
+        .filter((override) => override.unitKey)
+        .map((override) => [override.channelName, override.unitKey!]),
+    );
+  }, [publicMode, config.channelUnitOverrides, vehicleChannelOverrides]);
   const seedPrefs = useMutation(api.userPreferences.seedFromWorkspace);
   const seededRef = useRef(false);
   useEffect(() => {
@@ -586,6 +599,7 @@ export function LogViewerReady({
             dispatch({ type: "toggleZone", traceId, zoneId })
           }
             unitOverrides={unitOverrides}
+          channelUnitOverrides={channelUnitOverrides}
                     onSetTraceHeights={(heights) => dispatch({ type: "setTraceHeights", heights })}
           onToggleTraceCollapsed={(traceId) => dispatch({ type: "toggleTraceCollapsed", traceId })}
           onToggleTraceTimeslip={(traceId) => dispatch({ type: "toggleTraceTimeslip", traceId })}
@@ -595,15 +609,17 @@ export function LogViewerReady({
           accountFeatures={!publicMode}
           mathChannels={math.definitions}
           mathVersion={math.version}
-          onSetUnit={(quantitySlug, unitKey) =>
-            publicMode
-              ? dispatch({
-                  type: "setUnitOverride",
-                  quantitySlug,
-                  alternateKey: unitKey,
-                })
-              : units.setVehicleOverrides({ ...units.resolved, [quantitySlug]: unitKey })
-          }
+          onSetUnit={(channelName, unitKey) => {
+            if (publicMode) {
+              dispatch({
+                type: "setChannelUnitOverride",
+                channelName,
+                alternateKey: unitKey,
+              });
+            } else if (vehicleId) {
+              void setVehicleChannelOverride({ vehicleId, channelName, unitKey });
+            }
+          }}
           onSetTraceChannelOrder={(traceId, channelNames) =>
             dispatch({ type: "setTraceChannelOrder", traceId, channelNames })
           }

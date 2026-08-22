@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LoadedLog, HeatmapConfig } from "@/lib/viewer-types";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { convertForDisplay, getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
+import {
+  convertForDisplay,
+  getDisplayUnit,
+  type ChannelUnitOverrides,
+  type UnitSystem,
+  type UnitOverrides,
+} from "@/lib/units";
 import { findIndexAtTime } from "@/lib/cursor-utils";
 import { autoRange, computeHeatmap } from "@/lib/heatmap";
 import { PencilIcon, XIcon } from "lucide-react";
@@ -17,6 +23,7 @@ interface Props {
   cursorTime: number | null;
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
+  channelUnitOverrides?: ChannelUnitOverrides;
   onUpdate: (updates: Partial<HeatmapConfig>) => void;
   onRemove: () => void;
   onConfigure: () => void;
@@ -32,6 +39,7 @@ export function HeatmapContainer({
   cursorTime,
   unitSystem,
   unitOverrides,
+  channelUnitOverrides,
   onUpdate,
   onRemove,
   onConfigure,
@@ -56,16 +64,43 @@ export function HeatmapContainer({
   const vMetric = defOf(heatmap.valueChannel)?.quantitySlug ?? "";
 
   const xConvert = useCallback(
-    (v: number) => (xMetric ? convertForDisplay(v, xMetric, unitSystem, unitOverrides) : v),
-    [xMetric, unitSystem, unitOverrides],
+    (v: number) =>
+      xMetric
+        ? convertForDisplay(
+            v,
+            xMetric,
+            unitSystem,
+            unitOverrides,
+            channelUnitOverrides?.[heatmap.xChannel],
+          )
+        : v,
+    [xMetric, unitSystem, unitOverrides, channelUnitOverrides, heatmap.xChannel],
   );
   const yConvert = useCallback(
-    (v: number) => (yMetric ? convertForDisplay(v, yMetric, unitSystem, unitOverrides) : v),
-    [yMetric, unitSystem, unitOverrides],
+    (v: number) =>
+      yMetric
+        ? convertForDisplay(
+            v,
+            yMetric,
+            unitSystem,
+            unitOverrides,
+            channelUnitOverrides?.[heatmap.yChannel],
+          )
+        : v,
+    [yMetric, unitSystem, unitOverrides, channelUnitOverrides, heatmap.yChannel],
   );
   const valueConvert = useCallback(
-    (v: number) => (vMetric ? convertForDisplay(v, vMetric, unitSystem, unitOverrides) : v),
-    [vMetric, unitSystem, unitOverrides],
+    (v: number) =>
+      vMetric
+        ? convertForDisplay(
+            v,
+            vMetric,
+            unitSystem,
+            unitOverrides,
+            channelUnitOverrides?.[heatmap.valueChannel],
+          )
+        : v,
+    [vMetric, unitSystem, unitOverrides, channelUnitOverrides, heatmap.valueChannel],
   );
 
   const handleResizeStart = useCallback(
@@ -182,9 +217,24 @@ export function HeatmapContainer({
     return set.size > 0 ? set : null;
   }, [result, xData, yData, ts, selection, cursorTime, offset, xConvert, yConvert, heatmap]);
 
-  const xUnit = getDisplayUnit(xMetric, unitSystem, unitOverrides);
-  const yUnit = getDisplayUnit(yMetric, unitSystem, unitOverrides);
-  const vUnit = getDisplayUnit(vMetric, unitSystem, unitOverrides);
+  const xUnit = getDisplayUnit(
+    xMetric,
+    unitSystem,
+    unitOverrides,
+    channelUnitOverrides?.[heatmap.xChannel],
+  );
+  const yUnit = getDisplayUnit(
+    yMetric,
+    unitSystem,
+    unitOverrides,
+    channelUnitOverrides?.[heatmap.yChannel],
+  );
+  const vUnit = getDisplayUnit(
+    vMetric,
+    unitSystem,
+    unitOverrides,
+    channelUnitOverrides?.[heatmap.valueChannel],
+  );
   const xLabel = heatmap.xChannel + (xUnit ? ` (${xUnit})` : "");
   const yLabel = heatmap.yChannel + (yUnit ? ` (${yUnit})` : "");
   const valueLabel = heatmap.valueChannel + (vUnit ? ` (${vUnit})` : "");

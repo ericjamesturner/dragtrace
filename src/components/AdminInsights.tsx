@@ -123,7 +123,7 @@ export function AdminInsights() {
                       {dateTime(item.createdAt)} · {item.source === "guest" ? "Guest viewer" : "Signed-in viewer"}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {item.userEmail || (item.visitorKey ? "Anonymous visitor" : "Anonymous")}
+                      {item.contactEmail || item.userEmail || (item.visitorKey ? "Anonymous visitor" : "Anonymous")}
                       {item.page ? ` · ${item.page}` : ""}
                     </p>
                   </div>

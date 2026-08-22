@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { LoadedLog, ScatterConfig, ScatterSuggestion } from "@/lib/viewer-types";
 import type { ChannelDef } from "@/lib/log-types";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
+import {
+  getDisplayUnit,
+  type ChannelUnitOverrides,
+  type UnitSystem,
+  type UnitOverrides,
+} from "@/lib/units";
 import { buildScatterPresets } from "@/lib/scatter-presets";
 import {
   Dialog,
@@ -21,6 +26,7 @@ interface Props {
   existing?: ScatterConfig;
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
+  channelUnitOverrides?: ChannelUnitOverrides;
   aiSuggestions?: ScatterSuggestion[];
   onSubmit: (config: Omit<ScatterConfig, "id">) => void;
 }
@@ -31,6 +37,7 @@ function ChannelPicker({
   channelDefs,
   unitSystem,
   unitOverrides,
+  channelUnitOverrides,
   placeholder,
 }: {
   value: string;
@@ -38,6 +45,7 @@ function ChannelPicker({
   channelDefs: ChannelDef[];
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
+  channelUnitOverrides?: ChannelUnitOverrides;
   placeholder?: string;
 }) {
   const [search, setSearch] = useState("");
@@ -52,7 +60,9 @@ function ChannelPicker({
 
   const selectedDef = channelDefs.find((d) => d.name === value);
   const quantitySlug = selectedDef?.quantitySlug ?? "";
-  const displayUnit = quantitySlug ? getDisplayUnit(quantitySlug, unitSystem, unitOverrides) : "";
+  const displayUnit = quantitySlug
+    ? getDisplayUnit(quantitySlug, unitSystem, unitOverrides, channelUnitOverrides?.[value])
+    : "";
 
   return (
     <div>
@@ -83,7 +93,14 @@ function ChannelPicker({
           {results.length > 0 && open && (
             <div className="absolute left-0 right-0 top-full mt-1 z-50 max-h-48 overflow-y-auto rounded-lg border border-border bg-popover shadow-md">
               {results.map((def) => {
-                const du = def.quantitySlug ? getDisplayUnit(def.quantitySlug, unitSystem, unitOverrides) : "";
+                const du = def.quantitySlug
+                  ? getDisplayUnit(
+                      def.quantitySlug,
+                      unitSystem,
+                      unitOverrides,
+                      channelUnitOverrides?.[def.name],
+                    )
+                  : "";
                 return (
                   <button
                     key={def.name}
@@ -115,6 +132,7 @@ export function ScatterConfigDialog({
   existing,
   unitSystem,
   unitOverrides,
+  channelUnitOverrides,
   aiSuggestions,
   onSubmit,
 }: Props) {
@@ -248,6 +266,7 @@ export function ScatterConfigDialog({
               channelDefs={channelDefs}
               unitSystem={unitSystem}
               unitOverrides={unitOverrides}
+              channelUnitOverrides={channelUnitOverrides}
               placeholder="X channel"
             />
           </div>
@@ -260,6 +279,7 @@ export function ScatterConfigDialog({
               channelDefs={channelDefs}
               unitSystem={unitSystem}
               unitOverrides={unitOverrides}
+              channelUnitOverrides={channelUnitOverrides}
               placeholder="Y channel"
             />
           </div>
@@ -282,6 +302,7 @@ export function ScatterConfigDialog({
               channelDefs={channelDefs}
               unitSystem={unitSystem}
               unitOverrides={unitOverrides}
+              channelUnitOverrides={channelUnitOverrides}
               placeholder="Color channel"
             />
           </div>

@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import type { LoadedLog, TraceConfig, ChannelOnTrace, PageConfig, HighlightZoneConfig, ScatterConfig, HeatmapConfig, ScatterSuggestion } from "@/lib/viewer-types";
 import { MIN_TRACE_HEIGHT } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
-import type { UnitSystem, UnitOverrides } from "@/lib/units";
+import type { ChannelUnitOverrides, UnitSystem, UnitOverrides } from "@/lib/units";
 import type { Id, Doc } from "../../../convex/_generated/dataModel";
 import { TraceContainer, TRACE_CHROME_PX } from "./TraceContainer";
 import { ScatterContainer } from "./ScatterContainer";
@@ -70,6 +70,7 @@ interface Props {
   onToggleZone: (traceId: string, zoneId: string) => void;
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
+  channelUnitOverrides?: ChannelUnitOverrides;
   wheelZoomEnabled?: boolean;
   wheelZoomFactor?: number;
   wheelMode?: "zoom" | "scroll";
@@ -148,6 +149,7 @@ export function TracePanel({
   onToggleZone,
   unitSystem,
   unitOverrides,
+  channelUnitOverrides,
   wheelZoomEnabled,
   wheelZoomFactor,
   wheelMode,
@@ -756,6 +758,7 @@ export function TracePanel({
                 cursorTime={effectiveCursorTime}
                 unitSystem={unitSystem}
                 unitOverrides={unitOverrides}
+                channelUnitOverrides={channelUnitOverrides}
                 groupYRanges={groupYRanges}
                 sharedZones={sharedZones}
                 onAddZone={accountFeatures ? (zone) => onAddZone(trace.id, zone) : undefined}
@@ -783,6 +786,7 @@ export function TracePanel({
                 cursorTime={effectiveCursorTime}
                 unitSystem={unitSystem}
                 unitOverrides={unitOverrides}
+                channelUnitOverrides={channelUnitOverrides}
                 onUpdate={(u) => onUpdateScatter(sc.id, u)}
                 onRemove={() => onRemoveScatter(sc.id)}
                 onConfigure={() => setScatterDialog({ mode: "edit", scatter: sc })}
@@ -801,6 +805,7 @@ export function TracePanel({
                 cursorTime={effectiveCursorTime}
                 unitSystem={unitSystem}
                 unitOverrides={unitOverrides}
+                channelUnitOverrides={channelUnitOverrides}
                 onUpdate={(u) => onUpdateHeatmap(hm.id, u)}
                 onRemove={() => onRemoveHeatmap(hm.id)}
                 onConfigure={() => setHeatmapDialog({ mode: "edit", heatmap: hm })}
@@ -868,6 +873,7 @@ export function TracePanel({
           existing={scatterDialog.mode === "edit" ? scatterDialog.scatter : undefined}
           unitSystem={unitSystem}
           unitOverrides={unitOverrides}
+          channelUnitOverrides={channelUnitOverrides}
           aiSuggestions={scatterSuggestions ?? []}
           onSubmit={(cfg) => {
             if (scatterDialog.mode === "edit") {
@@ -887,6 +893,7 @@ export function TracePanel({
           existing={heatmapDialog.mode === "edit" ? heatmapDialog.heatmap : undefined}
           unitSystem={unitSystem}
           unitOverrides={unitOverrides}
+          channelUnitOverrides={channelUnitOverrides}
           onSubmit={(cfg) => {
             if (heatmapDialog.mode === "edit") {
               onUpdateHeatmap(heatmapDialog.heatmap.id, cfg);

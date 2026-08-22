@@ -5,7 +5,14 @@ import "uplot/dist/uPlot.min.css";
 import { resolveChannelStyle } from "@/lib/viewer-types";
 import type { ChannelOnTrace, LoadedLog } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
-import { convertForDisplay, getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
+import {
+  convertForDisplay,
+  getDisplayUnit,
+  resolveUnitKey,
+  type ChannelUnitOverrides,
+  type UnitSystem,
+  type UnitOverrides,
+} from "@/lib/units";
 import { readableTextColor } from "@/lib/colors";
 import { formatSlipTime, distanceAtTime, findSlipAtLaunch } from "@/lib/timeslip-zones";
 import { formatValue, formatDuration } from "@/lib/cursor-utils";
@@ -124,6 +131,7 @@ interface Props {
   raceStartTimes: { time: number; offset: number }[];
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
+  channelUnitOverrides?: ChannelUnitOverrides;
   selection: [number, number] | null;
   onSelection?: (min: number, max: number) => void;
   onClearSelection?: () => void;
@@ -224,6 +232,7 @@ export function TraceChart({
   raceStartTimes,
   unitSystem,
   unitOverrides,
+  channelUnitOverrides,
   selection,
   onSelection,
   onClearSelection,
@@ -330,7 +339,7 @@ export function TraceChart({
   // Build a stable key for dependencies
   const groupsKey = logGroups
     .map((g) =>
-      `${g.log.fileId}:${g.timeOffset}:${g.channels.map((c) => `${c.channelName}:${c.color ?? ""}:${c.opacity ?? ""}:${c.width ?? ""}:${(c.dash ?? []).join(".")}:${c.axisMin ?? ""}:${c.axisMax ?? ""}:${c.colorBy ?? ""}:${c.colorByMin ?? ""}:${c.colorByMax ?? ""}:${c.colorByLowColor ?? ""}:${c.colorByHighColor ?? ""}`).join(",")}`
+      `${g.log.fileId}:${g.timeOffset}:${g.channels.map((c) => `${c.channelName}:${channelUnitOverrides?.[c.channelName] ?? ""}:${c.color ?? ""}:${c.opacity ?? ""}:${c.width ?? ""}:${(c.dash ?? []).join(".")}:${c.axisMin ?? ""}:${c.axisMax ?? ""}:${c.colorBy ?? ""}:${c.colorBy ? channelUnitOverrides?.[c.colorBy] ?? "" : ""}:${c.colorByMin ?? ""}:${c.colorByMax ?? ""}:${c.colorByLowColor ?? ""}:${c.colorByHighColor ?? ""}`).join(",")}`
     )
     .join("|");
 
@@ -378,6 +387,7 @@ export function TraceChart({
       colorBy?: string;
       colorByVals?: (number | null)[] | null;
       colorByMetricUnit?: string;
+      colorByUnitKey?: string;
       colorByLowColor?: string;
       colorByHighColor?: string;
       colorByMin?: number;
@@ -423,6 +433,7 @@ export function TraceChart({
           colorBy: ch.colorBy,
           colorByVals,
           colorByMetricUnit,
+          colorByUnitKey: ch.colorBy ? channelUnitOverrides?.[ch.colorBy] : undefined,
           colorByLowColor: ch.colorByLowColor,
           colorByHighColor: ch.colorByHighColor,
           colorByMin: ch.colorByMin,
@@ -471,9 +482,23 @@ export function TraceChart({
       return null;
     };
 
+    const resolvedUnitKeyByChannel = new Map<string, string>();
+    for (const [channelName, quantitySlug] of quantitySlugByChannel) {
+      resolvedUnitKeyByChannel.set(
+        channelName,
+        resolveUnitKey(
+          quantitySlug,
+          unitSystem,
+          unitOverrides,
+          channelUnitOverrides?.[channelName],
+        ),
+      );
+    }
+
     const scaleIdOf = (channelName: string) => {
       const g = groupIdOf(channelName);
-      return g ? `g_${g}` : channelName;
+      const base = g ? `g_${g}` : channelName;
+      return `${base}:${resolvedUnitKeyByChannel.get(channelName) ?? ""}`;
     };
 
     const scaleKeyById = new Map<string, string>(); // scaleId -> "y0"/"y1"…
@@ -484,6 +509,7 @@ export function TraceChart({
     const scaleManualMin = new Map<string, number>();
     const scaleManualMax = new Map<string, number>();
     const scaleMetricUnit = new Map<string, string>();
+    const scaleUnitKey = new Map<string, string>();
     let scaleIdx = 0;
 
     // First pass: assign each channel to a scale (grouped or per-channel)
@@ -496,6 +522,8 @@ export function TraceChart({
         scaleGroupByKey.set(scaleKey, groupIdOf(meta.channelName));
         const mu = quantitySlugByChannel.get(meta.channelName);
         if (mu) scaleMetricUnit.set(scaleKey, mu);
+        const unitKey = resolvedUnitKeyByChannel.get(meta.channelName);
+        if (unitKey) scaleUnitKey.set(scaleKey, unitKey);
       }
       const scaleKey = scaleKeyById.get(scaleId)!;
       const members = channelsInScale.get(scaleId) ?? [];
@@ -627,7 +655,10 @@ export function TraceChart({
         const isFirstVisible = showAxes && leftAxisCount === 0;
         if (showAxes) leftAxisCount++;
         const mu = scaleMetricUnit.get(scaleKey) ?? "";
-        const displayUnit = mu ? getDisplayUnit(mu, unitSystem, unitOverrides) : "";
+        const unitKey = scaleUnitKey.get(scaleKey);
+        const displayUnit = mu
+          ? getDisplayUnit(mu, unitSystem, unitOverrides, unitKey)
+          : "";
         // When 2+ channels share a group scale, label the axis with the group
         // name (e.g. "RPM") instead of whichever channel happened to draw it.
         const groupId = scaleGroupByKey.get(scaleKey) ?? null;
@@ -649,7 +680,9 @@ export function TraceChart({
           side: 3,
           ...(mu && {
             values: (_u: uPlot, splits: number[]) =>
-              splits.map((v) => formatValue(convertForDisplay(v, mu, unitSystem, unitOverrides))),
+              splits.map((v) =>
+                formatValue(convertForDisplay(v, mu, unitSystem, unitOverrides, unitKey)),
+              ),
           }),
         });
       }
@@ -726,7 +759,15 @@ export function TraceChart({
                 const scaleKey = scaleKeyById.get(scaleId)!;
                 const mu = meta.colorByMetricUnit;
                 const conv = (v: number) =>
-                  mu ? convertForDisplay(v, mu, unitSystem, unitOverrides) : v;
+                  mu
+                    ? convertForDisplay(
+                        v,
+                        mu,
+                        unitSystem,
+                        unitOverrides,
+                        meta.colorByUnitKey,
+                      )
+                    : v;
 
                 // Color range over converted colorBy values, with optional lock.
                 let cMin = Infinity;
@@ -1787,7 +1828,14 @@ export function TraceChart({
   const handleCopyCsv = async () => {
     const group = logGroups[0];
     if (!group || !selection) return;
-    const csv = buildSelectionCsv(group.log, selection, group.timeOffset, unitSystem, unitOverrides);
+    const csv = buildSelectionCsv(
+      group.log,
+      selection,
+      group.timeOffset,
+      unitSystem,
+      unitOverrides,
+      channelUnitOverrides,
+    );
     if (!csv) return;
     try {
       await navigator.clipboard.writeText(csv);

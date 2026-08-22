@@ -15,9 +15,9 @@ export interface UnitAlternate {
 
 /**
  * Something measurable — pressure, temperature, air/fuel ratio — independent of
- * which ECU logged it. Channels reference a quantity by slug, and a user's unit
- * preference is stored per quantity, so choosing psi applies to every pressure
- * channel from every vendor.
+ * which ECU logged it. Channels reference a quantity by slug. A user's unit
+ * preference supplies the default per quantity, while a named channel can
+ * override that default independently.
  */
 export interface Quantity {
   slug: string;

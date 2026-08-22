@@ -4,8 +4,8 @@ import { QUANTITY_EXTRAS } from "./extras";
 
 /**
  * The shared quantity registry: generated vendor data with our own additions
- * merged in. Keyed by vendor-neutral slug, so a user's "show me psi" applies
- * to every pressure channel regardless of which ECU logged it.
+ * merged in. Keyed by vendor-neutral slug, it supplies default display units;
+ * individual named channels may override those defaults.
  */
 export const QUANTITIES: Record<string, Quantity> = (() => {
   const out: Record<string, Quantity> = {};

@@ -6,6 +6,22 @@ export type { UnitSystem, UnitAlternate };
 /** Display-unit choice per quantity slug, e.g. `{ pressure: "psi" }`. */
 export type UnitOverrides = Record<string, string>;
 
+/** Display-unit choice per channel name, e.g. `{ MAP: "inhg" }`. */
+export type ChannelUnitOverrides = Record<string, string>;
+
+function resolveDisplayAlternate(
+  quantitySlug: string,
+  system: UnitSystem,
+  overrides?: UnitOverrides,
+  alternateKey?: string,
+) {
+  const quantity = getQuantity(quantitySlug);
+  const channelChoice = alternateKey
+    ? quantity?.alternates.find((alternate) => alternate.key === alternateKey)
+    : undefined;
+  return channelChoice ?? resolveAlternate(quantitySlug, system, overrides);
+}
+
 /**
  * Channel values are stored in each quantity's canonical unit (see
  * `canonicalAlternate`). Both canonical and display are defined as linear
@@ -26,8 +42,9 @@ export function convertForDisplay(
   quantitySlug: string,
   system: UnitSystem,
   overrides?: UnitOverrides,
+  alternateKey?: string,
 ): number {
-  const alt = resolveAlternate(quantitySlug, system, overrides);
+  const alt = resolveDisplayAlternate(quantitySlug, system, overrides, alternateKey);
   if (!alt) return value;
   return canonicalToDisplay(value, quantitySlug)(alt);
 }
@@ -38,8 +55,9 @@ export function convertFromDisplay(
   quantitySlug: string,
   system: UnitSystem,
   overrides?: UnitOverrides,
+  alternateKey?: string,
 ): number {
-  const alt = resolveAlternate(quantitySlug, system, overrides);
+  const alt = resolveDisplayAlternate(quantitySlug, system, overrides, alternateKey);
   const c = canonicalAlternate(quantitySlug);
   if (!alt || !c || alt.scale === 0) return value;
   const raw = (value - alt.offset) / alt.scale;
@@ -50,8 +68,9 @@ export function getDisplayUnit(
   quantitySlug: string,
   system: UnitSystem,
   overrides?: UnitOverrides,
+  alternateKey?: string,
 ): string {
-  const alt = resolveAlternate(quantitySlug, system, overrides);
+  const alt = resolveDisplayAlternate(quantitySlug, system, overrides, alternateKey);
   if (!alt) return "";
   // "Raw" and other unitless quantities carry a blank label.
   return alt.label.trim();
@@ -62,9 +81,10 @@ export function getDisplayPrecision(
   quantitySlug: string | undefined,
   system: UnitSystem,
   overrides?: UnitOverrides,
+  alternateKey?: string,
 ): number | undefined {
   if (!quantitySlug) return undefined;
-  return resolveAlternate(quantitySlug, system, overrides)?.dp;
+  return resolveDisplayAlternate(quantitySlug, system, overrides, alternateKey)?.dp;
 }
 
 /** Advance to the next display unit for a quantity; a no-op when there's one. */
@@ -96,6 +116,7 @@ export function resolveUnitKey(
   quantitySlug: string,
   system: UnitSystem,
   overrides?: UnitOverrides,
+  alternateKey?: string,
 ): string {
-  return resolveAlternate(quantitySlug, system, overrides)?.key ?? "";
+  return resolveDisplayAlternate(quantitySlug, system, overrides, alternateKey)?.key ?? "";
 }

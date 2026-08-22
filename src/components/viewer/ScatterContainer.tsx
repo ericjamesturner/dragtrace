@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LoadedLog, ScatterConfig } from "@/lib/viewer-types";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { convertForDisplay, getDisplayUnit, type UnitSystem, type UnitOverrides } from "@/lib/units";
+import {
+  convertForDisplay,
+  getDisplayUnit,
+  type ChannelUnitOverrides,
+  type UnitSystem,
+  type UnitOverrides,
+} from "@/lib/units";
 import { findIndexAtTime } from "@/lib/cursor-utils";
 import { PencilIcon, XIcon } from "lucide-react";
 import { ScatterChart } from "./ScatterChart";
@@ -16,6 +22,7 @@ interface Props {
   cursorTime: number | null;
   unitSystem: UnitSystem;
   unitOverrides?: UnitOverrides;
+  channelUnitOverrides?: ChannelUnitOverrides;
   onUpdate: (updates: Partial<ScatterConfig>) => void;
   onRemove: () => void;
   onConfigure: () => void;
@@ -31,6 +38,7 @@ export function ScatterContainer({
   cursorTime,
   unitSystem,
   unitOverrides,
+  channelUnitOverrides,
   onUpdate,
   onRemove,
   onConfigure,
@@ -102,9 +110,36 @@ export function ScatterContainer({
   const scatterData = useMemo(() => {
     if (!xData || !yData || !ts) return null;
 
-    const convX = (v: number) => (xMetric ? convertForDisplay(v, xMetric, unitSystem, unitOverrides) : v);
-    const convY = (v: number) => (yMetric ? convertForDisplay(v, yMetric, unitSystem, unitOverrides) : v);
-    const convC = (v: number) => (cMetric ? convertForDisplay(v, cMetric, unitSystem, unitOverrides) : v);
+    const convX = (v: number) =>
+      xMetric
+        ? convertForDisplay(
+            v,
+            xMetric,
+            unitSystem,
+            unitOverrides,
+            channelUnitOverrides?.[scatter.xChannel],
+          )
+        : v;
+    const convY = (v: number) =>
+      yMetric
+        ? convertForDisplay(
+            v,
+            yMetric,
+            unitSystem,
+            unitOverrides,
+            channelUnitOverrides?.[scatter.yChannel],
+          )
+        : v;
+    const convC = (v: number) =>
+      cMetric && scatter.colorChannel
+        ? convertForDisplay(
+            v,
+            cMetric,
+            unitSystem,
+            unitOverrides,
+            channelUnitOverrides?.[scatter.colorChannel],
+          )
+        : v;
 
     // Aligned time = ts[i] + offset; filter to the current zoom window.
     let iStart = 0;
@@ -159,8 +194,11 @@ export function ScatterContainer({
       yRange: (isFinite(ymin) ? pad(ymin, ymax) : [0, 1]) as [number, number],
       colorRange: colorData && isFinite(cmin) ? (pad(cmin, cmax) as [number, number]) : undefined,
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [xData, yData, colorData, ts, offset, zoomRange, xMetric, yMetric, cMetric, unitSystem, unitOverrides]);
+  }, [
+    xData, yData, colorData, ts, offset, zoomRange, xMetric, yMetric, cMetric,
+    unitSystem, unitOverrides, channelUnitOverrides, scatter.xChannel,
+    scatter.yChannel, scatter.colorChannel,
+  ]);
 
   // Highlight: nearest scatter point to the synced cursor / point-selection time.
   const highlightIdx = useMemo(() => {
@@ -173,9 +211,26 @@ export function ScatterContainer({
     return sIdx >= 0 ? sIdx : null;
   }, [scatterData, ts, selection, cursorTime, offset]);
 
-  const xUnit = getDisplayUnit(xMetric, unitSystem, unitOverrides);
-  const yUnit = getDisplayUnit(yMetric, unitSystem, unitOverrides);
-  const cUnit = scatter.colorChannel ? getDisplayUnit(cMetric, unitSystem, unitOverrides) : "";
+  const xUnit = getDisplayUnit(
+    xMetric,
+    unitSystem,
+    unitOverrides,
+    channelUnitOverrides?.[scatter.xChannel],
+  );
+  const yUnit = getDisplayUnit(
+    yMetric,
+    unitSystem,
+    unitOverrides,
+    channelUnitOverrides?.[scatter.yChannel],
+  );
+  const cUnit = scatter.colorChannel
+    ? getDisplayUnit(
+        cMetric,
+        unitSystem,
+        unitOverrides,
+        channelUnitOverrides?.[scatter.colorChannel],
+      )
+    : "";
   const xLabel = scatter.xChannel + (xUnit ? ` (${xUnit})` : "");
   const yLabel = scatter.yChannel + (yUnit ? ` (${yUnit})` : "");
   const colorLabel = scatter.colorChannel ? scatter.colorChannel + (cUnit ? ` (${cUnit})` : "") : undefined;
