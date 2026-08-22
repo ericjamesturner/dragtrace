@@ -2,6 +2,34 @@ import { query, mutation } from "./_generated/server";
 import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
 
+const vehicleDetails = {
+  year: v.optional(v.number()),
+  make: v.optional(v.string()),
+  model: v.optional(v.string()),
+  raceWeightLb: v.optional(v.number()),
+};
+
+function validateVehicleDetails(args: {
+  year?: number;
+  raceWeightLb?: number;
+}) {
+  const nextYear = new Date().getFullYear() + 1;
+  if (
+    args.year !== undefined &&
+    (!Number.isInteger(args.year) || args.year < 1886 || args.year > nextYear)
+  ) {
+    throw new Error(`Year must be between 1886 and ${nextYear}`);
+  }
+  if (
+    args.raceWeightLb !== undefined &&
+    (!Number.isFinite(args.raceWeightLb) ||
+      args.raceWeightLb <= 0 ||
+      args.raceWeightLb > 100_000)
+  ) {
+    throw new Error("Race weight must be between 1 and 100,000 lb");
+  }
+}
+
 export const list = query({
   args: {},
   handler: async (ctx) => {
@@ -28,14 +56,20 @@ export const get = query({
 export const create = mutation({
   args: {
     name: v.string(),
+    ...vehicleDetails,
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
+    validateVehicleDetails(args);
     return await ctx.db.insert("vehicles", {
       userId,
       name: args.name,
+      year: args.year,
+      make: args.make,
+      model: args.model,
+      raceWeightLb: args.raceWeightLb,
       description: args.description,
       createdAt: Date.now(),
     });
@@ -65,6 +99,7 @@ export const update = mutation({
   args: {
     id: v.id("vehicles"),
     name: v.string(),
+    ...vehicleDetails,
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -72,8 +107,13 @@ export const update = mutation({
     if (!userId) throw new Error("Not authenticated");
     const vehicle = await ctx.db.get(args.id);
     if (!vehicle || vehicle.userId !== userId) throw new Error("Not found");
+    validateVehicleDetails(args);
     await ctx.db.patch(args.id, {
       name: args.name,
+      year: args.year,
+      make: args.make,
+      model: args.model,
+      raceWeightLb: args.raceWeightLb,
       description: args.description,
     });
   },

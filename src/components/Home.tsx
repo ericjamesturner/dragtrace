@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
+import type { Doc } from "../../convex/_generated/dataModel";
 import { useNav } from "./Layout";
 import { VehicleForm } from "./VehicleForm";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,16 @@ export function Home() {
   const [showForm, setShowForm] = useState(false);
 
   if (vehicles === undefined) return null;
+
+  const vehicleDetails = (vehicle: Doc<"vehicles">) => {
+    const identity = [vehicle.year, vehicle.make, vehicle.model]
+      .filter((part) => part !== undefined && part !== "")
+      .join(" ");
+    const weight = vehicle.raceWeightLb
+      ? `${vehicle.raceWeightLb.toLocaleString()} lb race weight`
+      : "";
+    return [identity, weight, vehicle.description].filter(Boolean).join(" · ");
+  };
 
   return (
     <div className="mx-auto max-w-2xl p-6">
@@ -58,9 +69,9 @@ export function Home() {
                   <span className="block truncate text-sm font-medium">
                     {v.name}
                   </span>
-                  {v.description && (
+                  {vehicleDetails(v) && (
                     <span className="block truncate text-xs text-muted-foreground">
-                      {v.description}
+                      {vehicleDetails(v)}
                     </span>
                   )}
                 </span>

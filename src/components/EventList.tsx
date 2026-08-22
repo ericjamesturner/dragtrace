@@ -84,9 +84,14 @@ export function EventList({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
     <div className="max-w-3xl p-6">
       <div className="mb-6 flex items-center gap-2">
         <h2 className="text-lg font-semibold">{vehicle?.name ?? "..."}</h2>
-        {vehicle?.description && (
+        {(vehicle?.year || vehicle?.make || vehicle?.model) && (
           <span className="text-sm text-muted-foreground">
-            — {vehicle.description}
+            — {[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ")}
+          </span>
+        )}
+        {vehicle?.raceWeightLb && (
+          <span className="shrink-0 rounded-md border px-2 py-0.5 font-mono text-xs tabular-nums text-muted-foreground">
+            {vehicle.raceWeightLb.toLocaleString()} lb
           </span>
         )}
         {pb?.bestEt !== undefined && (
@@ -118,6 +123,12 @@ export function EventList({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
           </Button>
         </div>
       </div>
+
+      {vehicle?.description && (
+        <p className="-mt-4 mb-6 text-sm text-muted-foreground">
+          {vehicle.description}
+        </p>
+      )}
 
       {events === undefined ? (
         <p className="text-sm text-muted-foreground py-8 text-center">

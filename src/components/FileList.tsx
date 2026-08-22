@@ -7,6 +7,7 @@ import { FileUpload } from "./FileUpload";
 import { TimeslipForm } from "./TimeslipForm";
 import { SlipCompareDialog, type CompareSlipRef } from "./SlipCompareDialog";
 import { SEGMENTS, segmentTimes, type SegmentKey } from "@/lib/timeslip-segments";
+import { estimatePowerFromTimeslip } from "@/lib/drag-performance";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
@@ -543,6 +544,7 @@ export function FileList({
                 )}
                 <PassCard
                   file={file}
+                  raceWeightLb={vehicle?.raceWeightLb}
                   passNumber={i + 1}
                   onArmDrag={() => armDrag(i)}
                   isBest={file._id === bestFileId}
@@ -572,6 +574,7 @@ export function FileList({
 
 function PassCard({
   file,
+  raceWeightLb,
   passNumber,
   isBest,
   eventBests,
@@ -587,6 +590,7 @@ function PassCard({
   slipRefs,
 }: {
   file: Doc<"files">;
+  raceWeightLb?: number;
   passNumber: number;
   isBest: boolean;
   eventBests: MetricBests;
@@ -1054,7 +1058,11 @@ function PassCard({
           timeslips.map((ts, idx) => (
             <div key={ts._id}>
               {idx > 0 && <Separator className="my-2" />}
-              <SlipLines ts={ts} bests={eventBests} />
+              <SlipLines
+                ts={ts}
+                bests={eventBests}
+                raceWeightLb={raceWeightLb}
+              />
               {idx === timeslips.length - 1 && lift !== null && passLen !== null && (
                 <>
                   <Separator className="my-1.5" />
@@ -1367,6 +1375,66 @@ function EstimateExplainer({
   );
 }
 
+/** The formula and caveats behind one weight-derived power number. */
+function WeightPowerExplainer({
+  method,
+  distance,
+  raceWeightLb,
+  observed,
+  estimateHp,
+}: {
+  method: "E.T." | "MPH";
+  distance: "1/4" | "1/8";
+  raceWeightLb: number;
+  observed: number;
+  estimateHp: number;
+}) {
+  const isEt = method === "E.T.";
+  const conversion = isEt ? 1.57 : 1.25;
+  const equivalent = distance === "1/8" ? observed * conversion : observed;
+  const formula = isEt
+    ? `${raceWeightLb.toLocaleString()} ÷ (${equivalent.toFixed(3)} ÷ 5.825)³`
+    : `${raceWeightLb.toLocaleString()} × (${equivalent.toFixed(2)} ÷ 234)³`;
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          Weight estimate · {method}
+        </div>
+        <div className="font-mono text-2xl font-semibold tabular-nums text-green-400">
+          ≈ {Math.round(estimateHp).toLocaleString()} hp
+        </div>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          Estimated from the {raceWeightLb.toLocaleString()} lb race weight and
+          this pass&apos;s {distance}-mile {isEt ? "elapsed time" : "trap speed"}.
+        </p>
+      </div>
+
+      {distance === "1/8" && (
+        <div className="flex items-center justify-between rounded-md border bg-muted/40 px-2.5 py-2 font-mono text-xs tabular-nums">
+          <span className="text-muted-foreground">
+            {observed} × {conversion}
+          </span>
+          <span>{equivalent.toFixed(isEt ? 3 : 2)} quarter equivalent</span>
+        </div>
+      )}
+
+      <div className="rounded-md border bg-muted/40 px-2.5 py-2 font-mono text-xs tabular-nums">
+        <div className="text-muted-foreground">{formula}</div>
+        <div className="mt-1 text-right font-semibold text-green-400">
+          ≈ {Math.round(estimateHp).toLocaleString()} hp
+        </div>
+      </div>
+
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        This is a track-side estimate, not a dyno measurement. Traction, aero,
+        weather, gearing, and lifting can all move the result.
+      </p>
+    </div>
+  );
+}
+
 /** A slip with nothing on it, for the empty state's ghost lines. */
 const EMPTY_SLIP = {} as Doc<"timeslips">;
 
@@ -1374,9 +1442,11 @@ const EMPTY_SLIP = {} as Doc<"timeslips">;
 function SlipLines({
   ts,
   bests,
+  raceWeightLb,
 }: {
   ts: Doc<"timeslips">;
   bests: MetricBests;
+  raceWeightLb?: number;
 }) {
   const redLight = ts.rt !== undefined && ts.rt < 0;
   const breakout =
@@ -1397,6 +1467,27 @@ function SlipLines({
   const segs = segmentTimes(ts);
   const segBestClass = (k: SegmentKey) =>
     segs[k] !== undefined && segs[k] === bests[k] ? "text-green-400" : undefined;
+
+  const power = raceWeightLb
+    ? estimatePowerFromTimeslip({
+        raceWeightLb,
+        quarterEt: ts.et,
+        quarterMph: ts.mph,
+        eighthEt: ts.eighthEt,
+        eighthMph: ts.eighthMph,
+      })
+    : null;
+  const powerEtObserved = power?.distance === "1/4" ? ts.et : ts.eighthEt;
+  const powerMphObserved = power?.distance === "1/4" ? ts.mph : ts.eighthMph;
+  const hasRunConditions =
+    ts.lane !== undefined ||
+    ts.airTemperatureF !== undefined ||
+    ts.trackTemperatureF !== undefined ||
+    ts.humidityPct !== undefined ||
+    ts.barometricPressureInHg !== undefined ||
+    ts.densityAltitudeFt !== undefined ||
+    ts.windSpeedMph !== undefined ||
+    !!ts.windDirection;
 
   // Every line always renders — empty shows as "—" — so the slips line up
   // row for row across the whole gallery.
@@ -1437,6 +1528,113 @@ function SlipLines({
         valueClassName={breakout ? "text-red-400" : bestClass("et")}
       />
       <TimeslipLine label="MPH" value={ts.mph} bold valueClassName={bestClass("mph")} />
+
+      {hasRunConditions && (
+        <>
+          <Separator className="my-1.5" />
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+            Run conditions
+          </div>
+          {ts.lane !== undefined && (
+            <TimeslipLine
+              label="LANE"
+              value={ts.lane === "left" ? "Left" : "Right"}
+            />
+          )}
+          {ts.airTemperatureF !== undefined && (
+            <TimeslipLine label="AIR" value={`${ts.airTemperatureF} °F`} />
+          )}
+          {ts.trackTemperatureF !== undefined && (
+            <TimeslipLine label="TRACK" value={`${ts.trackTemperatureF} °F`} />
+          )}
+          {ts.humidityPct !== undefined && (
+            <TimeslipLine label="HUMIDITY" value={`${ts.humidityPct}%`} />
+          )}
+          {ts.barometricPressureInHg !== undefined && (
+            <TimeslipLine
+              label="BAROMETER"
+              value={`${ts.barometricPressureInHg} inHg`}
+            />
+          )}
+          {ts.densityAltitudeFt !== undefined && (
+            <TimeslipLine
+              label="D.A."
+              value={`${ts.densityAltitudeFt.toLocaleString()} ft`}
+            />
+          )}
+          {(ts.windSpeedMph !== undefined || ts.windDirection) && (
+            <TimeslipLine
+              label="WIND"
+              value={[
+                ts.windSpeedMph !== undefined ? `${ts.windSpeedMph} mph` : "",
+                ts.windDirection,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            />
+          )}
+        </>
+      )}
+
+      {raceWeightLb !== undefined && (
+        <>
+          <Separator className="my-1.5" />
+          <div className="mb-1 flex items-baseline justify-between">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+              Weight-based estimates
+            </span>
+            {power && (
+              <span className="text-[9px] text-muted-foreground/50">
+                {power.distance} mile
+              </span>
+            )}
+          </div>
+          <TimeslipLine
+            label="RACE WT"
+            value={`${raceWeightLb.toLocaleString()} lb`}
+          />
+          {power?.etHp !== undefined && powerEtObserved !== undefined ? (
+            <EstimateLine
+              line={
+                <TimeslipLine
+                  label="E.T. POWER"
+                  value={`≈ ${Math.round(power.etHp).toLocaleString()} hp`}
+                />
+              }
+            >
+              <WeightPowerExplainer
+                method="E.T."
+                distance={power.distance}
+                raceWeightLb={raceWeightLb}
+                observed={powerEtObserved}
+                estimateHp={power.etHp}
+              />
+            </EstimateLine>
+          ) : (
+            <TimeslipLine label="E.T. POWER" value={undefined} />
+          )}
+          {power?.mphHp !== undefined && powerMphObserved !== undefined ? (
+            <EstimateLine
+              line={
+                <TimeslipLine
+                  label="MPH POWER"
+                  value={`≈ ${Math.round(power.mphHp).toLocaleString()} hp`}
+                />
+              }
+            >
+              <WeightPowerExplainer
+                method="MPH"
+                distance={power.distance}
+                raceWeightLb={raceWeightLb}
+                observed={powerMphObserved}
+                estimateHp={power.mphHp}
+              />
+            </EstimateLine>
+          ) : (
+            <TimeslipLine label="MPH POWER" value={undefined} />
+          )}
+        </>
+      )}
 
       <Separator className="my-1.5" />
 

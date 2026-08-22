@@ -12,6 +12,14 @@ import { v } from "convex/values";
 
 const timeslipFields = {
   round: v.optional(v.string()),
+  lane: v.optional(v.union(v.literal("left"), v.literal("right"))),
+  airTemperatureF: v.optional(v.number()),
+  trackTemperatureF: v.optional(v.number()),
+  humidityPct: v.optional(v.number()),
+  barometricPressureInHg: v.optional(v.number()),
+  densityAltitudeFt: v.optional(v.number()),
+  windSpeedMph: v.optional(v.number()),
+  windDirection: v.optional(v.string()),
   delayBox: v.optional(v.number()),
   rt: v.optional(v.number()),
   sixtyFt: v.optional(v.number()),
@@ -56,7 +64,7 @@ export const listByVehicle = query({
         ...(await ctx.db
           .query("timeslips")
           .withIndex("by_file", (q) => q.eq("fileId", file._id))
-          .collect())
+          .collect()),
       );
     }
     return slips;
@@ -77,6 +85,14 @@ export const create = mutation({
       userId,
       fileId: args.fileId,
       round: args.round,
+      lane: args.lane,
+      airTemperatureF: args.airTemperatureF,
+      trackTemperatureF: args.trackTemperatureF,
+      humidityPct: args.humidityPct,
+      barometricPressureInHg: args.barometricPressureInHg,
+      densityAltitudeFt: args.densityAltitudeFt,
+      windSpeedMph: args.windSpeedMph,
+      windDirection: args.windDirection,
       delayBox: args.delayBox,
       rt: args.rt,
       sixtyFt: args.sixtyFt,
@@ -104,6 +120,14 @@ export const update = mutation({
     if (!ts || ts.userId !== userId) throw new Error("Not found");
     await ctx.db.patch(args.id, {
       round: args.round,
+      lane: args.lane,
+      airTemperatureF: args.airTemperatureF,
+      trackTemperatureF: args.trackTemperatureF,
+      humidityPct: args.humidityPct,
+      barometricPressureInHg: args.barometricPressureInHg,
+      densityAltitudeFt: args.densityAltitudeFt,
+      windSpeedMph: args.windSpeedMph,
+      windDirection: args.windDirection,
       delayBox: args.delayBox,
       rt: args.rt,
       sixtyFt: args.sixtyFt,
@@ -173,9 +197,12 @@ export const parseTimeslipImage = action({
     if (!userId) throw new Error("Not authenticated");
     // A storage id has no owner of its own, so the caller must hold the claim
     // written at upload time. Without this, any id could be read and deleted.
-    const owner = await ctx.runQuery(internal.timeslips.tempUploadOwnerInternal, {
-      storageId: args.storageId,
-    });
+    const owner = await ctx.runQuery(
+      internal.timeslips.tempUploadOwnerInternal,
+      {
+        storageId: args.storageId,
+      },
+    );
     if (owner !== userId) throw new Error("Not found");
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -188,7 +215,8 @@ export const parseTimeslipImage = action({
     const imageBuffer = await imageResponse.arrayBuffer();
     const base64 = Buffer.from(imageBuffer).toString("base64");
 
-    const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
+    const contentType =
+      imageResponse.headers.get("content-type") || "image/jpeg";
 
     // Call Claude API with vision
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -243,7 +271,7 @@ Return ONLY valid JSON, no other text.`,
       throw new Error(`Claude API error: ${response.status} ${errorText}`);
     }
 
-    const result = await response.json() as {
+    const result = (await response.json()) as {
       content: Array<{ type: string; text?: string }>;
     };
     const text = result.content?.[0]?.text ?? "";
@@ -260,7 +288,17 @@ Return ONLY valid JSON, no other text.`,
     });
 
     // Return only well-typed fields
-    const fields = ["dialIn", "rt", "sixtyFt", "threeThirty", "eighthEt", "eighthMph", "thousandFt", "et", "mph"] as const;
+    const fields = [
+      "dialIn",
+      "rt",
+      "sixtyFt",
+      "threeThirty",
+      "eighthEt",
+      "eighthMph",
+      "thousandFt",
+      "et",
+      "mph",
+    ] as const;
     const cleaned: Record<string, number | string> = {};
     for (const key of fields) {
       if (typeof parsed[key] === "number" && !isNaN(parsed[key])) {

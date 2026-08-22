@@ -18,6 +18,11 @@ export default defineSchema({
   vehicles: defineTable({
     userId: v.id("users"),
     name: v.string(),
+    year: v.optional(v.number()),
+    make: v.optional(v.string()),
+    model: v.optional(v.string()),
+    /** Total race-ready weight: vehicle, driver, fuel and ballast. */
+    raceWeightLb: v.optional(v.number()),
     description: v.optional(v.string()),
     createdAt: v.number(),
     /** Sparse per-quantity overrides layered over the user's preferences. */
@@ -139,6 +144,16 @@ export default defineSchema({
     fileId: v.id("files"),
     /** Which round the pass was — free text the racer types: T1, Q2, E3... */
     round: v.optional(v.string()),
+    /** The lane used for this pass. Unset when it was not recorded. */
+    lane: v.optional(v.union(v.literal("left"), v.literal("right"))),
+    /** Trackside weather readings, stored in conventional US drag-racing units. */
+    airTemperatureF: v.optional(v.number()),
+    trackTemperatureF: v.optional(v.number()),
+    humidityPct: v.optional(v.number()),
+    barometricPressureInHg: v.optional(v.number()),
+    densityAltitudeFt: v.optional(v.number()),
+    windSpeedMph: v.optional(v.number()),
+    windDirection: v.optional(v.string()),
     /** The delay box setting used on this pass. */
     delayBox: v.optional(v.number()),
     rt: v.optional(v.number()),
