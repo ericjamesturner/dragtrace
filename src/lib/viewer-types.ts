@@ -56,6 +56,8 @@ export function resolveChannelStyle(
 export interface LoadedLog {
   fileId: Id<"files">;
   fileName: string;
+  /** One-way content digest used only to count distinct logs in analytics. */
+  contentFingerprint: string;
   parsed: ParsedLog;
   activeSessionIndex: number;
   raceStartTime: number | null;

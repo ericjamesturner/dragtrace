@@ -4,8 +4,9 @@ import { SiteFooter, SiteHeader } from "./SiteChrome";
 /**
  * Privacy policy and terms, written to match what the code actually does:
  * account data has no sharing between users, guest logs stay in the browser,
- * uploaded files live in Convex storage, and the plain-English features send
- * channel names, a small sample of values, or a timeslip photo to Anthropic.
+ * feedback attachments and account files live in Convex storage, and the
+ * plain-English features send channel names, a small sample of values, or a
+ * timeslip photo to Anthropic.
  *
  * NOT LEGAL ADVICE. Eric shipped this without lawyer review on 2026-08-09;
  * worth a real review once there are paying customers.
@@ -111,8 +112,11 @@ function Privacy() {
       <H2>Your logs are yours. We do not share them.</H2>
       <P>
         If you use the guest viewer, your selected datalogs are read and parsed
-        on your device. We do not upload or store those files, their layout, or
-        your viewer changes. Reloading the page clears the guest session.
+        on your device. We do not upload or store those files, their filenames,
+        their layout, or your viewer changes. Reloading the page clears the guest
+        session. We do send a one-way fingerprint of each log so we can count
+        distinct logs without receiving their contents. A file is uploaded only
+        if you deliberately attach it to feedback.
       </P>
       <P>
         Your datalogs, your charts, your notes and your timeslips are private to
@@ -140,6 +144,17 @@ function Privacy() {
         <LI>
           <strong className="text-white">Your datalog files.</strong> The files
           you upload, exactly as your ECU wrote them.
+        </LI>
+        <LI>
+          <strong className="text-white">Viewer usage.</strong> A random browser
+          identifier for guests, viewer start and active time, whether the viewer
+          was guest or signed in, the number of logs opened, and a one-way log
+          fingerprint used to count distinct logs. We do not collect the guest
+          log's filename or contents for analytics.
+        </LI>
+        <LI>
+          <strong className="text-white">Feedback.</strong> The message you send,
+          the viewer page it came from, and any files you choose to attach.
         </LI>
         <LI>
           <strong className="text-white">Phone number,</strong> if you give us

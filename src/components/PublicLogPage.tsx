@@ -5,6 +5,7 @@ import type { LoadedLog } from "@/lib/viewer-types";
 import { Button } from "@/components/ui/button";
 import { FileUpIcon, Loader2Icon, LockKeyholeIcon } from "lucide-react";
 import { LogViewerReady } from "./LogViewer";
+import { FeedbackDialog } from "./viewer/FeedbackDialog";
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -131,9 +132,13 @@ export default function PublicLogPage({
           >
             DragTrace
           </button>
+          <FeedbackDialog
+            source="guest"
+            buttonClassName="ml-auto text-white/70 hover:bg-white/10 hover:text-white"
+          />
           <button
             onClick={onSignIn}
-            className="ml-auto rounded-md px-3 py-2 text-base text-white/70 transition-colors hover:text-white"
+            className="rounded-md px-3 py-2 text-base text-white/70 transition-colors hover:text-white"
           >
             Sign in
           </button>

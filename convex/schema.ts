@@ -168,6 +168,86 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_file", ["fileId"]),
 
+  // Feedback is intentionally writable from the guest viewer. Reads are
+  // guarded by the admin query in feedback.ts, so customer reports and their
+  // attachments never become public data.
+  feedback: defineTable({
+    userId: v.optional(v.id("users")),
+    visitorKey: v.optional(v.string()),
+    source: v.union(v.literal("guest"), v.literal("account")),
+    message: v.string(),
+    page: v.optional(v.string()),
+    status: v.union(v.literal("new"), v.literal("reviewed")),
+    createdAt: v.number(),
+  })
+    .index("by_created", ["createdAt"])
+    .index("by_status_created", ["status", "createdAt"]),
+
+  feedbackAttachments: defineTable({
+    feedbackId: v.id("feedback"),
+    storageId: v.id("_storage"),
+    fileName: v.string(),
+    fileSize: v.number(),
+    contentType: v.string(),
+    createdAt: v.number(),
+  }).index("by_feedback", ["feedbackId"]),
+
+  // A signed-in account is one visitor across devices. Signed-out use is
+  // counted by a random browser id; no IP address, filename, or log contents
+  // are stored for analytics.
+  viewerVisitors: defineTable({
+    visitorKey: v.string(),
+    userId: v.optional(v.id("users")),
+    firstSeenAt: v.number(),
+    lastSeenAt: v.number(),
+    sessionCount: v.number(),
+  }).index("by_visitor", ["visitorKey"]),
+
+  viewerSessions: defineTable({
+    visitorKey: v.string(),
+    userId: v.optional(v.id("users")),
+    source: v.union(v.literal("guest"), v.literal("account")),
+    startedAt: v.number(),
+    lastSeenAt: v.number(),
+    activeMs: v.number(),
+    uniqueLogsLoaded: v.number(),
+  })
+    .index("by_started", ["startedAt"])
+    .index("by_visitor", ["visitorKey"]),
+
+  // The fingerprint is a one-way SHA-256 digest computed in the browser. It
+  // lets us recognize the same log twice without uploading the guest's file.
+  viewerLogs: defineTable({
+    fingerprint: v.string(),
+    firstSource: v.union(v.literal("guest"), v.literal("account")),
+    firstSeenAt: v.number(),
+    lastSeenAt: v.number(),
+    sessionCount: v.number(),
+  }).index("by_fingerprint", ["fingerprint"]),
+
+  viewerLogLoads: defineTable({
+    sessionId: v.id("viewerSessions"),
+    fingerprint: v.string(),
+    loadedAt: v.number(),
+  })
+    .index("by_session", ["sessionId"])
+    .index("by_session_log", ["sessionId", "fingerprint"])
+    .index("by_loaded", ["loadedAt"]),
+
+  // A single roll-up keeps the lifetime dashboard cheap even after the raw
+  // session history grows large.
+  viewerMetrics: defineTable({
+    key: v.string(),
+    uniqueVisitors: v.number(),
+    uniqueLogs: v.number(),
+    sessions: v.number(),
+    guestSessions: v.number(),
+    accountSessions: v.number(),
+    totalLogLoads: v.number(),
+    totalActiveMs: v.number(),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
+
   /**
    * One row per user once they reach checkout. Stripe is the source of truth —
    * this is a local cache kept current by the webhook, so a query never has to

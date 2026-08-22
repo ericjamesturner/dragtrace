@@ -13,6 +13,16 @@ import { CHART_COLORS, type LoadedLog } from "./viewer-types";
 // Seconds of data kept before the race start when opening a log.
 const CLIP_PRE_RACE_S = 2;
 
+async function fingerprint(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(text),
+  );
+  return `sha256:${Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("")}`;
+}
+
 function detectRaceStart(
   parsed: ParsedLog,
   sessionIndex: number,
@@ -78,6 +88,10 @@ export async function loadHaltechLog({
 }): Promise<LoadedLog> {
   if (!detectHaltech(text)) throw new Error("Not a Haltech datalog");
 
+  // Start this before parsing so the browser can hash while the rest of the
+  // log is being prepared. Only the digest leaves the browser in guest mode.
+  const contentFingerprint = fingerprint(text);
+
   const parsed = parseHaltech(text);
   if (parsed.sessions.length === 0) throw new Error("No log sessions found");
 
@@ -96,6 +110,7 @@ export async function loadHaltechLog({
   return {
     fileId,
     fileName,
+    contentFingerprint: await contentFingerprint,
     parsed,
     activeSessionIndex,
     raceStartTime,

@@ -7,6 +7,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { useNav } from "./Layout";
 import { UnitsPanel } from "./UnitsPanel";
 import { Button } from "@/components/ui/button";
+import { AdminInsights } from "./AdminInsights";
 
 /**
  * Settings, rendered inside the normal app shell like any other page — the
@@ -14,7 +15,7 @@ import { Button } from "@/components/ui/button";
  * the app. Standard SaaS layout: heading, horizontal tabs, content.
  */
 
-export type SettingsSection = "profile" | "billing" | "units";
+export type SettingsSection = "profile" | "billing" | "units" | "insights";
 
 export function Settings({ section }: { section: SettingsSection }) {
   const { openSettings, goToChannelManager } = useNav();
@@ -55,9 +56,15 @@ export function Settings({ section }: { section: SettingsSection }) {
             Units
           </button>
           {isAdmin && (
-            <button className={item(false)} onClick={goToChannelManager}>
-              Channels
-            </button>
+            <>
+              <p className={groupLabel}>Admin</p>
+              <button className={item(section === "insights")} onClick={() => openSettings("insights")}>
+                Usage &amp; feedback
+              </button>
+              <button className={item(false)} onClick={goToChannelManager}>
+                Channels
+              </button>
+            </>
           )}
         </nav>
 
@@ -66,6 +73,8 @@ export function Settings({ section }: { section: SettingsSection }) {
             <ProfileSection />
           ) : section === "billing" ? (
             <BillingSection />
+          ) : section === "insights" && isAdmin ? (
+            <AdminInsights />
           ) : (
             <UnitsSection />
           )}

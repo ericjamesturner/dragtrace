@@ -9,11 +9,13 @@
  */
 
 import type * as admin from "../admin.js";
+import type * as analytics from "../analytics.js";
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
 import type * as channelCategories from "../channelCategories.js";
 import type * as channelMappings from "../channelMappings.js";
 import type * as events from "../events.js";
+import type * as feedback from "../feedback.js";
 import type * as files from "../files.js";
 import type * as highlightZones from "../highlightZones.js";
 import type * as http from "../http.js";
@@ -36,11 +38,13 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
+  analytics: typeof analytics;
   auth: typeof auth;
   authz: typeof authz;
   channelCategories: typeof channelCategories;
   channelMappings: typeof channelMappings;
   events: typeof events;
+  feedback: typeof feedback;
   files: typeof files;
   highlightZones: typeof highlightZones;
   http: typeof http;

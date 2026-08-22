@@ -9,6 +9,7 @@ import { useViewerSync } from "@/hooks/useViewerSync";
 import { useScatterSuggestions } from "@/hooks/useScatterSuggestions";
 import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 import { useMathChannels } from "@/hooks/useMathChannels";
+import { useViewerAnalytics } from "@/hooks/useViewerAnalytics";
 import { buildDefaultConfig } from "@/lib/default-layout";
 import { computeAlignment } from "@/lib/alignment";
 import { buildTimeslipZones } from "@/lib/timeslip-zones";
@@ -164,6 +165,10 @@ export function LogViewerReady({
   goToViewer,
 }: ReadyProps) {
   const sync = useViewerSync();
+  useViewerAnalytics(
+    publicMode ? "guest" : "account",
+    logs.map((log) => log.contentFingerprint),
+  );
 
   // A vehicle has one layout and it saves itself, so this is only ever the id
   // the auto-save writes back to.
@@ -463,6 +468,7 @@ export function LogViewerReady({
       <ViewerToolbar
         onAddTrace={() => handleAddTrace()}
         onBack={handleBack}
+        feedbackSource={publicMode ? "guest" : "account"}
         breadcrumb={
           publicMode ? (
             <div className="flex min-w-0 items-center gap-2">

@@ -57,7 +57,9 @@ function parseNavFromUrl(): NavState {
   if (params.has("settings") || params.has("account") || params.has("preferences")) {
     const value = params.get("settings");
     const section: SettingsSection =
-      value === "units" || params.has("preferences")
+      value === "insights"
+        ? "insights"
+        : value === "units" || params.has("preferences")
         ? "units"
         : value === "billing" || params.has("account")
           ? "billing"
