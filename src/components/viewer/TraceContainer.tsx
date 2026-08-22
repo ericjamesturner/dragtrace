@@ -556,6 +556,11 @@ export function TraceContainer({
   const [contextMenu, setContextMenu] = useState<ChannelStyleTarget | null>(null);
   const [customColorOpen, setCustomColorOpen] = useState(false);
   const [channelsDialogOpen, setChannelsDialogOpen] = useState(false);
+  const [channelPanelMenu, setChannelPanelMenu] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const channelPanelMenuRef = useRef<HTMLDivElement>(null);
   /** A channel is being dragged over the Channels… button, which removes it. */
   const [dropToRemove, setDropToRemove] = useState(false);
   const channelOverrides = useQuery(
@@ -587,6 +592,24 @@ export function TraceContainer({
   useEffect(() => {
     setColorPreview(null);
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!channelPanelMenu) return;
+    const closeOnClick = (event: MouseEvent) => {
+      if (!channelPanelMenuRef.current?.contains(event.target as Node)) {
+        setChannelPanelMenu(null);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setChannelPanelMenu(null);
+    };
+    document.addEventListener("mousedown", closeOnClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [channelPanelMenu]);
 
   const chartAreaRef = useRef<HTMLDivElement>(null);
   const [hoveredChannel, setHoveredChannel] = useState<string | null>(null);
@@ -1574,7 +1597,15 @@ export function TraceContainer({
 
             {/* Channel rows */}
             {!legendCollapsed && (
-              <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-1">
+              <div
+                className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-1"
+                onContextMenu={(event) => {
+                  if ((event.target as HTMLElement).closest('[draggable="true"]')) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setChannelPanelMenu({ x: event.clientX, y: event.clientY });
+                }}
+              >
                 {/* Comparing runs: one row per CHANNEL with that channel's
                     value from each log side by side, rather than repeating
                     every channel name once per log. Same structure the compact
@@ -1856,6 +1887,31 @@ export function TraceContainer({
           onPointerDown={handleResizePointerDown}
           style={{ touchAction: "none" }}
         />
+      )}
+
+      {channelPanelMenu && (
+        <div
+          ref={channelPanelMenuRef}
+          style={{
+            position: "fixed",
+            left: Math.min(channelPanelMenu.x, window.innerWidth - 180),
+            top: Math.min(channelPanelMenu.y, window.innerHeight - 60),
+            zIndex: 1000,
+          }}
+          className="min-w-40 overflow-hidden rounded-md border border-border bg-popover shadow-lg"
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setChannelPanelMenu(null);
+              setChannelsDialogOpen(true);
+            }}
+            className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+          >
+            <ListPlusIcon className="size-4" />
+            Channels
+          </button>
+        </div>
       )}
 
       {/* Channel style dialog, opened from a row in the panel. */}

@@ -110,9 +110,9 @@ function Privacy() {
 
       <H2>Your logs are yours. We do not share them.</H2>
       <P>
-        If you use the guest viewer, your selected datalog is read and parsed on
-        your device. We do not upload or store that file, its layout, or your
-        viewer changes. Reloading the page clears the guest session.
+        If you use the guest viewer, your selected datalogs are read and parsed
+        on your device. We do not upload or store those files, their layout, or
+        your viewer changes. Reloading the page clears the guest session.
       </P>
       <P>
         Your datalogs, your charts, your notes and your timeslips are private to

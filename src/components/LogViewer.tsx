@@ -137,6 +137,8 @@ interface ReadyProps {
   errors: string[];
   workspace: Doc<"workspaces"> | null;
   publicMode?: boolean;
+  publicLoading?: boolean;
+  onAddPublicFiles?: () => void;
   onBack?: () => void;
   goToFiles?: (vehicleId: Id<"vehicles">, eventId: Id<"events">) => void;
   goToViewer?: (
@@ -155,6 +157,8 @@ export function LogViewerReady({
   errors,
   workspace,
   publicMode = false,
+  publicLoading = false,
+  onAddPublicFiles,
   onBack,
   goToFiles,
   goToViewer,
@@ -354,16 +358,21 @@ export function LogViewerReady({
     dispatch({ type: "setMirroredLogs", logFileIds: want });
   }, [logs, config.mirroredLogIds]);
 
-  // Re-apply mirror sync when logs load/change
-  const prevSyncKeyRef = useRef("");
+  // Math definitions mutate the parsed channel lists after the logs are loaded,
+  // so re-apply mirror sync when those definitions change. Log additions are
+  // handled by setMirroredLogs above; replaying a stale config here would race
+  // that action and leave the newest comparison log loaded but not drawn.
+  const prevMathVersionRef = useRef(math.version);
   useEffect(() => {
-    const key = `${logs.length}:${math.version}`;
-    if (logs.length > 0 && key !== prevSyncKeyRef.current && (config.mirroredLogIds?.length ?? 0) > 0) {
+    if (
+      math.version !== prevMathVersionRef.current &&
+      (config.mirroredLogIds?.length ?? 0) > 0
+    ) {
       dispatch({ type: "loadConfig", config });
     }
-    prevSyncKeyRef.current = key;
+    prevMathVersionRef.current = math.version;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logs.length, math.version]);
+  }, [math.version]);
 
   // Update URL when fileIds change
   useEffect(() => {
@@ -456,9 +465,26 @@ export function LogViewerReady({
         onBack={handleBack}
         breadcrumb={
           publicMode ? (
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium">{logs[0]?.fileName}</div>
-              <div className="text-[10px] text-muted-foreground">Guest viewer · not saved</div>
+            <div className="flex min-w-0 items-center gap-2">
+              <div
+                className="min-w-0"
+                title={logs.map((log) => log.fileName).join("\n")}
+              >
+                <div className="truncate text-sm font-medium">
+                  {logs.length === 1 ? logs[0]?.fileName : `${logs.length} logs`}
+                </div>
+                <div className="text-[10px] text-muted-foreground">Guest viewer · not saved</div>
+              </div>
+              {onAddPublicFiles && (
+                <button
+                  type="button"
+                  disabled={publicLoading}
+                  onClick={onAddPublicFiles}
+                  className="shrink-0 cursor-pointer rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+                >
+                  {publicLoading ? "Opening…" : "+ Add logs"}
+                </button>
+              )}
             </div>
           ) : vehicleId && eventId ? (
             <ViewerBreadcrumb

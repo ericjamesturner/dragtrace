@@ -19,9 +19,9 @@ export default function PublicLogPage({
   onHome: () => void;
   onSignIn: () => void;
 }) {
-  const [log, setLog] = useState<LoadedLog | null>(null);
-  const [loadingFile, setLoadingFile] = useState<File | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [logs, setLogs] = useState<LoadedLog[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState<File[]>([]);
+  const [errors, setErrors] = useState<string[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -33,44 +33,91 @@ export default function PublicLogPage({
     };
   }, []);
 
-  const openFile = useCallback(async (file: File) => {
-    setError(null);
-    if (!file.name.toLowerCase().endsWith(".csv")) {
-      setError("Choose a Haltech CSV datalog.");
-      return;
-    }
+  const openFiles = useCallback(async (selectedFiles: File[]) => {
+    const csvFiles = selectedFiles.filter((file) =>
+      file.name.toLowerCase().endsWith(".csv"),
+    );
+    const nextErrors = selectedFiles
+      .filter((file) => !file.name.toLowerCase().endsWith(".csv"))
+      .map((file) => `${file.name}: Choose a Haltech CSV datalog.`);
+    setErrors(nextErrors);
+    if (csvFiles.length === 0) return;
 
-    setLoadingFile(file);
+    setLoadingFiles(csvFiles);
     try {
-      const text = await file.text();
-      const fileId = `local-${crypto.randomUUID()}` as Id<"files">;
-      const loaded = await loadHaltechLog({
-        text,
-        fileId,
-        fileName: file.name,
-      });
-      setLog(loaded);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Could not open this datalog",
+      const startIndex = logs.length;
+      const results = await Promise.all(
+        csvFiles.map(
+          async (
+            file,
+            index,
+          ): Promise<{ log: LoadedLog } | { error: string }> => {
+            try {
+              const text = await file.text();
+              const fileId = `local-${crypto.randomUUID()}` as Id<"files">;
+              return {
+                log: await loadHaltechLog({
+                  text,
+                  fileId,
+                  fileName: file.name,
+                  index: startIndex + index,
+                }),
+              };
+            } catch (err) {
+              const message =
+                err instanceof Error ? err.message : "Could not open this datalog";
+              return { error: `${file.name}: ${message}` };
+            }
+          },
+        ),
       );
+      const loaded = results.flatMap((result) =>
+        "log" in result ? [result.log] : [],
+      );
+      const parseErrors = results.flatMap((result) =>
+        "error" in result ? [result.error] : [],
+      );
+      if (loaded.length > 0) setLogs((current) => [...current, ...loaded]);
+      setErrors([...nextErrors, ...parseErrors]);
     } finally {
-      setLoadingFile(null);
+      setLoadingFiles([]);
       if (inputRef.current) inputRef.current.value = "";
     }
-  }, []);
+  }, [logs.length]);
 
-  if (log) {
+  const fileInput = (
+    <input
+      ref={inputRef}
+      type="file"
+      accept=".csv,text/csv"
+      multiple
+      className="hidden"
+      onChange={(event) => {
+        const files = Array.from(event.target.files ?? []);
+        if (files.length > 0) void openFiles(files);
+      }}
+    />
+  );
+
+  if (logs.length > 0) {
     return (
-      <LogViewerReady
-        key={log.fileId}
-        publicMode
-        fileIds={[log.fileId]}
-        logs={[log]}
-        errors={[]}
-        workspace={null}
-        onBack={() => setLog(null)}
-      />
+      <>
+        {fileInput}
+        <LogViewerReady
+          key={logs[0].fileId}
+          publicMode
+          fileIds={logs.map((log) => log.fileId)}
+          logs={logs}
+          errors={errors}
+          workspace={null}
+          publicLoading={loadingFiles.length > 0}
+          onAddPublicFiles={() => inputRef.current?.click()}
+          onBack={() => {
+            setLogs([]);
+            setErrors([]);
+          }}
+        />
+      </>
     );
   }
 
@@ -101,24 +148,16 @@ export default function PublicLogPage({
           Open a datalog. No account needed.
         </h1>
         <p className="mt-5 max-w-2xl text-lg leading-relaxed text-white/70">
-          Pick a Haltech CSV and DragTrace will open it with a useful starter
-          layout. Your file stays in this browser and is not uploaded.
+          Pick one or more Haltech CSVs and DragTrace will open them with a
+          useful starter layout. Your files stay in this browser and are not
+          uploaded.
         </p>
 
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) void openFile(file);
-          }}
-        />
+        {fileInput}
 
         <button
           type="button"
-          disabled={!!loadingFile}
+          disabled={loadingFiles.length > 0}
           onClick={() => inputRef.current?.click()}
           onDragEnter={(event) => {
             event.preventDefault();
@@ -138,8 +177,8 @@ export default function PublicLogPage({
           onDrop={(event) => {
             event.preventDefault();
             setDragOver(false);
-            const file = event.dataTransfer.files[0];
-            if (file) void openFile(file);
+            const files = Array.from(event.dataTransfer.files);
+            if (files.length > 0) void openFiles(files);
           }}
           className={`mt-10 flex min-h-72 w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-8 py-12 text-center transition-colors disabled:cursor-wait ${
             dragOver
@@ -147,32 +186,38 @@ export default function PublicLogPage({
               : "border-white/20 bg-white/[0.035] hover:border-white/40 hover:bg-white/[0.06]"
           }`}
         >
-          {loadingFile ? (
+          {loadingFiles.length > 0 ? (
             <>
               <Loader2Icon className="size-9 animate-spin text-white/70" />
               <span className="mt-5 text-lg font-medium">
-                Opening {loadingFile.name}
+                {loadingFiles.length === 1
+                  ? `Opening ${loadingFiles[0].name}`
+                  : `Opening ${loadingFiles.length} datalogs`}
               </span>
               <span className="mt-1 text-sm text-white/45">
-                Reading {formatBytes(loadingFile.size)} in your browser…
+                Reading{" "}
+                {formatBytes(
+                  loadingFiles.reduce((sum, file) => sum + file.size, 0),
+                )}{" "}
+                in your browser…
               </span>
             </>
           ) : (
             <>
               <FileUpIcon className="size-10 text-white/65" />
               <span className="mt-5 text-xl font-medium">
-                Drop a Haltech CSV here
+                Drop Haltech CSVs here
               </span>
               <span className="mt-2 text-base text-white/50">
-                or click to choose a file
+                or click to choose one or more files
               </span>
             </>
           )}
         </button>
 
-        {error && (
+        {errors.length > 0 && (
           <div className="mt-4 rounded-lg border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-200">
-            {error}
+            {errors.join(" ")}
           </div>
         )}
 
@@ -181,13 +226,14 @@ export default function PublicLogPage({
             <LockKeyholeIcon className="size-5 text-white/60" />
             <h2 className="mt-3 font-medium">Private by default</h2>
             <p className="mt-1 text-sm leading-relaxed text-white/50">
-              The CSV is parsed locally. It is never added to DragTrace storage.
+              The CSVs are parsed locally. They are never added to DragTrace
+              storage.
             </p>
           </div>
           <div className="rounded-xl border border-white/10 p-5">
             <h2 className="font-medium">A fresh start every time</h2>
             <p className="mt-1 text-sm leading-relaxed text-white/50">
-              Changes work for this visit only. Reloading clears the file and
+              Changes work for this visit only. Reloading clears the files and
               restores the default layout.
             </p>
           </div>
