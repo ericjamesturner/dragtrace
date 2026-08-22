@@ -153,8 +153,10 @@ function Privacy() {
           log's filename or contents for analytics.
         </LI>
         <LI>
-          <strong className="text-white">Feedback.</strong> The message you send,
-          the viewer page it came from, and any files you choose to attach.
+          <strong className="text-white">Feedback.</strong> The message and star
+          rating you send, the viewer page it came from, any files you choose to
+          attach, and—only if you opt in—permission and a display name for using
+          your words as a testimonial.
         </LI>
         <LI>
           <strong className="text-white">Phone number,</strong> if you give us

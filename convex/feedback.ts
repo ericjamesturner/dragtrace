@@ -27,6 +27,9 @@ export const generateAttachmentUploadUrl = mutation({
 export const submit = mutation({
   args: {
     message: v.string(),
+    rating: v.number(),
+    allowTestimonial: v.boolean(),
+    testimonialName: v.optional(v.string()),
     source: sourceValidator,
     page: v.optional(v.string()),
     browserVisitorId: v.optional(v.string()),
@@ -40,8 +43,15 @@ export const submit = mutation({
   },
   handler: async (ctx, args) => {
     const message = args.message.trim();
+    const testimonialName = args.testimonialName?.trim();
     if (!message) throw new Error("Please enter some feedback");
     if (message.length > 5000) throw new Error("Feedback is too long");
+    if (!Number.isInteger(args.rating) || args.rating < 0 || args.rating > 5) {
+      throw new Error("Rating must be between 0 and 5 stars");
+    }
+    if (testimonialName && testimonialName.length > 80) {
+      throw new Error("Testimonial name is too long");
+    }
     if (args.attachments.length > MAX_ATTACHMENTS) {
       throw new Error(`Attach no more than ${MAX_ATTACHMENTS} files`);
     }
@@ -85,7 +95,10 @@ export const submit = mutation({
       ...(userId ? { userId } : {}),
       ...(visitorKey ? { visitorKey } : {}),
       source,
+      rating: args.rating,
       message,
+      allowTestimonial: args.allowTestimonial,
+      ...(args.allowTestimonial && testimonialName ? { testimonialName } : {}),
       ...(args.page ? { page: args.page.slice(0, 500) } : {}),
       status: "new",
       createdAt: now,

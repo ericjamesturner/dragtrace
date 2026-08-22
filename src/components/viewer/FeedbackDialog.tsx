@@ -5,6 +5,7 @@ import {
   FilePlus2Icon,
   Loader2Icon,
   MessageSquareTextIcon,
+  StarIcon,
   XIcon,
 } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
@@ -42,7 +43,10 @@ export function FeedbackDialog({
   const generateUploadUrl = useMutation(api.feedback.generateAttachmentUploadUrl);
   const submitFeedback = useMutation(api.feedback.submit);
   const [open, setOpen] = useState(false);
+  const [rating, setRating] = useState(0);
   const [message, setMessage] = useState("");
+  const [allowTestimonial, setAllowTestimonial] = useState(false);
+  const [testimonialName, setTestimonialName] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
@@ -50,7 +54,10 @@ export function FeedbackDialog({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
+    setRating(0);
     setMessage("");
+    setAllowTestimonial(false);
+    setTestimonialName("");
     setFiles([]);
     setBusy(false);
     setSent(false);
@@ -109,6 +116,11 @@ export function FeedbackDialog({
 
       await submitFeedback({
         message: message.trim(),
+        rating,
+        allowTestimonial,
+        ...(allowTestimonial && testimonialName.trim()
+          ? { testimonialName: testimonialName.trim() }
+          : {}),
         source,
         page: `${window.location.pathname}${window.location.search}`,
         browserVisitorId: getBrowserVisitorId(),
@@ -135,14 +147,14 @@ export function FeedbackDialog({
       </Button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
           {sent ? (
             <>
               <div className="flex flex-col items-center py-5 text-center">
                 <CheckCircle2Icon className="size-9 text-green-500" />
                 <DialogTitle className="mt-3">Thanks — your feedback is saved.</DialogTitle>
                 <DialogDescription className="mt-2">
-                  Any attached files were saved with your report.
+                  We appreciate hearing what you love and what we can improve.
                 </DialogDescription>
               </div>
               <DialogFooter>
@@ -152,16 +164,44 @@ export function FeedbackDialog({
           ) : (
             <>
               <DialogHeader>
-                <DialogTitle>Give feedback</DialogTitle>
+                <DialogTitle>Share feedback</DialogTitle>
                 <DialogDescription>
-                  Tell us what went wrong, what is confusing, or what would make
-                  DragTrace better.
+                  Tell us what you love, what we got right, or what would make
+                  DragTrace even better.
                 </DialogDescription>
               </DialogHeader>
 
+              <fieldset>
+                <legend className="text-sm font-medium">How are we doing?</legend>
+                <div className="mt-1.5 flex items-center gap-1" role="radiogroup" aria-label="Star rating">
+                  {[1, 2, 3, 4, 5].map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={rating === value}
+                      aria-label={`${value} out of 5 stars`}
+                      className={`rounded p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                        value <= rating
+                          ? "text-amber-400"
+                          : "text-muted-foreground/35 hover:text-amber-400/70"
+                      }`}
+                      onClick={() => setRating((current) => (current === value ? 0 : value))}
+                    >
+                      <StarIcon
+                        className={`size-7 ${value <= rating ? "fill-current" : ""}`}
+                      />
+                    </button>
+                  ))}
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {rating === 0 ? "Optional" : `${rating} of 5`}
+                  </span>
+                </div>
+              </fieldset>
+
               <div>
                 <label htmlFor="feedback-message" className="text-sm font-medium">
-                  Feedback
+                  Your feedback
                 </label>
                 <Textarea
                   id="feedback-message"
@@ -169,12 +209,44 @@ export function FeedbackDialog({
                   value={message}
                   maxLength={5000}
                   autoFocus
-                  placeholder="What happened? What did you expect?"
+                  placeholder="What did we get right? What do you enjoy? What could be even better?"
                   onChange={(event) => setMessage(event.target.value)}
                 />
                 <div className="mt-1 text-right text-xs text-muted-foreground">
                   {message.length.toLocaleString()} / 5,000
                 </div>
+              </div>
+
+              <div className="rounded-lg border bg-muted/25 p-3">
+                <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-4 rounded border-input accent-primary"
+                    checked={allowTestimonial}
+                    onChange={(event) => setAllowTestimonial(event.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium">You may share this as a testimonial</span>
+                    <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+                      Optional. We will only quote your feedback publicly if you check this.
+                    </span>
+                  </span>
+                </label>
+                {allowTestimonial && (
+                  <div className="mt-3">
+                    <label htmlFor="testimonial-name" className="text-xs font-medium">
+                      Name to show <span className="font-normal text-muted-foreground">(optional)</span>
+                    </label>
+                    <input
+                      id="testimonial-name"
+                      value={testimonialName}
+                      maxLength={80}
+                      placeholder="Your name, team, or business"
+                      className="mt-1 block h-8 w-full rounded-md border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+                      onChange={(event) => setTestimonialName(event.target.value)}
+                    />
+                  </div>
+                )}
               </div>
 
               <div>

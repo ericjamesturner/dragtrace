@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "convex/react";
-import { CheckIcon, DownloadIcon, RotateCcwIcon } from "lucide-react";
+import { CheckIcon, DownloadIcon, RotateCcwIcon, StarIcon } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 
@@ -96,7 +96,7 @@ export function AdminInsights() {
       <section className="border-t pt-8">
         <div className="flex items-end justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold">Feedback</h3>
+            <h3 className="text-base font-semibold">Feedback &amp; testimonials</h3>
             <p className="mt-1 text-sm text-muted-foreground">
               The latest 100 reports, newest first.
             </p>
@@ -140,6 +140,29 @@ export function AdminInsights() {
                     {item.status === "reviewed" ? <RotateCcwIcon /> : <CheckIcon />}
                     {item.status === "reviewed" ? "Mark new" : "Reviewed"}
                   </Button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {(item.rating ?? 0) > 0 ? (
+                    <div
+                      className="flex items-center gap-0.5 text-amber-400"
+                      aria-label={`${item.rating} out of 5 stars`}
+                    >
+                      {[1, 2, 3, 4, 5].map((value) => (
+                        <StarIcon
+                          key={value}
+                          className={`size-4 ${value <= (item.rating ?? 0) ? "fill-current" : "text-muted-foreground/25"}`}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">No star rating</span>
+                  )}
+                  {item.allowTestimonial && (
+                    <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600 dark:text-green-400">
+                      Approved testimonial
+                      {item.testimonialName ? ` · ${item.testimonialName}` : ""}
+                    </span>
+                  )}
                 </div>
                 <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed">{item.message}</p>
                 {item.attachments.length > 0 && (

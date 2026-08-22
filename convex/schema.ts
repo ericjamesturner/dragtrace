@@ -175,7 +175,12 @@ export default defineSchema({
     userId: v.optional(v.id("users")),
     visitorKey: v.optional(v.string()),
     source: v.union(v.literal("guest"), v.literal("account")),
+    /** 0 means the sender skipped the optional 1–5 star rating. */
+    rating: v.optional(v.number()),
     message: v.string(),
+    /** Explicit permission to quote this response publicly. */
+    allowTestimonial: v.optional(v.boolean()),
+    testimonialName: v.optional(v.string()),
     page: v.optional(v.string()),
     status: v.union(v.literal("new"), v.literal("reviewed")),
     createdAt: v.number(),
