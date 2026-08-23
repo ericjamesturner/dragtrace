@@ -107,8 +107,8 @@ export function SiteFooter({
           <span>© {new Date().getFullYear()} DragTrace</span>
           <span className="text-white/25">·</span>
           <span>
-            Haltech is a trademark of its owner. DragTrace is not affiliated with
-            Haltech.
+            Haltech and Holley are trademarks of their respective owners.
+            DragTrace is not affiliated with either company.
           </span>
         </div>
       </div>

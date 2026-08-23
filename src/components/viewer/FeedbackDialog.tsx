@@ -370,7 +370,7 @@ export function FeedbackDialog({
                           type="file"
                           multiple
                           className="hidden"
-                          accept=".csv,.log,.txt,.zip,.pdf,.png,.jpg,.jpeg"
+                          accept=".csv,.log,.txt,.dl,.zip,.pdf,.png,.jpg,.jpeg"
                           onChange={(event) => {
                             addFiles(Array.from(event.target.files ?? []));
                             event.target.value = "";

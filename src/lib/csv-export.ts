@@ -1,7 +1,7 @@
 import type { LoadedLog } from "@/lib/viewer-types";
 import {
   convertForDisplay,
-  getDisplayUnit,
+  getChannelDisplayUnit,
   type ChannelUnitOverrides,
   type UnitSystem,
   type UnitOverrides,
@@ -59,14 +59,12 @@ export function buildSelectionCsv(
   const defs = log.parsed.channelDefs;
   const header = ["Time (s)"];
   for (const d of defs) {
-    const unit = d.quantitySlug
-      ? getDisplayUnit(
-          d.quantitySlug,
-          unitSystem,
-          unitOverrides,
-          channelUnitOverrides?.[d.name],
-        )
-      : "";
+    const unit = getChannelDisplayUnit(
+      d,
+      unitSystem,
+      unitOverrides,
+      channelUnitOverrides?.[d.name],
+    );
     header.push(csvField(unit ? `${d.name} (${unit})` : d.name));
   }
   const lines = [header.join(",")];

@@ -3,7 +3,7 @@ import type { LoadedLog, HeatmapConfig, HeatmapAggregation } from "@/lib/viewer-
 import type { ChannelDef } from "@/lib/log-types";
 import type { Id } from "../../../convex/_generated/dataModel";
 import {
-  getDisplayUnit,
+  getChannelDisplayUnit,
   type ChannelUnitOverrides,
   type UnitSystem,
   type UnitOverrides,
@@ -64,10 +64,12 @@ function ChannelPicker({
   }, [search, channelDefs]);
 
   const selectedDef = channelDefs.find((d) => d.name === value);
-  const quantitySlug = selectedDef?.quantitySlug ?? "";
-  const displayUnit = quantitySlug
-    ? getDisplayUnit(quantitySlug, unitSystem, unitOverrides, channelUnitOverrides?.[value])
-    : "";
+  const displayUnit = getChannelDisplayUnit(
+    selectedDef,
+    unitSystem,
+    unitOverrides,
+    channelUnitOverrides?.[value],
+  );
 
   return (
     <div>
@@ -98,14 +100,12 @@ function ChannelPicker({
           {results.length > 0 && open && (
             <div className="absolute left-0 right-0 top-full mt-1 z-50 max-h-48 overflow-y-auto rounded-lg border border-border bg-popover shadow-md">
               {results.map((def) => {
-                const du = def.quantitySlug
-                  ? getDisplayUnit(
-                      def.quantitySlug,
-                      unitSystem,
-                      unitOverrides,
-                      channelUnitOverrides?.[def.name],
-                    )
-                  : "";
+                const du = getChannelDisplayUnit(
+                  def,
+                  unitSystem,
+                  unitOverrides,
+                  channelUnitOverrides?.[def.name],
+                );
                 return (
                   <button
                     key={def.name}

@@ -3,7 +3,7 @@ import type { LoadedLog, HeatmapConfig } from "@/lib/viewer-types";
 import type { Id } from "../../../convex/_generated/dataModel";
 import {
   convertForDisplay,
-  getDisplayUnit,
+  getChannelDisplayUnit,
   type ChannelUnitOverrides,
   type UnitSystem,
   type UnitOverrides,
@@ -59,9 +59,12 @@ export function HeatmapContainer({
   const valueData = session?.channels.get(heatmap.valueChannel);
 
   const defOf = (n: string) => log?.parsed.channelDefs.find((d) => d.name === n);
-  const xMetric = defOf(heatmap.xChannel)?.quantitySlug ?? "";
-  const yMetric = defOf(heatmap.yChannel)?.quantitySlug ?? "";
-  const vMetric = defOf(heatmap.valueChannel)?.quantitySlug ?? "";
+  const xDef = defOf(heatmap.xChannel);
+  const yDef = defOf(heatmap.yChannel);
+  const vDef = defOf(heatmap.valueChannel);
+  const xMetric = xDef?.quantitySlug ?? "";
+  const yMetric = yDef?.quantitySlug ?? "";
+  const vMetric = vDef?.quantitySlug ?? "";
 
   const xConvert = useCallback(
     (v: number) =>
@@ -217,20 +220,20 @@ export function HeatmapContainer({
     return set.size > 0 ? set : null;
   }, [result, xData, yData, ts, selection, cursorTime, offset, xConvert, yConvert, heatmap]);
 
-  const xUnit = getDisplayUnit(
-    xMetric,
+  const xUnit = getChannelDisplayUnit(
+    xDef,
     unitSystem,
     unitOverrides,
     channelUnitOverrides?.[heatmap.xChannel],
   );
-  const yUnit = getDisplayUnit(
-    yMetric,
+  const yUnit = getChannelDisplayUnit(
+    yDef,
     unitSystem,
     unitOverrides,
     channelUnitOverrides?.[heatmap.yChannel],
   );
-  const vUnit = getDisplayUnit(
-    vMetric,
+  const vUnit = getChannelDisplayUnit(
+    vDef,
     unitSystem,
     unitOverrides,
     channelUnitOverrides?.[heatmap.valueChannel],

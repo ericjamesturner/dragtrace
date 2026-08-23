@@ -9,7 +9,7 @@ import { findValueAtTime, formatValue, formatChannelValue, computeRangeStats, st
 import {
   convertForDisplay,
   convertFromDisplay,
-  getDisplayUnit,
+  getChannelDisplayUnit,
   getDisplayPrecision,
   getUnitOptions,
   resolveUnitKey,
@@ -966,9 +966,12 @@ export function TraceContainer({
               valueStr = formatChannelValue(converted, {
                 decimals: getDisplayPrecision(mu, unitSystem, unitOverrides, channelUnitKey),
               });
-              unitLabel = mu
-                ? getDisplayUnit(mu, unitSystem, unitOverrides, channelUnitKey)
-                : "";
+              unitLabel = getChannelDisplayUnit(
+                def,
+                unitSystem,
+                unitOverrides,
+                channelUnitKey,
+              );
             }
           }
         }
@@ -986,9 +989,12 @@ export function TraceContainer({
             minTime = stats.minTime;
             maxTime = stats.maxTime;
             if (!unitLabel) {
-              unitLabel = mu
-                ? getDisplayUnit(mu, unitSystem, unitOverrides, channelUnitKey)
-                : "";
+              unitLabel = getChannelDisplayUnit(
+                def,
+                unitSystem,
+                unitOverrides,
+                channelUnitKey,
+              );
             }
           }
         }
@@ -1971,9 +1977,12 @@ export function TraceContainer({
           cmMu
             ? convertForDisplay(v, cmMu, unitSystem, unitOverrides, cmChannelUnitKey)
             : v;
-        const cmDisplayUnit = cmMu
-          ? getDisplayUnit(cmMu, unitSystem, unitOverrides, cmChannelUnitKey)
-          : "";
+        const cmDisplayUnit = getChannelDisplayUnit(
+          cmDef,
+          unitSystem,
+          unitOverrides,
+          cmChannelUnitKey,
+        );
 
         const cmResolved = resolvedRanges.get(contextMenu.channelName);
         // What the line actually looks like right now, for the preview swatch.

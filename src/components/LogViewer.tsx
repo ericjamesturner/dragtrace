@@ -101,7 +101,7 @@ export default function LogViewer({ vehicleId, eventId, fileIds: initialFileIds 
     return (
       <div className="flex h-dvh items-center justify-center text-muted-foreground">
         <div className="text-center">
-          <div className="text-sm mb-2">No valid Haltech logs found</div>
+          <div className="text-sm mb-2">No supported ECU logs found</div>
           {errors.map((e, i) => (
             <div key={i} className="text-xs text-destructive">{e}</div>
           ))}

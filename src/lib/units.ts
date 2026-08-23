@@ -1,5 +1,6 @@
 import type { UnitSystem, UnitAlternate } from "./ecu/types";
 import { QUANTITIES, getQuantity, resolveAlternate, canonicalAlternate } from "./ecu/quantities";
+import type { ChannelDef } from "./log-types";
 
 export type { UnitSystem, UnitAlternate };
 
@@ -74,6 +75,20 @@ export function getDisplayUnit(
   if (!alt) return "";
   // "Raw" and other unitless quantities carry a blank label.
   return alt.label.trim();
+}
+
+/** Display label for a channel, falling back to the source file's unit when
+ * the channel does not map to one of DragTrace's convertible quantities. */
+export function getChannelDisplayUnit(
+  channel: Pick<ChannelDef, "quantitySlug" | "unit"> | undefined,
+  system: UnitSystem,
+  overrides?: UnitOverrides,
+  alternateKey?: string,
+): string {
+  if (!channel) return "";
+  return channel.quantitySlug
+    ? getDisplayUnit(channel.quantitySlug, system, overrides, alternateKey)
+    : channel.unit?.trim() ?? "";
 }
 
 /** Decimal places this quantity is conventionally shown to, if known. */

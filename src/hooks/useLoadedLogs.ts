@@ -3,7 +3,7 @@ import { useQueries } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { CHART_COLORS, type LoadedLog } from "@/lib/viewer-types";
-import { loadHaltechLog } from "@/lib/load-haltech-log";
+import { loadDatalog } from "@/lib/load-haltech-log";
 
 /**
  * Hook to load multiple log files for the viewer.
@@ -94,11 +94,11 @@ export function useLoadedLogs(fileIds: Id<"files">[]) {
         toFetch.map(async ({ index, fileId, fileName, url }) => {
           try {
             const res = await fetch(url);
-            const text = await res.text();
+            const bytes = await res.arrayBuffer();
             if (cancelled) return;
 
-            const log = await loadHaltechLog({
-              text,
+            const log = await loadDatalog({
+              bytes,
               fileId,
               fileName,
               index,

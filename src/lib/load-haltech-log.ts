@@ -1,22 +1,19 @@
 import type { Id } from "../../convex/_generated/dataModel";
 import { addComputedChannels } from "./computed-channels";
+import { parseDatalogBytes } from "./datalog-parser";
 import { enrichWithDefinitions } from "./ecu/enrich";
 import { DEFAULT_ECU_TYPE } from "./ecu/registry";
-import {
-  detectHaltech,
-  detectRaceStartIndex,
-  parseHaltech,
-} from "./haltech-parser";
+import { detectRaceStartIndex } from "./haltech-parser";
 import type { ParsedLog } from "./log-types";
 import { CHART_COLORS, type LoadedLog } from "./viewer-types";
 
 // Seconds of data kept before the race start when opening a log.
 const CLIP_PRE_RACE_S = 2;
 
-async function fingerprint(text: string): Promise<string> {
+async function fingerprint(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(text),
+    bytes,
   );
   return `sha256:${Array.from(new Uint8Array(digest), (byte) =>
     byte.toString(16).padStart(2, "0"),
@@ -73,26 +70,24 @@ function clipSessionBeforeRace(
   return raceStartTime - base;
 }
 
-/** Parse and prepare one Haltech CSV, regardless of whether it came from
- * Convex storage or a guest's local file picker. */
-export async function loadHaltechLog({
-  text,
+/** Parse and prepare one supported ECU log, regardless of whether it came
+ * from Convex storage or a guest's local file picker. */
+export async function loadDatalog({
+  bytes,
   fileId,
   fileName,
   index = 0,
 }: {
-  text: string;
+  bytes: ArrayBuffer;
   fileId: Id<"files">;
   fileName: string;
   index?: number;
 }): Promise<LoadedLog> {
-  if (!detectHaltech(text)) throw new Error("Not a Haltech datalog");
-
   // Start this before parsing so the browser can hash while the rest of the
   // log is being prepared. Only the digest leaves the browser in guest mode.
-  const contentFingerprint = fingerprint(text);
+  const contentFingerprint = fingerprint(bytes);
 
-  const parsed = parseHaltech(text);
+  const parsed = parseDatalogBytes(bytes, fileName);
   if (parsed.sessions.length === 0) throw new Error("No log sessions found");
 
   const activeSessionIndex = 0;
@@ -104,7 +99,9 @@ export async function loadHaltechLog({
       raceStartTime,
     );
   }
-  await enrichWithDefinitions(parsed, DEFAULT_ECU_TYPE);
+  if (parsed.format === "Haltech") {
+    await enrichWithDefinitions(parsed, DEFAULT_ECU_TYPE);
+  }
   addComputedChannels(parsed);
 
   return {

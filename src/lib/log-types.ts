@@ -6,6 +6,8 @@ export interface ChannelDef {
   displayMin: number;
   index: number;
   quantitySlug?: string;
+  /** Unit carried by non-Haltech exports when no shared quantity exists. */
+  unit?: string;
   enumValues?: Record<number, string>;
   /** Derived math channel (computed client-side, not logged by the ECU). */
   computed?: boolean;

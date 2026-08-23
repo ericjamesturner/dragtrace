@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Doc } from "../../convex/_generated/dataModel";
-import { detectHaltech, detectRaceStartIndex, parseHaltech } from "@/lib/haltech-parser";
+import { detectRaceStartIndex } from "@/lib/haltech-parser";
+import { parseDatalogBytes } from "@/lib/datalog-parser";
 import { lttbDownsample } from "@/lib/downsample";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
 // Bump when the preview computation changes so stored previews recompute.
-const PREVIEW_VERSION = 1;
+const PREVIEW_VERSION = 2;
 
 // Stored window around the race — wider than the rendered window so the
 // dashboard lead-in/tail can be tuned without recomputing stored previews.
@@ -109,10 +110,8 @@ interface RpmPreviewProps {
   height?: number;
 }
 
-function computePreview(text: string): PreviewPayload | string {
-  if (!detectHaltech(text)) return "Not a Haltech log";
-
-  const parsed = parseHaltech(text);
+function computePreview(bytes: ArrayBuffer, fileName: string): PreviewPayload | string {
+  const parsed = parseDatalogBytes(bytes, fileName);
   if (parsed.sessions.length === 0) return "No sessions";
 
   const session = parsed.sessions[0];
@@ -204,10 +203,10 @@ export function RpmPreview({ file, onRaceTiming, alignWindow, height = 176 }: Rp
     let cancelled = false;
 
     fetch(url)
-      .then((res) => res.text())
-      .then((text) => {
+      .then((res) => res.arrayBuffer())
+      .then((bytes) => {
         if (cancelled) return;
-        const result = computePreview(text);
+        const result = computePreview(bytes, file.fileName);
         if (typeof result === "string") {
           setStatus({ kind: "no-data", message: result });
           return;
@@ -224,7 +223,7 @@ export function RpmPreview({ file, onRaceTiming, alignWindow, height = 176 }: Rp
     return () => {
       cancelled = true;
     };
-  }, [stored, url, file._id, savePreview]);
+  }, [stored, url, file._id, file.fileName, savePreview]);
 
   // Report race timing for dashboard alignment
   useEffect(() => {

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Id } from "../../convex/_generated/dataModel";
-import { loadHaltechLog } from "@/lib/load-haltech-log";
+import { loadDatalog } from "@/lib/load-haltech-log";
+import {
+  isSupportedLogFile,
+  SUPPORTED_LOG_ACCEPT,
+} from "@/lib/datalog-parser";
 import type { LoadedLog } from "@/lib/viewer-types";
 import { Button } from "@/components/ui/button";
 import { FileUpIcon, Loader2Icon, LockKeyholeIcon } from "lucide-react";
@@ -35,30 +39,28 @@ export default function PublicLogPage({
   }, []);
 
   const openFiles = useCallback(async (selectedFiles: File[]) => {
-    const csvFiles = selectedFiles.filter((file) =>
-      file.name.toLowerCase().endsWith(".csv"),
-    );
+    const logFiles = selectedFiles.filter((file) => isSupportedLogFile(file.name));
     const nextErrors = selectedFiles
-      .filter((file) => !file.name.toLowerCase().endsWith(".csv"))
-      .map((file) => `${file.name}: Choose a Haltech CSV datalog.`);
+      .filter((file) => !isSupportedLogFile(file.name))
+      .map((file) => `${file.name}: That log-file extension is not supported.`);
     setErrors(nextErrors);
-    if (csvFiles.length === 0) return;
+    if (logFiles.length === 0) return;
 
-    setLoadingFiles(csvFiles);
+    setLoadingFiles(logFiles);
     try {
       const startIndex = logs.length;
       const results = await Promise.all(
-        csvFiles.map(
+        logFiles.map(
           async (
             file,
             index,
           ): Promise<{ log: LoadedLog } | { error: string }> => {
             try {
-              const text = await file.text();
+              const bytes = await file.arrayBuffer();
               const fileId = `local-${crypto.randomUUID()}` as Id<"files">;
               return {
-                log: await loadHaltechLog({
-                  text,
+                log: await loadDatalog({
+                  bytes,
                   fileId,
                   fileName: file.name,
                   index: startIndex + index,
@@ -90,7 +92,7 @@ export default function PublicLogPage({
     <input
       ref={inputRef}
       type="file"
-      accept=".csv,text/csv"
+      accept={SUPPORTED_LOG_ACCEPT}
       multiple
       className="hidden"
       onChange={(event) => {
@@ -153,8 +155,8 @@ export default function PublicLogPage({
           Open a datalog. No account needed.
         </h1>
         <p className="mt-5 max-w-2xl text-lg leading-relaxed text-white/70">
-          Pick one or more Haltech CSVs and DragTrace will open them with a
-          useful starter layout. Your files stay in this browser and are not
+          Pick one or more supported ECU logs and DragTrace will open them with
+          a useful starter layout. Your files stay in this browser and are not
           uploaded.
         </p>
 
@@ -211,7 +213,7 @@ export default function PublicLogPage({
             <>
               <FileUpIcon className="size-10 text-white/65" />
               <span className="mt-5 text-xl font-medium">
-                Drop Haltech CSVs here
+                Drop ECU log files here
               </span>
               <span className="mt-2 text-base text-white/50">
                 or click to choose one or more files
@@ -231,7 +233,7 @@ export default function PublicLogPage({
             <LockKeyholeIcon className="size-5 text-white/60" />
             <h2 className="mt-3 font-medium">Private by default</h2>
             <p className="mt-1 text-sm leading-relaxed text-white/50">
-              The CSVs are parsed locally. They are never added to DragTrace
+              The logs are parsed locally. They are never added to DragTrace
               storage.
             </p>
           </div>

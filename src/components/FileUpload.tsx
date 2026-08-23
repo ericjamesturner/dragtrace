@@ -3,6 +3,7 @@ import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { UploadIcon } from "lucide-react";
+import { isSupportedLogFile, SUPPORTED_LOG_ACCEPT } from "@/lib/datalog-parser";
 
 type UploadProgress = {
   fileName: string;
@@ -62,9 +63,12 @@ export function FileUpload({
   const uploadFiles = useCallback(
     async (fileList: FileList) => {
       if (progress) return;
-      // Haltech datalogs only — also guards drag-and-drop, which ignores `accept`
-      const files = Array.from(fileList).filter((f) => f.name.toLowerCase().endsWith(".csv"));
-      if (files.length === 0) return;
+      // Guard drag-and-drop too, since it ignores the input's `accept` value.
+      const files = Array.from(fileList).filter((file) => isSupportedLogFile(file.name));
+      if (files.length === 0) {
+        setError("Choose a supported ECU text export or Holley V6 .dl file.");
+        return;
+      }
       setError(null);
       const total = files.reduce((sum, f) => sum + f.size, 0);
       let doneBytes = 0;
@@ -143,7 +147,7 @@ export function FileUpload({
         ref={inputRef}
         type="file"
         multiple
-        accept=".csv"
+        accept={SUPPORTED_LOG_ACCEPT}
         className="hidden"
         onChange={(e) => {
           if (e.target.files) void uploadFiles(e.target.files);

@@ -49,7 +49,7 @@ const STEPS = [
   {
     n: "1",
     title: "Upload your log",
-    body: "Pull the log off the Haltech like you always do, then drag the file in. Nothing to install.",
+    body: "Pull the log off your ECU like you always do, then drag the file in. Nothing to install.",
   },
   {
     n: "2",
@@ -129,13 +129,13 @@ export function Landing({
       <section className="mx-auto max-w-6xl px-6 pb-10 pt-10 lg:pt-16">
         <div className="motion-safe:animate-[fadeUp_0.7s_ease-out_both]">
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-white/55">
-            For Haltech drag racers
+            For data-driven drag racers
           </p>
           <h1 className="mt-5 max-w-[17ch] text-balance text-[clamp(2.3rem,5.4vw,3.9rem)] font-semibold leading-[1.03] tracking-[-0.03em]">
             The datalog viewer that has your back.
           </h1>
           <p className="mt-6 max-w-2xl text-xl leading-relaxed text-white/75">
-            Upload the log from your Haltech. Your charts open already set up,
+            Upload the log from your ECU. Your charts open already set up,
             with your 60-foot, eighth and quarter marked on the run — and
             DragTrace tells you if anything looked wrong.
           </p>
@@ -247,11 +247,11 @@ export function Landing({
               },
               {
                 q: "Do I still need my laptop?",
-                a: "Yes, to pull the log off the Haltech, same as you do now. After that you are done with it. Upload the file and read the run on your phone or your tablet, right there in the trailer.",
+                a: "Yes, to pull the log off your ECU, same as you do now. After that you are done with it. Upload the file and read the run on your phone or your tablet, right there in the trailer.",
               },
               {
                 q: "Will it work with my ECU?",
-                a: "Right now, Haltech only. We are adding more later — Holley, AEM, MoTeC and Fueltech.",
+                a: "DragTrace opens Haltech, Holley EFI V6 .dl, ECUMaster, RomRaider, MegaSquirt/TunerStudio, Honda Tuning Studio, MHD, Motorsport Electronics, DynamicEFI, Woolich, RaceChrono, BlueDriver, and OBDLink logs. Other binary formats are still on the way.",
               },
             ].map((f) => (
               <div key={f.q}>

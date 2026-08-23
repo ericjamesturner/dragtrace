@@ -26,7 +26,14 @@ Simple enough for a racer between rounds. Deep enough for whoever tunes the car.
 
 ## ECU support
 
-Right now, Haltech only. We are adding more later — Holley, AEM, MoTeC and Fueltech.
+DragTrace opens Haltech logs, Holley EFI V6 `.dl` files, and text/CSV exports from
+ECUMaster, RomRaider, MegaSquirt/TunerStudio, Honda Tuning Studio, BlueDriver,
+OBDLink, MHD, Motorsport Electronics, DynamicEFI, Woolich, RaceChrono, and the
+UltraLog locomotive logger.
+
+Holley V3/V4/V5 and `.dlz`, plus other manufacturers' binary formats, are not
+currently supported. Open a Holley V5 file in Holley EFI software to convert it
+to V6 before uploading it.
 
 ## Development
 

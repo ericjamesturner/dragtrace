@@ -1,5 +1,5 @@
 import type { ChannelDef } from "./log-types";
-import { getDisplayUnit, type UnitSystem, type UnitOverrides } from "./units";
+import { getChannelDisplayUnit, type UnitSystem, type UnitOverrides } from "./units";
 import type { LoadedLog, ScatterSuggestion } from "./viewer-types";
 
 // Build the `- "Name" [unit: X]` channel list string sent to the AI action.
@@ -10,7 +10,7 @@ export function buildScatterChannelList(
 ): string {
   return defs
     .map((d) => {
-      const u = d.quantitySlug ? getDisplayUnit(d.quantitySlug, unitSystem, unitOverrides) : "";
+      const u = getChannelDisplayUnit(d, unitSystem, unitOverrides);
       return u ? `- "${d.name}" [unit: ${u}]` : `- "${d.name}"`;
     })
     .join("\n");

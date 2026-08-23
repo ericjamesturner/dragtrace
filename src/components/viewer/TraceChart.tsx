@@ -7,7 +7,7 @@ import type { ChannelOnTrace, LoadedLog } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import {
   convertForDisplay,
-  getDisplayUnit,
+  getChannelDisplayUnit,
   resolveUnitKey,
   type ChannelUnitOverrides,
   type UnitSystem,
@@ -454,11 +454,15 @@ export function TraceChart({
 
     // Build quantitySlug + factory display range lookups from logGroups
     const quantitySlugByChannel = new Map<string, string>();
+    const channelDefByName = new Map<string, LoadedLog["parsed"]["channelDefs"][number]>();
     const displayRangeByChannel = new Map<string, [number, number]>();
     for (const group of logGroups) {
       for (const ch of group.channels) {
         if (!quantitySlugByChannel.has(ch.channelName)) {
           const def = group.log.parsed.channelDefs.find(d => d.name === ch.channelName);
+          if (def && !channelDefByName.has(ch.channelName)) {
+            channelDefByName.set(ch.channelName, def);
+          }
           if (def?.quantitySlug) quantitySlugByChannel.set(ch.channelName, def.quantitySlug);
           if (
             def &&
@@ -656,9 +660,13 @@ export function TraceChart({
         if (showAxes) leftAxisCount++;
         const mu = scaleMetricUnit.get(scaleKey) ?? "";
         const unitKey = scaleUnitKey.get(scaleKey);
-        const displayUnit = mu
-          ? getDisplayUnit(mu, unitSystem, unitOverrides, unitKey)
-          : "";
+        const firstMember = (channelsInScale.get(scaleId) ?? [])[0];
+        const displayUnit = getChannelDisplayUnit(
+          firstMember ? channelDefByName.get(firstMember) : undefined,
+          unitSystem,
+          unitOverrides,
+          unitKey,
+        );
         // When 2+ channels share a group scale, label the axis with the group
         // name (e.g. "RPM") instead of whichever channel happened to draw it.
         const groupId = scaleGroupByKey.get(scaleKey) ?? null;

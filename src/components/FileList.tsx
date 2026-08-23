@@ -662,7 +662,7 @@ function PassCard({
 
   /**
    * Opening the signed URL hands back a storage-id filename, and a browser will
-   * often render a CSV in the tab instead of saving it. Pull the blob and save
+   * often render a log in the tab instead of saving it. Pull the blob and save
    * it under the name the racer uploaded.
    */
   const downloadFile = async () => {
@@ -675,9 +675,7 @@ function PassCard({
       const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = objectUrl;
-      a.download = file.fileName.endsWith(".csv")
-        ? file.fileName
-        : `${file.fileName}.csv`;
+      a.download = file.fileName;
       document.body.appendChild(a);
       a.click();
       a.remove();

@@ -3,7 +3,7 @@ import type { LoadedLog, ScatterConfig } from "@/lib/viewer-types";
 import type { Id } from "../../../convex/_generated/dataModel";
 import {
   convertForDisplay,
-  getDisplayUnit,
+  getChannelDisplayUnit,
   type ChannelUnitOverrides,
   type UnitSystem,
   type UnitOverrides,
@@ -211,21 +211,21 @@ export function ScatterContainer({
     return sIdx >= 0 ? sIdx : null;
   }, [scatterData, ts, selection, cursorTime, offset]);
 
-  const xUnit = getDisplayUnit(
-    xMetric,
+  const xUnit = getChannelDisplayUnit(
+    defOf(scatter.xChannel),
     unitSystem,
     unitOverrides,
     channelUnitOverrides?.[scatter.xChannel],
   );
-  const yUnit = getDisplayUnit(
-    yMetric,
+  const yUnit = getChannelDisplayUnit(
+    defOf(scatter.yChannel),
     unitSystem,
     unitOverrides,
     channelUnitOverrides?.[scatter.yChannel],
   );
   const cUnit = scatter.colorChannel
-    ? getDisplayUnit(
-        cMetric,
+    ? getChannelDisplayUnit(
+        defOf(scatter.colorChannel),
         unitSystem,
         unitOverrides,
         channelUnitOverrides?.[scatter.colorChannel],
