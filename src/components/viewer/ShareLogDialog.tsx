@@ -131,8 +131,13 @@ export function ShareLogDialog({
         fingerprint: selectedLog.contentFingerprint,
       });
       const url = `${window.location.origin}/share/${shareId}`;
+      const viewerUrl = `/open?share=${encodeURIComponent(shareId)}`;
       setShareUrl(url);
       setStage("");
+      // Keep the already-open viewer in place, but promote the address bar to
+      // the durable shared-log URL so closing this dialog leaves something the
+      // visitor can copy, bookmark, or reload.
+      window.history.replaceState({}, "", viewerUrl);
       try {
         await navigator.clipboard.writeText(url);
         setCopied(true);
