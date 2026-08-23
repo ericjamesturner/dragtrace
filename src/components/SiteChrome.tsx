@@ -11,17 +11,19 @@ export function SiteHeader({
   onHome,
   onSignIn,
   onOpenLog,
+  onShareLog,
   links,
 }: {
   onHome: () => void;
   onSignIn: (flow: "signIn" | "signUp") => void;
   onOpenLog?: () => void;
+  onShareLog?: () => void;
   /** In-page anchors, shown on the landing page so you can jump to a section. */
   links?: readonly { label: string; href: string }[];
 }) {
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-[#08090a]/85 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center gap-4 px-6 py-4">
+      <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-4 sm:px-6">
         <button
           onClick={onHome}
           className="text-base font-semibold tracking-tight transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
@@ -42,21 +44,30 @@ export function SiteHeader({
           </nav>
         )}
         <span className="ml-auto flex items-center gap-2">
+          {onShareLog && (
+            <button
+              onClick={onShareLog}
+              className="rounded-md bg-red-500 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-400"
+            >
+              <span className="sm:hidden">Share log</span>
+              <span className="hidden sm:inline">Share a log</span>
+            </button>
+          )}
           {onOpenLog && (
             <button
               onClick={onOpenLog}
-              className="hidden rounded-md px-3 py-2 text-base text-white/70 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 sm:block"
+              className="hidden rounded-md px-3 py-2 text-base text-white/70 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 lg:block"
             >
               Open a log
             </button>
           )}
           <button
             onClick={() => onSignIn("signIn")}
-            className="rounded-md px-3 py-2 text-base text-white/70 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+            className="hidden rounded-md px-3 py-2 text-base text-white/70 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 md:block"
           >
             Sign in
           </button>
-          <button onClick={() => onSignIn("signUp")} className={`${CTA} px-4 py-2 text-sm`}>
+          <button onClick={() => onSignIn("signUp")} className={`${CTA} px-3 py-2 text-sm sm:px-4`}>
             Get started
           </button>
         </span>

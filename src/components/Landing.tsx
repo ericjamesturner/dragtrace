@@ -108,10 +108,12 @@ export function Landing({
   onSignIn,
   onLegal,
   onOpenLog,
+  onShareLog,
 }: {
   onSignIn: (flow: "signIn" | "signUp") => void;
   onLegal: (page: "privacy" | "terms") => void;
   onOpenLog: () => void;
+  onShareLog: () => void;
 }) {
   const cta =
     "rounded-lg bg-white px-6 py-3 text-base font-semibold text-black transition-colors hover:bg-white/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white";
@@ -122,6 +124,7 @@ export function Landing({
         onHome={() => window.scrollTo({ top: 0, behavior: "smooth" })}
         onSignIn={onSignIn}
         onOpenLog={onOpenLog}
+        onShareLog={onShareLog}
         links={NAV}
       />
 

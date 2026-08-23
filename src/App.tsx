@@ -128,7 +128,12 @@ function App() {
   return route ? (
     <SignIn initialFlow={route} onBack={goHome} />
   ) : (
-    <Landing onSignIn={go} onLegal={go} onOpenLog={() => go("open")} />
+    <Landing
+      onSignIn={go}
+      onLegal={go}
+      onOpenLog={() => go("open")}
+      onShareLog={() => go("openShare")}
+    />
   );
 }
 
