@@ -24,9 +24,14 @@ function dateTime(value: number) {
 export function AdminInsights() {
   const summary = useQuery(api.analytics.summary);
   const feedback = useQuery(api.feedback.list);
+  const sharedLogs = useQuery(api.sharedLogs.listForAdmin);
   const markReviewed = useMutation(api.feedback.markReviewed);
 
-  if (summary === undefined || feedback === undefined) {
+  if (
+    summary === undefined ||
+    feedback === undefined ||
+    sharedLogs === undefined
+  ) {
     return <p className="text-sm text-muted-foreground">Loading usage and feedback…</p>;
   }
 
@@ -91,6 +96,58 @@ export function AdminInsights() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="border-t pt-8">
+        <div>
+          <h3 className="text-base font-semibold">Publicly shared logs</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            The latest 100 public links and the people who created them.
+          </p>
+        </div>
+
+        {sharedLogs.length === 0 ? (
+          <div className="mt-4 rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+            No shared logs yet.
+          </div>
+        ) : (
+          <div className="mt-4 overflow-hidden rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Shared by</th>
+                  <th className="px-3 py-2 font-medium">Log</th>
+                  <th className="px-3 py-2 font-medium">Created</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {sharedLogs.map((item) => (
+                  <tr key={item._id}>
+                    <td className="px-3 py-2">
+                      <p>{item.sharerName || "Unknown"}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {item.sharerEmail || "Created before contact collection"}
+                      </p>
+                    </td>
+                    <td className="px-3 py-2">
+                      <a
+                        href={`/share/${item._id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="hover:underline"
+                      >
+                        {item.fileName}
+                      </a>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {dateTime(item.createdAt)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="border-t pt-8">

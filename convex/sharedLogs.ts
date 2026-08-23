@@ -1,5 +1,6 @@
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
+import { requireAdmin } from "./authz";
 
 const MAX_FILE_BYTES = 125 * 1024 * 1024;
 const MAX_SHARES_PER_HOUR = 5;
@@ -15,6 +16,21 @@ function visitorKey(value: string): string {
 
 function cleanFileName(value: string): string {
   return (value.split(/[\\/]/).pop()?.trim() || "shared-log").slice(0, 200);
+}
+
+function cleanSharerName(value: string): string {
+  const name = value.trim().replace(/\s+/g, " ");
+  if (!name) throw new Error("Enter your name.");
+  if (name.length > 100) throw new Error("Name must be 100 characters or less.");
+  return name;
+}
+
+function cleanSharerEmail(value: string): string {
+  const email = value.trim().toLowerCase();
+  if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Enter a valid email address.");
+  }
+  return email;
 }
 
 async function enforceShareRateLimit(
@@ -50,11 +66,15 @@ export const create = mutation({
     fileName: v.string(),
     contentType: v.string(),
     browserVisitorId: v.string(),
+    sharerName: v.string(),
+    sharerEmail: v.string(),
     fingerprint: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const key = visitorKey(args.browserVisitorId);
     const fileName = cleanFileName(args.fileName);
+    const sharerName = cleanSharerName(args.sharerName);
+    const sharerEmail = cleanSharerEmail(args.sharerEmail);
     const metadata = await ctx.db.system.get(args.storageId);
     const imageMetadata = await ctx.db.system.get(args.ogImageStorageId);
     if (!metadata) throw new Error("The uploaded log could not be found.");
@@ -94,6 +114,8 @@ export const create = mutation({
       fileSize: metadata.size,
       contentType: (metadata.contentType || args.contentType || "application/octet-stream").slice(0, 120),
       visitorKey: key,
+      sharerName,
+      sharerEmail,
       ...(fingerprint && fingerprint.length <= 100 ? { fingerprint } : {}),
       createdAt: Date.now(),
     });
@@ -120,5 +142,13 @@ export const get = query({
       url,
       ogImageUrl,
     };
+  },
+});
+
+export const listForAdmin = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    return await ctx.db.query("sharedLogs").order("desc").take(100);
   },
 });

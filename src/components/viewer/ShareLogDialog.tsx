@@ -34,11 +34,13 @@ export function ShareLogDialog({
   onOpenChange,
   logs,
   getSourceFile,
+  copyAndOpen = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   logs: LoadedLog[];
   getSourceFile: (fileId: Id<"files">) => File | undefined;
+  copyAndOpen?: boolean;
 }) {
   const generateUploadUrl = useMutation(api.sharedLogs.generateUploadUrl);
   const createShare = useMutation(api.sharedLogs.create);
@@ -48,6 +50,8 @@ export function ShareLogDialog({
   const [shareUrl, setShareUrl] = useState("");
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sharerName, setSharerName] = useState("");
+  const [sharerEmail, setSharerEmail] = useState("");
 
   const selectedLog = useMemo(
     () => logs.find((log) => log.fileId === selectedId) ?? logs[0],
@@ -66,6 +70,8 @@ export function ShareLogDialog({
       setShareUrl("");
       setCopied(false);
       setError(null);
+      setSharerName("");
+      setSharerEmail("");
     }
   };
 
@@ -91,6 +97,16 @@ export function ShareLogDialog({
       setError("Shared logs must be 125 MB or smaller.");
       return;
     }
+    const name = sharerName.trim();
+    const email = sharerEmail.trim();
+    if (!name) {
+      setError("Enter your name.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("Enter a valid email address.");
+      return;
+    }
 
     setBusy(true);
     setError(null);
@@ -110,6 +126,8 @@ export function ShareLogDialog({
         fileName: sourceFile.name,
         contentType: sourceFile.type || "application/octet-stream",
         browserVisitorId: getBrowserVisitorId(),
+        sharerName: name,
+        sharerEmail: email,
         fingerprint: selectedLog.contentFingerprint,
       });
       const url = `${window.location.origin}/share/${shareId}`;
@@ -129,13 +147,19 @@ export function ShareLogDialog({
     }
   };
 
-  const copyLink = async () => {
+  const copyLink = async (): Promise<boolean> => {
     try {
       await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
+      return true;
     } catch {
       setError("Copy was blocked. Select the link and copy it manually.");
+      return false;
     }
+  };
+
+  const copyLinkAndOpen = async () => {
+    if (await copyLink()) window.location.assign(shareUrl);
   };
 
   return (
@@ -168,10 +192,20 @@ export function ShareLogDialog({
               />
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <Button className="flex-1" onClick={() => void copyLink()}>
-                {copied ? <CheckIcon /> : <CopyIcon />}
-                {copied ? "Copied" : "Copy link"}
-              </Button>
+              {copyAndOpen ? (
+                <Button
+                  className="flex-1"
+                  onClick={() => void copyLinkAndOpen()}
+                >
+                  <ExternalLinkIcon />
+                  Copy link &amp; open
+                </Button>
+              ) : (
+                <Button className="flex-1" onClick={() => void copyLink()}>
+                  {copied ? <CheckIcon /> : <CopyIcon />}
+                  {copied ? "Copied" : "Copy link"}
+                </Button>
+              )}
               <Button
                 variant="outline"
                 className="flex-1"
@@ -188,8 +222,9 @@ export function ShareLogDialog({
               </Button>
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Anyone with this link can open the log. The link does not expose
-              your account or the other files in this browser.
+              {copyAndOpen
+                ? "The button copies this link, then opens the public log in this browser. Anyone with the link can view it without an account."
+                : "Anyone with this link can open the log. The link does not expose your account or the other files in this browser."}
             </p>
           </div>
         ) : (
@@ -223,6 +258,39 @@ export function ShareLogDialog({
               </div>
             )}
 
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block space-y-2">
+                <span className="text-sm font-medium">Your name</span>
+                <input
+                  required
+                  autoComplete="name"
+                  value={sharerName}
+                  disabled={busy}
+                  maxLength={100}
+                  onChange={(event) => setSharerName(event.target.value)}
+                  placeholder="Alex Smith"
+                  className="h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/50"
+                />
+              </label>
+              <label className="block space-y-2">
+                <span className="text-sm font-medium">Email</span>
+                <input
+                  required
+                  type="email"
+                  autoComplete="email"
+                  value={sharerEmail}
+                  disabled={busy}
+                  maxLength={254}
+                  onChange={(event) => setSharerEmail(event.target.value)}
+                  placeholder="alex@example.com"
+                  className="h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/50"
+                />
+              </label>
+              <p className="text-xs leading-relaxed text-muted-foreground sm:col-span-2">
+                These details are private and are not shown on the shared log.
+              </p>
+            </div>
+
             <div className="rounded-xl border border-amber-500/20 bg-amber-500/7 p-4 text-xs leading-relaxed text-muted-foreground">
               Opening logs here is still private. Publishing is the step that
               uploads this selected log and its preview image so anyone with the
@@ -249,7 +317,15 @@ export function ShareLogDialog({
               >
                 Cancel
               </Button>
-              <Button disabled={busy || !sourceFile} onClick={() => void publish()}>
+              <Button
+                disabled={
+                  busy ||
+                  !sourceFile ||
+                  !sharerName.trim() ||
+                  !sharerEmail.trim()
+                }
+                onClick={() => void publish()}
+              >
                 {busy && <Loader2Icon className="animate-spin" />}
                 {busy ? "Publishing…" : "Create public link"}
               </Button>

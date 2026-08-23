@@ -18,7 +18,15 @@ import "./App.css";
 const PublicLogPage = lazy(() => import("./components/PublicLogPage"));
 const SharedLogPage = lazy(() => import("./components/SharedLogPage"));
 
-type Route = null | "signIn" | "signUp" | "privacy" | "terms" | "open" | "share";
+type Route =
+  | null
+  | "signIn"
+  | "signUp"
+  | "privacy"
+  | "terms"
+  | "open"
+  | "openShare"
+  | "share";
 type NavigableRoute = Exclude<Route, null | "share">;
 
 function readShareId(): string | null {
@@ -35,6 +43,7 @@ function readRoute(): Route {
   if (params.has("signup")) return "signUp";
   if (params.has("signin")) return "signIn";
   if (readShareId()) return "share";
+  if (window.location.pathname === "/open/share") return "openShare";
   if (window.location.pathname === "/open") return "open";
   return null;
 }
@@ -45,6 +54,7 @@ const QUERY: Record<NavigableRoute, string> = {
   privacy: "/?privacy",
   terms: "/?terms",
   open: "/open",
+  openShare: "/open/share",
 };
 
 function App() {
@@ -75,10 +85,14 @@ function App() {
     return <Legal page={route} onBack={goHome} onSignIn={go} onLegal={go} />;
   }
 
-  if (route === "open") {
+  if (route === "open" || route === "openShare") {
     return (
       <Suspense fallback={<div className="loading">Loading viewer...</div>}>
-        <PublicLogPage onHome={goHome} onSignIn={() => go("signIn")} />
+        <PublicLogPage
+          directShare={route === "openShare"}
+          onHome={goHome}
+          onSignIn={() => go("signIn")}
+        />
       </Suspense>
     );
   }

@@ -12,7 +12,7 @@ import { SiteFooter, SiteHeader } from "./SiteChrome";
  * worth a real review once there are paying customers.
  */
 
-const UPDATED = "22 August 2026";
+const UPDATED = "23 August 2026";
 
 /** Fill these in before launch. */
 const CO = {
@@ -165,8 +165,9 @@ function Privacy() {
         <LI>
           <strong className="text-white">Logs you publish.</strong> If you choose
           “Create public link,” we store that selected log and a generated social
-          preview image. Anyone with the link can open the log. No other guest
-          logs or account data are included.
+          preview image, plus the name and email address you enter when publishing.
+          Anyone with the link can open the log, but your name and email stay
+          private to DragTrace. No other guest logs or account data are included.
         </LI>
         <LI>
           <strong className="text-white">Phone number,</strong> if you give us

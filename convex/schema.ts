@@ -202,8 +202,8 @@ export default defineSchema({
 
   // Logs a visitor explicitly chose to publish. Guest-viewer files otherwise
   // remain browser-only; this table is the opt-in path that powers /share/…
-  // links. The creator's random browser key is retained only for rate limiting
-  // and future removal of their own shares.
+  // links. Contact details stay private; the creator's random browser key is
+  // retained for rate limiting and future removal of their own shares.
   sharedLogs: defineTable({
     storageId: v.id("_storage"),
     ogImageStorageId: v.id("_storage"),
@@ -211,6 +211,9 @@ export default defineSchema({
     fileSize: v.number(),
     contentType: v.string(),
     visitorKey: v.string(),
+    /** Private contact details supplied when the public link was created. */
+    sharerName: v.optional(v.string()),
+    sharerEmail: v.optional(v.string()),
     fingerprint: v.optional(v.string()),
     createdAt: v.number(),
   })

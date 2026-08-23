@@ -19,9 +19,11 @@ function formatBytes(bytes: number): string {
 }
 
 export default function PublicLogPage({
+  directShare = false,
   onHome,
   onSignIn,
 }: {
+  directShare?: boolean;
   onHome: () => void;
   onSignIn: () => void;
 }) {
@@ -35,11 +37,13 @@ export default function PublicLogPage({
 
   useEffect(() => {
     const previousTitle = document.title;
-    document.title = "Open a Datalog — DragTrace";
+    document.title = directShare
+      ? "Share a Datalog — DragTrace"
+      : "Open a Datalog — DragTrace";
     return () => {
       document.title = previousTitle;
     };
-  }, []);
+  }, [directShare]);
 
   const openFiles = useCallback(async (selectedFiles: File[]) => {
     const logFiles = selectedFiles.filter((file) => isSupportedLogFile(file.name));
@@ -89,13 +93,16 @@ export default function PublicLogPage({
       const parseErrors = results.flatMap((result) =>
         "error" in result ? [result.error] : [],
       );
-      if (loaded.length > 0) setLogs((current) => [...current, ...loaded]);
+      if (loaded.length > 0) {
+        setLogs((current) => [...current, ...loaded]);
+        if (directShare) setShareOpen(true);
+      }
       setErrors([...nextErrors, ...parseErrors]);
     } finally {
       setLoadingFiles([]);
       if (inputRef.current) inputRef.current.value = "";
     }
-  }, [logs.length]);
+  }, [directShare, logs.length]);
 
   const fileInput = (
     <input
@@ -120,6 +127,7 @@ export default function PublicLogPage({
           onOpenChange={setShareOpen}
           logs={logs}
           getSourceFile={(fileId) => sourceFilesRef.current.get(fileId)}
+          copyAndOpen={directShare}
         />
         <LogViewerReady
           key={logs[0].fileId}
@@ -166,15 +174,17 @@ export default function PublicLogPage({
 
       <main className="mx-auto flex max-w-3xl flex-col px-6 py-14 sm:py-20">
         <p className="font-mono text-xs uppercase tracking-[0.2em] text-white/50">
-          Guest viewer
+          {directShare ? "Public log sharing" : "Guest viewer"}
         </p>
         <h1 className="mt-4 text-balance text-[clamp(2.2rem,6vw,3.6rem)] font-semibold leading-none tracking-[-0.03em]">
-          Open a datalog. No account needed.
+          {directShare
+            ? "Upload a datalog. Send one link."
+            : "Open a datalog. No account needed."}
         </h1>
         <p className="mt-5 max-w-2xl text-lg leading-relaxed text-white/70">
-          Pick one or more supported ECU logs and DragTrace will open them with
-          a useful starter layout. Opening stays in this browser; a file is
-          uploaded only if you explicitly create a public share link.
+          {directShare
+            ? "Choose a supported ECU log, preview it, and create a public link anyone can open without an account. DragTrace will copy the link before opening the shared viewer."
+            : "Pick one or more supported ECU logs and DragTrace will open them with a useful starter layout. Opening stays in this browser; a file is uploaded only if you explicitly create a public share link."}
         </p>
 
         {fileInput}
@@ -230,10 +240,14 @@ export default function PublicLogPage({
             <>
               <FileUpIcon className="size-10 text-white/65" />
               <span className="mt-5 text-xl font-medium">
-                Drop ECU log files here
+                {directShare
+                  ? "Drop an ECU log here to share"
+                  : "Drop ECU log files here"}
               </span>
               <span className="mt-2 text-base text-white/50">
-                or click to choose one or more files
+                {directShare
+                  ? "or click to choose a file"
+                  : "or click to choose one or more files"}
               </span>
             </>
           )}
