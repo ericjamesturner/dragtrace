@@ -1,6 +1,11 @@
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../convex/_generated/api.js";
 
+// Convex's browser API URL is public configuration. Vercel injects it while
+// building the app, but not into these serverless functions at runtime.
+const CONVEX_URL =
+  process.env.VITE_CONVEX_URL || "https://wonderful-husky-734.convex.cloud";
+
 function one(value) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -20,9 +25,9 @@ export default async function handler(request, response) {
   const viewerUrl = `/open?share=${encodeURIComponent(shareId)}`;
   let shared = null;
 
-  if (shareId && process.env.VITE_CONVEX_URL) {
+  if (shareId) {
     try {
-      const client = new ConvexHttpClient(process.env.VITE_CONVEX_URL);
+      const client = new ConvexHttpClient(CONVEX_URL);
       shared = await client.query(api.sharedLogs.get, { shareId });
     } catch (error) {
       console.error("Could not load shared-log metadata", error);
