@@ -214,6 +214,9 @@ export default defineSchema({
     /** Private contact details supplied when the public link was created. */
     sharerName: v.optional(v.string()),
     sharerEmail: v.optional(v.string()),
+    /** Optional context intentionally shown to anyone opening the public link. */
+    vehicleDetails: v.optional(v.string()),
+    description: v.optional(v.string()),
     fingerprint: v.optional(v.string()),
     createdAt: v.number(),
   })

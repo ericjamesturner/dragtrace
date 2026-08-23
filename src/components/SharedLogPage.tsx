@@ -67,6 +67,10 @@ export default function SharedLogPage({
         key={shareId}
         publicMode
         publicLabel="Shared log · layout saved locally"
+        publicDetails={{
+          vehicleDetails: shared?.vehicleDetails,
+          description: shared?.description,
+        }}
         fileIds={[log.fileId]}
         logs={[log]}
         errors={[]}

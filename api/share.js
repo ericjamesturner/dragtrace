@@ -36,9 +36,15 @@ export default async function handler(request, response) {
 
   const fileName = shared?.fileName || "Shared datalog";
   const title = `${fileName} — DragTrace`;
-  const description = shared
-    ? "Open this interactive racing datalog in DragTrace."
-    : "Open a shared racing datalog in DragTrace.";
+  const publicContext = [shared?.vehicleDetails, shared?.description]
+    .filter(Boolean)
+    .join(" — ")
+    .replace(/\s+/g, " ");
+  const description = publicContext
+    ? publicContext.slice(0, 180)
+    : shared
+      ? "Open this interactive racing datalog in DragTrace."
+      : "Open a shared racing datalog in DragTrace.";
   const imageUrl = `${origin}/api/share-og?id=${encodeURIComponent(shareId)}`;
 
   response.setHeader("Content-Type", "text/html; charset=utf-8");

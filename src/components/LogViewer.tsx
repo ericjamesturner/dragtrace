@@ -147,6 +147,10 @@ interface ReadyProps {
   onAddPublicFiles?: () => void;
   onSharePublicLog?: () => void;
   publicLabel?: string;
+  publicDetails?: {
+    vehicleDetails?: string;
+    description?: string;
+  };
   onBack?: () => void;
   goToFiles?: (vehicleId: Id<"vehicles">, eventId: Id<"events">) => void;
   goToViewer?: (
@@ -169,6 +173,7 @@ export function LogViewerReady({
   onAddPublicFiles,
   onSharePublicLog,
   publicLabel,
+  publicDetails,
   onBack,
   goToFiles,
   goToViewer,
@@ -549,6 +554,30 @@ export function LogViewerReady({
           ) : null
         }
       />
+
+      {publicMode &&
+        (publicDetails?.vehicleDetails || publicDetails?.description) && (
+          <div className="max-h-32 overflow-y-auto border-b bg-muted/30 px-3 py-2.5">
+            <div className="flex flex-col gap-1.5 text-xs sm:flex-row sm:items-start sm:gap-5">
+              {publicDetails.vehicleDetails && (
+                <p className="shrink-0">
+                  <span className="font-medium text-foreground">Vehicle:</span>{" "}
+                  <span className="text-muted-foreground">
+                    {publicDetails.vehicleDetails}
+                  </span>
+                </p>
+              )}
+              {publicDetails.description && (
+                <p className="whitespace-pre-wrap text-muted-foreground">
+                  <span className="font-medium text-foreground">
+                    Description / question:
+                  </span>{" "}
+                  {publicDetails.description}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
       {errors.length > 0 && (
         <div className="px-3 py-1 bg-destructive/10 text-destructive text-xs">

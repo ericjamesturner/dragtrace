@@ -33,6 +33,21 @@ function cleanSharerEmail(value: string): string {
   return email;
 }
 
+function cleanOptionalPublicText(
+  value: string | undefined,
+  label: string,
+  maxLength: number,
+): string | undefined {
+  const cleaned = value?.trim();
+  if (!cleaned) return undefined;
+  if (cleaned.length > maxLength) {
+    throw new Error(
+      `${label} must be ${maxLength.toLocaleString()} characters or less.`,
+    );
+  }
+  return cleaned;
+}
+
 async function enforceShareRateLimit(
   ctx: MutationCtx,
   key: string,
@@ -68,6 +83,8 @@ export const create = mutation({
     browserVisitorId: v.string(),
     sharerName: v.string(),
     sharerEmail: v.string(),
+    vehicleDetails: v.optional(v.string()),
+    description: v.optional(v.string()),
     fingerprint: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -75,6 +92,16 @@ export const create = mutation({
     const fileName = cleanFileName(args.fileName);
     const sharerName = cleanSharerName(args.sharerName);
     const sharerEmail = cleanSharerEmail(args.sharerEmail);
+    const vehicleDetails = cleanOptionalPublicText(
+      args.vehicleDetails,
+      "Vehicle details",
+      300,
+    );
+    const description = cleanOptionalPublicText(
+      args.description,
+      "Description or question",
+      2_000,
+    );
     const metadata = await ctx.db.system.get(args.storageId);
     const imageMetadata = await ctx.db.system.get(args.ogImageStorageId);
     if (!metadata) throw new Error("The uploaded log could not be found.");
@@ -116,6 +143,8 @@ export const create = mutation({
       visitorKey: key,
       sharerName,
       sharerEmail,
+      ...(vehicleDetails ? { vehicleDetails } : {}),
+      ...(description ? { description } : {}),
       ...(fingerprint && fingerprint.length <= 100 ? { fingerprint } : {}),
       createdAt: Date.now(),
     });
@@ -139,6 +168,8 @@ export const get = query({
       fileSize: item.fileSize,
       contentType: item.contentType,
       createdAt: item.createdAt,
+      vehicleDetails: item.vehicleDetails,
+      description: item.description,
       url,
       ogImageUrl,
     };

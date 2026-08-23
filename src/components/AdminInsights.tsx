@@ -138,6 +138,16 @@ export function AdminInsights() {
                       >
                         {item.fileName}
                       </a>
+                      {item.vehicleDetails && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {item.vehicleDetails}
+                        </p>
+                      )}
+                      {item.description && (
+                        <p className="mt-1 max-w-md whitespace-pre-wrap text-xs text-muted-foreground">
+                          {item.description}
+                        </p>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
                       {dateTime(item.createdAt)}

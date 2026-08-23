@@ -166,8 +166,10 @@ function Privacy() {
           <strong className="text-white">Logs you publish.</strong> If you choose
           “Create public link,” we store that selected log and a generated social
           preview image, plus the name and email address you enter when publishing.
-          Anyone with the link can open the log, but your name and email stay
-          private to DragTrace. No other guest logs or account data are included.
+          Vehicle details and a description or question are optional; if you add
+          them, they are shown publicly with the log. Anyone with the link can
+          open the log, but your name and email stay private to DragTrace. No
+          other guest logs or account data are included.
         </LI>
         <LI>
           <strong className="text-white">Phone number,</strong> if you give us
