@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { FileUpIcon, Loader2Icon, LockKeyholeIcon } from "lucide-react";
 import { LogViewerReady } from "./LogViewer";
 import { FeedbackDialog } from "./viewer/FeedbackDialog";
+import { ShareLogDialog } from "./viewer/ShareLogDialog";
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -28,7 +29,9 @@ export default function PublicLogPage({
   const [loadingFiles, setLoadingFiles] = useState<File[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const sourceFilesRef = useRef(new Map<string, File>());
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -54,7 +57,7 @@ export default function PublicLogPage({
           async (
             file,
             index,
-          ): Promise<{ log: LoadedLog } | { error: string }> => {
+          ): Promise<{ log: LoadedLog; file: File } | { error: string }> => {
             try {
               const bytes = await file.arrayBuffer();
               const fileId = `local-${crypto.randomUUID()}` as Id<"files">;
@@ -65,6 +68,7 @@ export default function PublicLogPage({
                   fileName: file.name,
                   index: startIndex + index,
                 }),
+                file,
               };
             } catch (err) {
               const message =
@@ -77,6 +81,11 @@ export default function PublicLogPage({
       const loaded = results.flatMap((result) =>
         "log" in result ? [result.log] : [],
       );
+      for (const result of results) {
+        if ("log" in result) {
+          sourceFilesRef.current.set(result.log.fileId, result.file);
+        }
+      }
       const parseErrors = results.flatMap((result) =>
         "error" in result ? [result.error] : [],
       );
@@ -106,6 +115,12 @@ export default function PublicLogPage({
     return (
       <>
         {fileInput}
+        <ShareLogDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          logs={logs}
+          getSourceFile={(fileId) => sourceFilesRef.current.get(fileId)}
+        />
         <LogViewerReady
           key={logs[0].fileId}
           publicMode
@@ -115,9 +130,11 @@ export default function PublicLogPage({
           workspace={null}
           publicLoading={loadingFiles.length > 0}
           onAddPublicFiles={() => inputRef.current?.click()}
+          onSharePublicLog={() => setShareOpen(true)}
           onBack={() => {
             setLogs([]);
             setErrors([]);
+            sourceFilesRef.current.clear();
           }}
         />
       </>
@@ -156,8 +173,8 @@ export default function PublicLogPage({
         </h1>
         <p className="mt-5 max-w-2xl text-lg leading-relaxed text-white/70">
           Pick one or more supported ECU logs and DragTrace will open them with
-          a useful starter layout. Your files stay in this browser and are not
-          uploaded.
+          a useful starter layout. Opening stays in this browser; a file is
+          uploaded only if you explicitly create a public share link.
         </p>
 
         {fileInput}
@@ -233,15 +250,15 @@ export default function PublicLogPage({
             <LockKeyholeIcon className="size-5 text-white/60" />
             <h2 className="mt-3 font-medium">Private by default</h2>
             <p className="mt-1 text-sm leading-relaxed text-white/50">
-              The logs are parsed locally. They are never added to DragTrace
-              storage.
+              Logs are parsed locally. Only “Create public link” or a feedback
+              attachment sends a file to DragTrace storage.
             </p>
           </div>
           <div className="rounded-xl border border-white/10 p-5">
-            <h2 className="font-medium">A fresh start every time</h2>
+            <h2 className="font-medium">Your layout stays ready</h2>
             <p className="mt-1 text-sm leading-relaxed text-white/50">
-              Changes work for this visit only. Reloading clears the files and
-              restores the default layout.
+              Reloading clears the log files, but this browser remembers your
+              channels, pages, units, and chart settings for next time.
             </p>
           </div>
         </div>

@@ -1,5 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npx convex deploy --cmd 'npm run build'",
-  "rewrites": [{ "source": "/open", "destination": "/" }]
+  "rewrites": [
+    { "source": "/open", "destination": "/" },
+    { "source": "/share/:id", "destination": "/api/share?id=:id" }
+  ]
 }

@@ -11,6 +11,10 @@ import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 import { useMathChannels } from "@/hooks/useMathChannels";
 import { useViewerAnalytics } from "@/hooks/useViewerAnalytics";
 import { buildDefaultConfig } from "@/lib/default-layout";
+import {
+  loadGuestWorkspace,
+  saveGuestWorkspace,
+} from "@/lib/guest-workspace";
 import { computeAlignment } from "@/lib/alignment";
 import { buildTimeslipZones } from "@/lib/timeslip-zones";
 import {
@@ -27,6 +31,7 @@ import {
 import { ViewerToolbar } from "./viewer/ViewerToolbar";
 import { ViewerBreadcrumb } from "./viewer/ViewerBreadcrumb";
 import { TracePanel } from "./viewer/TracePanel";
+import { Share2Icon } from "lucide-react";
 
 interface Props {
   vehicleId: Id<"vehicles">;
@@ -140,6 +145,8 @@ interface ReadyProps {
   publicMode?: boolean;
   publicLoading?: boolean;
   onAddPublicFiles?: () => void;
+  onSharePublicLog?: () => void;
+  publicLabel?: string;
   onBack?: () => void;
   goToFiles?: (vehicleId: Id<"vehicles">, eventId: Id<"events">) => void;
   goToViewer?: (
@@ -160,6 +167,8 @@ export function LogViewerReady({
   publicMode = false,
   publicLoading = false,
   onAddPublicFiles,
+  onSharePublicLog,
+  publicLabel,
   onBack,
   goToFiles,
   goToViewer,
@@ -198,8 +207,12 @@ export function LogViewerReady({
     []
   );
 
-  // Guest layouts always start from defaults and remain in memory only.
+  // Guest files remain session-only, but their lightweight workspace is saved
+  // in this browser and remapped by channel name onto the next logs they open.
   const [config, dispatch] = useReducer(reducerWithMirror, null, () => {
+    if (publicMode) {
+      return loadGuestWorkspace(logs) ?? buildDefaultConfig(logs);
+    }
     if (!publicMode && workspace) {
       try {
         const saved = migrateConfig(JSON.parse(workspace.config));
@@ -273,9 +286,11 @@ export function LogViewerReady({
     }
   }, [effectiveTraces, activeTraceId]);
 
-  // Save to localStorage (immediate)
+  // Save to localStorage (immediate). Account viewers keep the existing
+  // event-local fallback; guests get one reusable browser-local workspace.
   useEffect(() => {
-    if (!publicMode && eventId) saveConfigLocal(eventId, config);
+    if (publicMode) saveGuestWorkspace(config);
+    else if (eventId) saveConfigLocal(eventId, config);
   }, [publicMode, eventId, config]);
 
   // Save to DB (debounced, flushed on unmount)
@@ -492,8 +507,20 @@ export function LogViewerReady({
                 <div className="truncate text-sm font-medium">
                   {logs.length === 1 ? logs[0]?.fileName : `${logs.length} logs`}
                 </div>
-                <div className="text-[10px] text-muted-foreground">Guest viewer · not saved</div>
+                <div className="text-[10px] text-muted-foreground">
+                  {publicLabel ?? "Guest viewer · layout saved locally"}
+                </div>
               </div>
+              {onSharePublicLog && (
+                <button
+                  type="button"
+                  onClick={onSharePublicLog}
+                  className="flex shrink-0 cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <Share2Icon className="size-3.5" />
+                  Share log
+                </button>
+              )}
               {onAddPublicFiles && (
                 <button
                   type="button"

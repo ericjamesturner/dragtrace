@@ -113,10 +113,14 @@ function Privacy() {
       <P>
         If you use the guest viewer, your selected datalogs are read and parsed
         on your device. We do not upload or store those files, their filenames,
-        their layout, or your viewer changes. Reloading the page clears the guest
-        session. We do send a one-way fingerprint of each log so we can count
-        distinct logs without receiving their contents. A file is uploaded only
-        if you deliberately attach it to feedback.
+        or their contents. Reloading the page clears the log files. Your browser
+        stores the guest workspace locally—including channel names, pages, units,
+        and chart settings—so it is ready for the next logs you open. That local
+        workspace stays on your device until you clear this site's browser data.
+        We do send a one-way fingerprint of each log so we can count distinct
+        logs without receiving their contents. A file is uploaded only if you
+        deliberately attach it to feedback or choose to create a public share
+        link.
       </P>
       <P>
         Your datalogs, your charts, your notes and your timeslips are private to
@@ -157,6 +161,12 @@ function Privacy() {
           rating you send, an email address if you provide one, the viewer page
           it came from, any files you choose to attach, and—only if you opt
           in—permission and a display name for using your words as a testimonial.
+        </LI>
+        <LI>
+          <strong className="text-white">Logs you publish.</strong> If you choose
+          “Create public link,” we store that selected log and a generated social
+          preview image. Anyone with the link can open the log. No other guest
+          logs or account data are included.
         </LI>
         <LI>
           <strong className="text-white">Phone number,</strong> if you give us
@@ -231,7 +241,9 @@ function Privacy() {
       <P>
         Your files stay until you delete them or close your account. Deleting a
         car, a race or a pass removes its files and timeslips from our storage.
-        Backups may hold copies for a short period afterwards.
+        Publicly shared guest logs stay available at their link; email {CO.email}
+        if you want one removed. Backups may hold copies for a short period
+        afterwards.
       </P>
 
       <H2>Getting your data out, or deleting it</H2>

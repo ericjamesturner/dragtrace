@@ -200,6 +200,23 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_feedback", ["feedbackId"]),
 
+  // Logs a visitor explicitly chose to publish. Guest-viewer files otherwise
+  // remain browser-only; this table is the opt-in path that powers /share/…
+  // links. The creator's random browser key is retained only for rate limiting
+  // and future removal of their own shares.
+  sharedLogs: defineTable({
+    storageId: v.id("_storage"),
+    ogImageStorageId: v.id("_storage"),
+    fileName: v.string(),
+    fileSize: v.number(),
+    contentType: v.string(),
+    visitorKey: v.string(),
+    fingerprint: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_storage", ["storageId"])
+    .index("by_visitor_created", ["visitorKey", "createdAt"]),
+
   // A signed-in account is one visitor across devices. Signed-out use is
   // counted by a random browser id; no IP address, filename, or log contents
   // are stored for analytics.

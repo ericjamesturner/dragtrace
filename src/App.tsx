@@ -16,8 +16,17 @@ import "./App.css";
  * legal pages are reachable whether or not you are signed in.
  */
 const PublicLogPage = lazy(() => import("./components/PublicLogPage"));
+const SharedLogPage = lazy(() => import("./components/SharedLogPage"));
 
-type Route = null | "signIn" | "signUp" | "privacy" | "terms" | "open";
+type Route = null | "signIn" | "signUp" | "privacy" | "terms" | "open" | "share";
+type NavigableRoute = Exclude<Route, null | "share">;
+
+function readShareId(): string | null {
+  const fromQuery = new URLSearchParams(window.location.search).get("share");
+  if (fromQuery) return fromQuery;
+  const match = /^\/share\/([^/]+)\/?$/.exec(window.location.pathname);
+  return match ? decodeURIComponent(match[1]) : null;
+}
 
 function readRoute(): Route {
   const params = new URLSearchParams(window.location.search);
@@ -25,11 +34,12 @@ function readRoute(): Route {
   if (params.has("terms")) return "terms";
   if (params.has("signup")) return "signUp";
   if (params.has("signin")) return "signIn";
+  if (readShareId()) return "share";
   if (window.location.pathname === "/open") return "open";
   return null;
 }
 
-const QUERY: Record<Exclude<Route, null>, string> = {
+const QUERY: Record<NavigableRoute, string> = {
   signIn: "/?signin",
   signUp: "/?signup",
   privacy: "/?privacy",
@@ -49,7 +59,7 @@ function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  const go = useCallback((next: Exclude<Route, null>) => {
+  const go = useCallback((next: NavigableRoute) => {
     window.history.pushState({}, "", QUERY[next]);
     setRoute(next);
     window.scrollTo(0, 0);
@@ -69,6 +79,15 @@ function App() {
     return (
       <Suspense fallback={<div className="loading">Loading viewer...</div>}>
         <PublicLogPage onHome={goHome} onSignIn={() => go("signIn")} />
+      </Suspense>
+    );
+  }
+
+  if (route === "share") {
+    const shareId = readShareId() ?? "";
+    return (
+      <Suspense fallback={<div className="loading">Loading shared log...</div>}>
+        <SharedLogPage key={shareId} shareId={shareId} onHome={goHome} />
       </Suspense>
     );
   }

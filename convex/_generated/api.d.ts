@@ -22,6 +22,7 @@ import type * as http from "../http.js";
 import type * as mathChannels from "../mathChannels.js";
 import type * as profile from "../profile.js";
 import type * as scatterSuggestions from "../scatterSuggestions.js";
+import type * as sharedLogs from "../sharedLogs.js";
 import type * as stripe from "../stripe.js";
 import type * as timeslips from "../timeslips.js";
 import type * as userPreferences from "../userPreferences.js";
@@ -51,6 +52,7 @@ declare const fullApi: ApiFromModules<{
   mathChannels: typeof mathChannels;
   profile: typeof profile;
   scatterSuggestions: typeof scatterSuggestions;
+  sharedLogs: typeof sharedLogs;
   stripe: typeof stripe;
   timeslips: typeof timeslips;
   userPreferences: typeof userPreferences;
