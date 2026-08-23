@@ -317,7 +317,7 @@ export function ShareLogDialog({
                   disabled={busy}
                   maxLength={300}
                   onChange={(event) => setVehicleDetails(event.target.value)}
-                  placeholder="1969 Camaro · 540 BBC · Holley EFI"
+                  placeholder="03 Evo 8 - Haltech 2500"
                   className="h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/50"
                 />
               </label>
