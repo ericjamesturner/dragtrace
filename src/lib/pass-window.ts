@@ -4,9 +4,9 @@ import type { LoadedLog } from "./viewer-types";
 
 const DEFAULT_PADDING_S = 0.5;
 const MIN_PASS_S = 0.75;
-const TPS_ON_PERCENT = 70;
-const TPS_OFF_PERCENT = 55;
-const SUSTAINED_LIFT_S = 0.35;
+const WOT_PERCENT = 95;
+const MIN_WOT_PEAK_PERCENT = 85;
+const MAX_SHIFT_DIP_S = 0.35;
 
 type TimeWindow = [number, number];
 
@@ -49,9 +49,9 @@ function throttleChannel(log: LoadedLog): Float64Array | null {
 }
 
 /**
- * Find sustained throttle runs without mistaking a gear-change or a quick
- * pedal for the end of the pass. When a log also contains a burnout, the
- * longest run wins (and a later run wins a tie).
+ * Find sustained wide-open-throttle runs without mistaking a gear-change for
+ * the end of the pass. When a log also contains a burnout, the longest run
+ * wins (and a later run wins a tie).
  */
 function throttleWindow(log: LoadedLog): TimeWindow | null {
   const session = log.parsed.sessions[log.activeSessionIndex];
@@ -66,8 +66,13 @@ function throttleWindow(log: LoadedLog): TimeWindow | null {
 
   // A few exporters log pedal position as 0..1 instead of 0..100.
   const scale = maxThrottle <= 1.5 ? 0.01 : 1;
-  const onThreshold = TPS_ON_PERCENT * scale;
-  const offThreshold = TPS_OFF_PERCENT * scale;
+  const peakPercent = maxThrottle / scale;
+  if (peakPercent < MIN_WOT_PEAK_PERCENT) return null;
+
+  // Treat the top of the observed range as WOT without requiring an exporter
+  // to land on exactly 100.0. Normally this is 95%; the small relative
+  // fallback accommodates channels calibrated a few percent below 100.
+  const wotThreshold = Math.min(WOT_PERCENT, peakPercent * 0.98) * scale;
   const candidates: TimeWindow[] = [];
   let startIndex: number | null = null;
   let liftIndex: number | null = null;
@@ -89,23 +94,25 @@ function throttleWindow(log: LoadedLog): TimeWindow | null {
     if (!Number.isFinite(value) || !Number.isFinite(time)) continue;
 
     if (startIndex === null) {
-      if (value >= onThreshold) startIndex = i;
+      if (value >= wotThreshold) startIndex = i;
       continue;
     }
 
-    if (value >= onThreshold) {
+    if (value >= wotThreshold) {
       liftIndex = null;
-    } else if (value <= offThreshold) {
+    } else {
       if (liftIndex === null) liftIndex = i;
       const liftTime = session.timestamps[liftIndex];
-      if (Number.isFinite(liftTime) && time - liftTime >= SUSTAINED_LIFT_S) {
+      if (Number.isFinite(liftTime) && time - liftTime >= MAX_SHIFT_DIP_S) {
         finishCandidate(liftIndex);
       }
     }
   }
 
   if (startIndex !== null) {
-    finishCandidate(Math.min(throttle.length, session.timestamps.length) - 1);
+    finishCandidate(
+      liftIndex ?? Math.min(throttle.length, session.timestamps.length) - 1,
+    );
   }
   if (candidates.length === 0) return null;
 
@@ -121,8 +128,10 @@ function throttleWindow(log: LoadedLog): TimeWindow | null {
 
 /**
  * Estimate the useful drag-pass window using only the log itself. An ECU race
- * timer is authoritative when present; otherwise the longest sustained
- * throttle run is a conservative fallback. Returns aligned viewer time.
+ * wide-open throttle is preferred because it matches the useful pull more
+ * closely than a timer that can keep counting through shutdown. The ECU race
+ * timer remains the fallback when the log has no clear WOT run. Returns
+ * aligned viewer time.
  */
 export function inferPassWindow(
   logs: LoadedLog[],
@@ -134,7 +143,7 @@ export function inferPassWindow(
   let end = -Infinity;
 
   for (const log of logs) {
-    const local = raceTimerWindow(log) ?? throttleWindow(log);
+    const local = throttleWindow(log) ?? raceTimerWindow(log);
     if (!local) continue;
     const offset = offsets.get(log.fileId) ?? 0;
     start = Math.min(start, local[0] + offset);

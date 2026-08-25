@@ -1,4 +1,5 @@
 import type { ChannelDef } from "./log-types";
+import { inferPassWindow } from "./pass-window";
 import type { LoadedLog } from "./viewer-types";
 
 const WIDTH = 1200;
@@ -141,6 +142,40 @@ export async function createSharedLogImage(log: LoadedLog): Promise<Blob> {
   const session = log.parsed.sessions[log.activeSessionIndex];
   if (!session) throw new Error("This log does not have a viewable session.");
 
+  const lastSampleIndex = session.timestamps.length - 1;
+  const fullRange: [number, number] = [
+    session.timestamps[0] ?? 0,
+    session.timestamps[lastSampleIndex] ?? 0,
+  ];
+  const passWindow = inferPassWindow(
+    [log],
+    new Map([[log.fileId, 0]]),
+    fullRange,
+  );
+  let firstSampleIndex = 0;
+  let finalSampleIndex = lastSampleIndex;
+  if (passWindow) {
+    while (
+      firstSampleIndex < lastSampleIndex &&
+      session.timestamps[firstSampleIndex] < passWindow[0]
+    ) {
+      firstSampleIndex++;
+    }
+    while (
+      finalSampleIndex > firstSampleIndex &&
+      session.timestamps[finalSampleIndex] > passWindow[1]
+    ) {
+      finalSampleIndex--;
+    }
+  }
+  const visibleSampleCount = Math.max(
+    0,
+    finalSampleIndex - firstSampleIndex + 1,
+  );
+  const visibleStart = session.timestamps[firstSampleIndex] ?? fullRange[0];
+  const visibleEnd = session.timestamps[finalSampleIndex] ?? fullRange[1];
+  const visibleDuration = Math.max(0, visibleEnd - visibleStart);
+
   const selectedChannels = getSharedLogPreviewChannels(log);
   const series: ShareSeries[] = selectedChannels.map((selected) => ({
     ...selected,
@@ -199,7 +234,11 @@ export async function createSharedLogImage(log: LoadedLog): Promise<Blob> {
     const bandHeight = chartHeight / series.length;
     for (let seriesIndex = 0; seriesIndex < series.length; seriesIndex++) {
       const item = series[seriesIndex];
-      const range = finiteRange(item.values);
+      const visibleValues = item.values.subarray(
+        firstSampleIndex,
+        finalSampleIndex + 1,
+      );
+      const range = finiteRange(visibleValues);
       if (!range) continue;
       const [min, max] = range;
       const span = max - min || 1;
@@ -223,14 +262,18 @@ export async function createSharedLogImage(log: LoadedLog): Promise<Blob> {
       const plotRight = chartX + chartWidth - 16;
       const plotTop = top + 10;
       const plotBottom = top + bandHeight - 10;
-      const pointCount = Math.min(item.values.length, 760);
-      const step = Math.max(1, Math.ceil(item.values.length / pointCount));
+      const pointCount = Math.min(visibleSampleCount, 760);
+      const step = Math.max(1, Math.ceil(visibleSampleCount / pointCount));
       let drawing = false;
       context.strokeStyle = item.color;
       context.lineWidth = 2.5;
       context.lineJoin = "round";
       context.beginPath();
-      for (let index = 0; index < item.values.length; index += step) {
+      for (
+        let index = firstSampleIndex;
+        index <= finalSampleIndex;
+        index += step
+      ) {
         const value = item.values[index];
         if (!Number.isFinite(value)) {
           drawing = false;
@@ -238,8 +281,9 @@ export async function createSharedLogImage(log: LoadedLog): Promise<Blob> {
         }
         const x =
           plotLeft +
-          ((plotRight - plotLeft) * index) /
-            Math.max(1, item.values.length - 1);
+          ((plotRight - plotLeft) *
+            ((session.timestamps[index] ?? visibleStart) - visibleStart)) /
+            Math.max(Number.EPSILON, visibleDuration);
         const y = plotBottom - ((plotBottom - plotTop) * (value - min)) / span;
         if (drawing) context.lineTo(x, y);
         else {
@@ -251,11 +295,10 @@ export async function createSharedLogImage(log: LoadedLog): Promise<Blob> {
     }
   }
 
-  const duration = session.timestamps[session.timestamps.length - 1] ?? 0;
   context.font = "500 16px Geist, system-ui, sans-serif";
   context.fillStyle = "#94a3b8";
   context.fillText(
-    `${log.parsed.format}  ·  ${session.rowCount.toLocaleString()} samples  ·  ${duration.toFixed(2)} seconds`,
+    `${log.parsed.format}  ·  ${visibleSampleCount.toLocaleString()} samples  ·  ${visibleDuration.toFixed(2)} seconds`,
     70,
     585,
   );
