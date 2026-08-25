@@ -218,6 +218,8 @@ export default defineSchema({
     vehicleDetails: v.optional(v.string()),
     description: v.optional(v.string()),
     fingerprint: v.optional(v.string()),
+    /** Public viewer opens for this share link; social-card crawlers do not run it. */
+    visitCount: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_storage", ["storageId"])

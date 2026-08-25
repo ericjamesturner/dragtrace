@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useQuery } from "convex/react";
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
 import { FileWarningIcon, Loader2Icon } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -16,8 +16,18 @@ export default function SharedLogPage({
   onHome: () => void;
 }) {
   const shared = useQuery(api.sharedLogs.get, { shareId });
+  const recordVisit = useMutation(api.sharedLogs.recordVisit);
+  const recordedVisit = useRef(false);
   const [log, setLog] = useState<LoadedLog | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!shared || recordedVisit.current) return;
+    recordedVisit.current = true;
+    void recordVisit({ shareId }).catch(() => {
+      // A counter failure must never stop someone from opening the log.
+    });
+  }, [recordVisit, shareId, shared]);
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -62,12 +72,13 @@ export default function SharedLogPage({
   }, [shareId, shared?.fileName, shared?.url]);
 
   if (log) {
+    const visitCount = shared?.visitCount ?? 0;
     return (
       <LogViewerReady
         key={shareId}
         publicMode
         autoFitPass
-        publicLabel="Shared log · layout saved locally"
+        publicLabel={`Shared log · ${visitCount.toLocaleString()} ${visitCount === 1 ? "visit" : "visits"} · layout saved locally`}
         publicDetails={{
           vehicleDetails: shared?.vehicleDetails,
           description: shared?.description,

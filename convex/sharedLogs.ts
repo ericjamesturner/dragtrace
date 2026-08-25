@@ -146,8 +146,22 @@ export const create = mutation({
       ...(vehicleDetails ? { vehicleDetails } : {}),
       ...(description ? { description } : {}),
       ...(fingerprint && fingerprint.length <= 100 ? { fingerprint } : {}),
+      visitCount: 0,
       createdAt: Date.now(),
     });
+  },
+});
+
+export const recordVisit = mutation({
+  args: { shareId: v.string() },
+  handler: async (ctx, args) => {
+    const id = ctx.db.normalizeId("sharedLogs", args.shareId);
+    if (!id) return null;
+    const item = await ctx.db.get(id);
+    if (!item) return null;
+    const visitCount = (item.visitCount ?? 0) + 1;
+    await ctx.db.patch(id, { visitCount });
+    return visitCount;
   },
 });
 
@@ -170,6 +184,7 @@ export const get = query({
       createdAt: item.createdAt,
       vehicleDetails: item.vehicleDetails,
       description: item.description,
+      visitCount: item.visitCount ?? 0,
       url,
       ogImageUrl,
     };
