@@ -151,6 +151,7 @@ interface ReadyProps {
     vehicleDetails?: string;
     description?: string;
   };
+  autoFitPass?: boolean;
   onBack?: () => void;
   goToFiles?: (vehicleId: Id<"vehicles">, eventId: Id<"events">) => void;
   goToViewer?: (
@@ -174,6 +175,7 @@ export function LogViewerReady({
   onSharePublicLog,
   publicLabel,
   publicDetails,
+  autoFitPass = false,
   onBack,
   goToFiles,
   goToViewer,
@@ -606,6 +608,7 @@ export function LogViewerReady({
             syncKey={sync.key}
           offsets={alignment.offsets}
           globalRange={alignment.globalRange}
+          autoFitPass={autoFitPass}
           activeTraceId={activeTraceId}
           hiddenLogIds={config.hiddenLogIds ?? []}
           mirroredLogIds={config.mirroredLogIds ?? []}

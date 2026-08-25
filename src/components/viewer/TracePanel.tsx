@@ -13,6 +13,7 @@ import { SuspensionPanel, SHOCK_CHANNEL_NAMES } from "./SuspensionPanel";
 import { OverviewBar } from "./OverviewBar";
 import { PlusIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
+import { inferPassWindow } from "@/lib/pass-window";
 
 // Arrow-key nudge for a parked marker line. Fine ≈ one sample at 100Hz.
 const MARKER_STEP_FINE = 0.01;
@@ -32,6 +33,7 @@ interface Props {
   syncKey: string;
   offsets: Map<Id<"files">, number>;
   globalRange: [number, number];
+  autoFitPass?: boolean;
   activeTraceId: string | null;
   hiddenLogIds: string[];
   mirroredLogIds: string[];
@@ -112,6 +114,7 @@ export function TracePanel({
   syncKey,
   offsets,
   globalRange,
+  autoFitPass = false,
   activeTraceId,
   hiddenLogIds,
   mirroredLogIds,
@@ -176,7 +179,14 @@ export function TracePanel({
   onRemoveHeatmap,
   onUpdateHeatmap,
 }: Props) {
-  const [zoomRange, setZoomRange] = useState<[number, number] | null>(persistedZoom ?? null);
+  const inferredPassWindow = useMemo(
+    () => inferPassWindow(logs, offsets, globalRange),
+    [logs, offsets, globalRange],
+  );
+  const autoFitZoom = autoFitPass ? inferredPassWindow : null;
+  const [zoomRange, setZoomRange] = useState<[number, number] | null>(
+    autoFitZoom ?? persistedZoom ?? null,
+  );
   const [selection, setSelection] = useState<[number, number] | null>(persistedSelection ?? null);
   const [dragPreview, setDragPreview] = useState<[number, number] | null>(null);
   const [cursorTime, setCursorTime] = useState<number | null>(null);
@@ -364,6 +374,7 @@ export function TracePanel({
   // change re-arrives 400-500ms later as the same numbers and settles.
   const selectionKey = persistedSelection ? `${persistedSelection[0]}:${persistedSelection[1]}` : "";
   const zoomKey = persistedZoom ? `${persistedZoom[0]}:${persistedZoom[1]}` : "";
+  const autoFitKey = autoFitZoom ? `${autoFitZoom[0]}:${autoFitZoom[1]}` : "";
 
   // --- Persist the settled drag-selection (Convex-backed) ---
   const onPersistSelectionRef = useRef(onPersistSelection);
@@ -380,13 +391,26 @@ export function TracePanel({
   // time rather than needing to be hunted down again. ---
   const onPersistZoomRef = useRef(onPersistZoom);
   onPersistZoomRef.current = onPersistZoom;
-  const lastZoomSentRef = useRef<[number, number] | null>(persistedZoom ?? null);
+  const lastZoomSentRef = useRef<[number, number] | null>(
+    autoFitZoom ?? persistedZoom ?? null,
+  );
+  const appliedAutoFitRef = useRef("");
 
   useEffect(() => {
+    if (autoFitKey) {
+      if (appliedAutoFitRef.current !== autoFitKey) {
+        appliedAutoFitRef.current = autoFitKey;
+        setZoomRange(autoFitZoom);
+        // An automatic, file-specific fit should not replace the reusable guest
+        // workspace's zoom. A manual zoom afterwards still persists normally.
+        lastZoomSentRef.current = autoFitZoom;
+      }
+      return;
+    }
     setZoomRange(persistedZoom ?? null);
     lastZoomSentRef.current = persistedZoom ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zoomKey]);
+  }, [zoomKey, autoFitKey]);
 
   // Wheel-zoom fires continuously, so only the settled value is written —
   // otherwise every frame would round-trip through the reducer and the save.
@@ -678,6 +702,7 @@ export function TracePanel({
                 syncKey={syncKey}
                 zoomRange={zoomRange}
                 globalRange={globalRange}
+                inferredPassWindow={inferredPassWindow}
                 offsets={offsets}
                 hiddenLogIds={hiddenLogIds}
                 mirroredLogIds={mirroredLogIds}

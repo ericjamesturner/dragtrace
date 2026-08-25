@@ -66,6 +66,7 @@ export default function SharedLogPage({
       <LogViewerReady
         key={shareId}
         publicMode
+        autoFitPass
         publicLabel="Shared log · layout saved locally"
         publicDetails={{
           vehicleDetails: shared?.vehicleDetails,

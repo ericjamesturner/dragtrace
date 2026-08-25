@@ -392,6 +392,7 @@ interface Props {
   syncKey: string;
   zoomRange: [number, number] | null;
   globalRange: [number, number];
+  inferredPassWindow?: [number, number] | null;
   offsets: Map<Id<"files">, number>;
   hiddenLogIds: string[];
   mirroredLogIds: string[];
@@ -487,6 +488,7 @@ export function TraceContainer({
   syncKey,
   zoomRange,
   globalRange,
+  inferredPassWindow,
   offsets,
   hiddenLogIds,
   selection,
@@ -1021,8 +1023,8 @@ export function TraceContainer({
   const legendInHeader = compactLegend && !avgRange && trace.channels.length > 0;
 
   // The pass itself — the launch through the finish line, taken from the
-  // timeslip band, with half a second either side. The stage and the shutdown
-  // are most of a log and none of the run.
+  // timeslip band when available and otherwise inferred from the log. The
+  // stage and the shutdown are most of a log and none of the run.
   const passWindow = useMemo<[number, number] | null>(() => {
     let start = Infinity;
     let end = -Infinity;
@@ -1032,14 +1034,16 @@ export function TraceContainer({
         if (region.end > end) end = region.end;
       }
     }
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      return inferredPassWindow ?? null;
+    }
     // Clamped to the log: a run that ends near the end of the recording would
     // otherwise buy two seconds of blank chart.
     return [
       Math.max(globalRange[0], start - PASS_WINDOW_PAD_S),
       Math.min(globalRange[1], end + PASS_WINDOW_PAD_S),
     ];
-  }, [timeslipZones, globalRange]);
+  }, [timeslipZones, globalRange, inferredPassWindow]);
 
   // For the header strip, collapse the per-log rows into one entry per channel
   // NAME, with that channel's value from each log side by side. Comparing two
