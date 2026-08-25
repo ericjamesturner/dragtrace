@@ -35,7 +35,8 @@ export default async function handler(request, response) {
   }
 
   const fileName = shared?.fileName || "Shared datalog";
-  const title = `${fileName} — DragTrace`;
+  const fileCount = shared?.fileCount || 1;
+  const title = `${fileName}${fileCount > 1 ? ` + ${fileCount - 1} more` : ""} — DragTrace`;
   const publicContext = [shared?.vehicleDetails, shared?.description]
     .filter(Boolean)
     .join(" — ")
@@ -43,7 +44,9 @@ export default async function handler(request, response) {
   const description = publicContext
     ? publicContext.slice(0, 180)
     : shared
-      ? "Open this interactive racing datalog in DragTrace."
+      ? fileCount > 1
+        ? `Open this ${fileCount}-log racing comparison in DragTrace.`
+        : "Open this interactive racing datalog in DragTrace."
       : "Open a shared racing datalog in DragTrace.";
   const imageUrl = `${origin}/api/share-og?id=${encodeURIComponent(shareId)}`;
 
@@ -75,7 +78,7 @@ export default async function handler(request, response) {
     <script>window.location.replace(${JSON.stringify(viewerUrl)});</script>
   </head>
   <body style="margin:0;background:#08090a;color:#fff;font:16px system-ui;display:grid;min-height:100vh;place-items:center">
-    <p>Opening <a style="color:#fff" href="${escapeHtml(viewerUrl)}">${escapeHtml(fileName)}</a> in DragTrace…</p>
+    <p>Opening <a style="color:#fff" href="${escapeHtml(viewerUrl)}">${escapeHtml(fileCount > 1 ? `${fileCount}-log comparison` : fileName)}</a> in DragTrace…</p>
   </body>
 </html>`);
 }

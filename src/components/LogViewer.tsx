@@ -151,6 +151,9 @@ interface ReadyProps {
     vehicleDetails?: string;
     description?: string;
   };
+  initialPublicConfig?: ViewerConfig | null;
+  publicWorkspaceStorageKey?: string;
+  onPublicConfigChange?: (config: ViewerConfig) => void;
   autoFitPass?: boolean;
   onBack?: () => void;
   goToFiles?: (vehicleId: Id<"vehicles">, eventId: Id<"events">) => void;
@@ -175,6 +178,9 @@ export function LogViewerReady({
   onSharePublicLog,
   publicLabel,
   publicDetails,
+  initialPublicConfig,
+  publicWorkspaceStorageKey,
+  onPublicConfigChange,
   autoFitPass = false,
   onBack,
   goToFiles,
@@ -218,6 +224,13 @@ export function LogViewerReady({
   // in this browser and remapped by channel name onto the next logs they open.
   const [config, dispatch] = useReducer(reducerWithMirror, null, () => {
     if (publicMode) {
+      const linkWorkspace = publicWorkspaceStorageKey
+        ? loadGuestWorkspace(logs, undefined, publicWorkspaceStorageKey)
+        : null;
+      if (linkWorkspace) return linkWorkspace;
+      if (initialPublicConfig) {
+        return remapConfigToFiles(initialPublicConfig, logs);
+      }
       return loadGuestWorkspace(logs) ?? buildDefaultConfig(logs);
     }
     if (!publicMode && workspace) {
@@ -296,9 +309,15 @@ export function LogViewerReady({
   // Save to localStorage (immediate). Account viewers keep the existing
   // event-local fallback; guests get one reusable browser-local workspace.
   useEffect(() => {
-    if (publicMode) saveGuestWorkspace(config);
+    if (publicMode) {
+      saveGuestWorkspace(config, undefined, publicWorkspaceStorageKey);
+    }
     else if (eventId) saveConfigLocal(eventId, config);
-  }, [publicMode, eventId, config]);
+  }, [publicMode, publicWorkspaceStorageKey, eventId, config]);
+
+  useEffect(() => {
+    if (publicMode) onPublicConfigChange?.(config);
+  }, [publicMode, onPublicConfigChange, config]);
 
   // Save to DB (debounced, flushed on unmount)
   const saveWorkspace = useMutation(api.workspaces.save);

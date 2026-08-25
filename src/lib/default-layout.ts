@@ -8,8 +8,8 @@ import { defaultViewerConfig } from "./viewer-types";
  * Someone who doesn't tune for a living shouldn't have to build a chart before
  * the app tells them anything — and someone who does shouldn't have to rebuild
  * the same two traces every time they add a car. So a fresh workspace starts
- * with engine speed against throttle, and the wideband readings against what
- * the ECU was asking for.
+ * with engine and driveshaft speed against throttle, and the wideband readings
+ * against what the ECU was asking for.
  */
 
 interface ChannelSpec {
@@ -34,6 +34,11 @@ const EXCLUDE = /derivative|filter|error|target error|raw|diagnostic|\bmin\b|\bm
 const DEFAULT_TRACES: ChannelSpec[][] = [
   [
     { names: ["RPM", "Engine Speed"], quantity: "engine-speed", pattern: /^(rpm|engine speed)$/i, limit: 1 },
+    {
+      names: ["Driveshaft RPM", "Driveshaft Speed", "Drive Shaft RPM", "Drive Shaft Speed"],
+      pattern: /^drive\s*shaft (rpm|speed)$/i,
+      limit: 1,
+    },
     { names: ["Throttle Position"], pattern: /^throttle position$/i, limit: 1 },
   ],
   [

@@ -210,6 +210,18 @@ export default defineSchema({
     fileName: v.string(),
     fileSize: v.number(),
     contentType: v.string(),
+    /** All logs in a comparison share. Older links use the fields above. */
+    files: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          fileName: v.string(),
+          fileSize: v.number(),
+          contentType: v.string(),
+          fingerprint: v.optional(v.string()),
+        }),
+      ),
+    ),
     visitorKey: v.string(),
     /** Private contact details supplied when the public link was created. */
     sharerName: v.optional(v.string()),
@@ -218,6 +230,8 @@ export default defineSchema({
     vehicleDetails: v.optional(v.string()),
     description: v.optional(v.string()),
     fingerprint: v.optional(v.string()),
+    /** Selected logs' viewer workspace, intentionally published with the link. */
+    viewerWorkspace: v.optional(v.string()),
     /** Public viewer opens for this share link; social-card crawlers do not run it. */
     visitCount: v.optional(v.number()),
     createdAt: v.number(),

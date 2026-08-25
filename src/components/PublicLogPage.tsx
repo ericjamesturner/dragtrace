@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useMutation } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { loadDatalog } from "@/lib/load-haltech-log";
 import {
   isSupportedLogFile,
   SUPPORTED_LOG_ACCEPT,
 } from "@/lib/datalog-parser";
-import type { LoadedLog } from "@/lib/viewer-types";
+import type { LoadedLog, ViewerConfig } from "@/lib/viewer-types";
+import { captureSharedViewerWorkspace } from "@/lib/shared-viewer-layout";
+import { getBrowserVisitorId } from "@/lib/visitor-id";
 import { Button } from "@/components/ui/button";
 import { FileUpIcon, Loader2Icon, LockKeyholeIcon } from "lucide-react";
 import { LogViewerReady } from "./LogViewer";
@@ -34,6 +38,50 @@ export default function PublicLogPage({
   const [shareOpen, setShareOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const sourceFilesRef = useRef(new Map<string, File>());
+  const viewerConfigRef = useRef<ViewerConfig | null>(null);
+  const logsRef = useRef(logs);
+  const activeShareRef = useRef<{ shareId: string; logFileIds: string[] } | null>(null);
+  const shareUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const updateViewerWorkspace = useMutation(api.sharedLogs.updateViewerWorkspace);
+
+  useEffect(() => {
+    logsRef.current = logs;
+  }, [logs]);
+
+  const getViewerConfig = useCallback(() => viewerConfigRef.current, []);
+  const handleViewerConfigChange = useCallback((config: ViewerConfig) => {
+    viewerConfigRef.current = config;
+    const activeShare = activeShareRef.current;
+    if (!activeShare) return;
+    const sharedLogs = logsRef.current.filter((log) =>
+      activeShare.logFileIds.includes(log.fileId),
+    );
+    const viewerWorkspace = captureSharedViewerWorkspace(config, sharedLogs);
+    if (!viewerWorkspace) return;
+    if (shareUpdateTimerRef.current) clearTimeout(shareUpdateTimerRef.current);
+    shareUpdateTimerRef.current = setTimeout(() => {
+      void updateViewerWorkspace({
+        shareId: activeShare.shareId,
+        browserVisitorId: getBrowserVisitorId(),
+        viewerWorkspace,
+      }).catch(() => {
+        // The original share is still usable if a background update fails.
+      });
+    }, 750);
+  }, [updateViewerWorkspace]);
+  const handleShareCreated = useCallback(
+    (shareId: string, logFileIds: string[]) => {
+      activeShareRef.current = { shareId, logFileIds };
+    },
+    [],
+  );
+
+  useEffect(
+    () => () => {
+      if (shareUpdateTimerRef.current) clearTimeout(shareUpdateTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -127,6 +175,8 @@ export default function PublicLogPage({
           onOpenChange={setShareOpen}
           logs={logs}
           getSourceFile={(fileId) => sourceFilesRef.current.get(fileId)}
+          getViewerConfig={getViewerConfig}
+          onShareCreated={handleShareCreated}
           copyAndOpen={directShare}
         />
         <LogViewerReady
@@ -137,12 +187,19 @@ export default function PublicLogPage({
           errors={errors}
           workspace={null}
           publicLoading={loadingFiles.length > 0}
+          onPublicConfigChange={handleViewerConfigChange}
           onAddPublicFiles={() => inputRef.current?.click()}
           onSharePublicLog={() => setShareOpen(true)}
           onBack={() => {
             setLogs([]);
             setErrors([]);
             sourceFilesRef.current.clear();
+            viewerConfigRef.current = null;
+            activeShareRef.current = null;
+            if (shareUpdateTimerRef.current) {
+              clearTimeout(shareUpdateTimerRef.current);
+              shareUpdateTimerRef.current = null;
+            }
           }}
         />
       </>
@@ -183,7 +240,7 @@ export default function PublicLogPage({
         </h1>
         <p className="mt-5 max-w-2xl text-lg leading-relaxed text-white/70">
           {directShare
-            ? "Choose a supported ECU log, preview it, and create a public link anyone can open without an account. DragTrace will copy the link before opening the shared viewer."
+            ? "Choose one or more supported ECU logs, preview them, and create a public comparison link anyone can open without an account. DragTrace will copy the link before opening the shared viewer."
             : "Pick one or more supported ECU logs and DragTrace will open them with a useful starter layout. Opening stays in this browser; a file is uploaded only if you explicitly create a public share link."}
         </p>
 

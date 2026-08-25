@@ -1,11 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { FileWarningIcon, Loader2Icon } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { loadDatalog } from "@/lib/load-haltech-log";
-import type { LoadedLog } from "@/lib/viewer-types";
+import { isSharedLogOwner } from "@/lib/shared-log-owner";
+import {
+  captureSharedViewerWorkspace,
+  configFromSharedViewerWorkspace,
+  sharedViewerWorkspaceKey,
+} from "@/lib/shared-viewer-layout";
+import { getBrowserVisitorId } from "@/lib/visitor-id";
+import type { LoadedLog, ViewerConfig } from "@/lib/viewer-types";
 import { LogViewerReady } from "./LogViewer";
 
 export default function SharedLogPage({
@@ -17,9 +24,50 @@ export default function SharedLogPage({
 }) {
   const shared = useQuery(api.sharedLogs.get, { shareId });
   const recordVisit = useMutation(api.sharedLogs.recordVisit);
+  const updateViewerWorkspace = useMutation(api.sharedLogs.updateViewerWorkspace);
   const recordedVisit = useRef(false);
-  const [log, setLog] = useState<LoadedLog | null>(null);
+  const [logs, setLogs] = useState<LoadedLog[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const logsRef = useRef(logs);
+  const sharedFilesRef = useRef(shared?.files);
+  const sharedFilesKey =
+    shared?.files.map((file) => `${file.fileName}:${file.url}`).join("|") ?? "";
+  const ownerRef = useRef(isSharedLogOwner(shareId));
+  const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    logsRef.current = logs;
+  }, [logs]);
+
+  useEffect(() => {
+    sharedFilesRef.current = shared?.files;
+  }, [shared?.files]);
+
+  const handleViewerConfigChange = useCallback(
+    (config: ViewerConfig) => {
+      if (!ownerRef.current) return;
+      const viewerWorkspace = captureSharedViewerWorkspace(config, logsRef.current);
+      if (!viewerWorkspace) return;
+      if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
+      updateTimerRef.current = setTimeout(() => {
+        void updateViewerWorkspace({
+          shareId,
+          browserVisitorId: getBrowserVisitorId(),
+          viewerWorkspace,
+        }).catch(() => {
+          // Local edits still persist even if the public snapshot cannot update.
+        });
+      }, 750);
+    },
+    [shareId, updateViewerWorkspace],
+  );
+
+  useEffect(
+    () => () => {
+      if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!shared || recordedVisit.current) return;
@@ -32,30 +80,33 @@ export default function SharedLogPage({
   useEffect(() => {
     const previousTitle = document.title;
     document.title = shared?.fileName
-      ? `${shared.fileName} — DragTrace`
+      ? `${shared.fileName}${(shared.fileCount ?? 1) > 1 ? ` + ${(shared.fileCount ?? 1) - 1} more` : ""} — DragTrace`
       : "Shared datalog — DragTrace";
     return () => {
       document.title = previousTitle;
     };
-  }, [shared?.fileName]);
+  }, [shared?.fileName, shared?.fileCount]);
 
   useEffect(() => {
-    if (!shared?.url) return;
+    const files = sharedFilesRef.current;
+    if (!files?.length) return;
     let cancelled = false;
-    void fetch(shared.url)
-      .then((response) => {
-        if (!response.ok) throw new Error("The shared log could not be downloaded.");
-        return response.arrayBuffer();
-      })
-      .then((bytes) =>
-        loadDatalog({
-          bytes,
-          fileId: `shared-${shareId}` as Id<"files">,
-          fileName: shared.fileName,
-        }),
-      )
+    void Promise.all(
+      files.map(async (file, index) => {
+        const response = await fetch(file.url);
+        if (!response.ok) {
+          throw new Error("A shared log could not be downloaded.");
+        }
+        return await loadDatalog({
+          bytes: await response.arrayBuffer(),
+          fileId: `shared-${shareId}-${index}` as Id<"files">,
+          fileName: file.fileName,
+          index,
+        });
+      }),
+    )
       .then((loaded) => {
-        if (!cancelled) setLog(loaded);
+        if (!cancelled) setLogs(loaded);
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
@@ -69,22 +120,30 @@ export default function SharedLogPage({
     return () => {
       cancelled = true;
     };
-  }, [shareId, shared?.fileName, shared?.url]);
+  }, [shareId, sharedFilesKey]);
 
-  if (log) {
+  if (logs.length > 0) {
     const visitCount = shared?.visitCount ?? 0;
+    const initialPublicConfig = configFromSharedViewerWorkspace(
+      shared?.viewerWorkspace,
+      logs,
+    );
+    const comparison = logs.length > 1;
     return (
       <LogViewerReady
         key={shareId}
         publicMode
         autoFitPass
-        publicLabel={`Shared log · ${visitCount.toLocaleString()} ${visitCount === 1 ? "visit" : "visits"} · layout saved locally`}
+        initialPublicConfig={initialPublicConfig}
+        publicWorkspaceStorageKey={sharedViewerWorkspaceKey(shareId)}
+        onPublicConfigChange={handleViewerConfigChange}
+        publicLabel={`Shared ${comparison ? `${logs.length}-log comparison` : "log"} · ${visitCount.toLocaleString()} ${visitCount === 1 ? "visit" : "visits"} · layout saved locally`}
         publicDetails={{
           vehicleDetails: shared?.vehicleDetails,
           description: shared?.description,
         }}
-        fileIds={[log.fileId]}
-        logs={[log]}
+        fileIds={logs.map((log) => log.fileId)}
+        logs={logs}
         errors={[]}
         workspace={null}
         onBack={onHome}

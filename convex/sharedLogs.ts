@@ -5,7 +5,15 @@ import { requireAdmin } from "./authz";
 const MAX_FILE_BYTES = 125 * 1024 * 1024;
 const MAX_SHARES_PER_HOUR = 5;
 const MAX_SHARES_PER_DAY = 20;
+const MAX_SHARED_FILES = 10;
+const MAX_VIEWER_WORKSPACE_LENGTH = 200_000;
 const SUPPORTED_EXTENSION = /\.(?:csv|log|txt|dl)$/i;
+const sharedFileInputValidator = v.object({
+  storageId: v.id("_storage"),
+  fileName: v.string(),
+  contentType: v.string(),
+  fingerprint: v.optional(v.string()),
+});
 
 function visitorKey(value: string): string {
   if (!/^[a-zA-Z0-9_-]{16,100}$/.test(value)) {
@@ -48,6 +56,43 @@ function cleanOptionalPublicText(
   return cleaned;
 }
 
+function cleanViewerWorkspace(value: string | undefined): string | undefined {
+  const workspace = value?.trim();
+  if (!workspace) return undefined;
+  if (workspace.length > MAX_VIEWER_WORKSPACE_LENGTH) {
+    throw new Error("The shared viewer workspace is too large.");
+  }
+  try {
+    const parsed: unknown = JSON.parse(workspace);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error();
+    }
+    const pages = (parsed as { pages?: unknown }).pages;
+    if (!Array.isArray(pages) || pages.length === 0 || pages.length > 20) {
+      throw new Error();
+    }
+    for (const page of pages) {
+      if (!page || typeof page !== "object" || Array.isArray(page)) throw new Error();
+      const item = page as {
+        traces?: unknown;
+        scatters?: unknown;
+        heatmaps?: unknown;
+      };
+      if (!Array.isArray(item.traces) || item.traces.length > 40) throw new Error();
+      if (Array.isArray(item.scatters) && item.scatters.length > 20) throw new Error();
+      if (Array.isArray(item.heatmaps) && item.heatmaps.length > 20) throw new Error();
+      for (const trace of item.traces) {
+        if (!trace || typeof trace !== "object" || Array.isArray(trace)) throw new Error();
+        const channels = (trace as { channels?: unknown }).channels;
+        if (!Array.isArray(channels) || channels.length > 64) throw new Error();
+      }
+    }
+    return JSON.stringify(parsed);
+  } catch {
+    throw new Error("The shared viewer workspace is invalid.");
+  }
+}
+
 async function enforceShareRateLimit(
   ctx: MutationCtx,
   key: string,
@@ -86,10 +131,11 @@ export const create = mutation({
     vehicleDetails: v.optional(v.string()),
     description: v.optional(v.string()),
     fingerprint: v.optional(v.string()),
+    files: v.optional(v.array(sharedFileInputValidator)),
+    viewerWorkspace: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const key = visitorKey(args.browserVisitorId);
-    const fileName = cleanFileName(args.fileName);
     const sharerName = cleanSharerName(args.sharerName);
     const sharerEmail = cleanSharerEmail(args.sharerEmail);
     const vehicleDetails = cleanOptionalPublicText(
@@ -102,9 +148,31 @@ export const create = mutation({
       "Description or question",
       2_000,
     );
-    const metadata = await ctx.db.system.get(args.storageId);
+    const viewerWorkspace = cleanViewerWorkspace(args.viewerWorkspace);
+    const requestedFiles = args.files?.length
+      ? args.files
+      : [
+          {
+            storageId: args.storageId,
+            fileName: args.fileName,
+            contentType: args.contentType,
+            fingerprint: args.fingerprint,
+          },
+        ];
+    if (requestedFiles.length > MAX_SHARED_FILES) {
+      throw new Error(`A share can include up to ${MAX_SHARED_FILES} logs.`);
+    }
+    if (requestedFiles[0]?.storageId !== args.storageId) {
+      throw new Error("The primary shared log does not match the file list.");
+    }
+    if (new Set(requestedFiles.map((file) => file.storageId)).size !== requestedFiles.length) {
+      throw new Error("The same log cannot be included twice.");
+    }
+
+    const fileMetadata = await Promise.all(
+      requestedFiles.map((file) => ctx.db.system.get(file.storageId)),
+    );
     const imageMetadata = await ctx.db.system.get(args.ogImageStorageId);
-    if (!metadata) throw new Error("The uploaded log could not be found.");
     if (
       !imageMetadata ||
       imageMetadata.size <= 0 ||
@@ -114,17 +182,31 @@ export const create = mutation({
       throw new Error("The share preview image could not be created.");
     }
 
-    const invalid =
-      !SUPPORTED_EXTENSION.test(fileName) ||
-      metadata.size <= 0 ||
-      metadata.size > MAX_FILE_BYTES;
-    if (invalid) {
-      await ctx.storage.delete(args.storageId);
+    const files = requestedFiles.map((file, index) => {
+      const metadata = fileMetadata[index];
+      if (!metadata) throw new Error("An uploaded log could not be found.");
+      const fileName = cleanFileName(file.fileName);
       if (!SUPPORTED_EXTENSION.test(fileName)) {
         throw new Error("That log-file extension cannot be shared.");
       }
-      throw new Error("Shared logs must be 125 MB or smaller.");
-    }
+      if (metadata.size <= 0 || metadata.size > MAX_FILE_BYTES) {
+        throw new Error("Shared logs must be 125 MB or smaller.");
+      }
+      const fingerprint = file.fingerprint?.trim();
+      return {
+        storageId: file.storageId,
+        fileName,
+        fileSize: metadata.size,
+        contentType: (
+          metadata.contentType ||
+          file.contentType ||
+          "application/octet-stream"
+        ).slice(0, 120),
+        ...(fingerprint && fingerprint.length <= 100 ? { fingerprint } : {}),
+      };
+    });
+    const primary = files[0];
+    if (!primary) throw new Error("Choose at least one log to share.");
 
     const duplicate = await ctx.db
       .query("sharedLogs")
@@ -133,19 +215,20 @@ export const create = mutation({
     if (duplicate) throw new Error("This upload already has a share link.");
     await enforceShareRateLimit(ctx, key);
 
-    const fingerprint = args.fingerprint?.trim();
     return await ctx.db.insert("sharedLogs", {
-      storageId: args.storageId,
+      storageId: primary.storageId,
       ogImageStorageId: args.ogImageStorageId,
-      fileName,
-      fileSize: metadata.size,
-      contentType: (metadata.contentType || args.contentType || "application/octet-stream").slice(0, 120),
+      fileName: primary.fileName,
+      fileSize: primary.fileSize,
+      contentType: primary.contentType,
+      files,
       visitorKey: key,
       sharerName,
       sharerEmail,
       ...(vehicleDetails ? { vehicleDetails } : {}),
       ...(description ? { description } : {}),
-      ...(fingerprint && fingerprint.length <= 100 ? { fingerprint } : {}),
+      ...(primary.fingerprint ? { fingerprint: primary.fingerprint } : {}),
+      ...(viewerWorkspace ? { viewerWorkspace } : {}),
       visitCount: 0,
       createdAt: Date.now(),
     });
@@ -165,6 +248,27 @@ export const recordVisit = mutation({
   },
 });
 
+export const updateViewerWorkspace = mutation({
+  args: {
+    shareId: v.string(),
+    browserVisitorId: v.string(),
+    viewerWorkspace: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const id = ctx.db.normalizeId("sharedLogs", args.shareId);
+    if (!id) throw new Error("The shared log could not be found.");
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("The shared log could not be found.");
+    if (item.visitorKey !== visitorKey(args.browserVisitorId)) {
+      throw new Error("Only the original sharer can update this workspace.");
+    }
+    const viewerWorkspace = cleanViewerWorkspace(args.viewerWorkspace);
+    if (!viewerWorkspace) throw new Error("The shared viewer workspace is empty.");
+    await ctx.db.patch(id, { viewerWorkspace });
+    return null;
+  },
+});
+
 export const get = query({
   args: { shareId: v.string() },
   handler: async (ctx, args) => {
@@ -172,20 +276,42 @@ export const get = query({
     if (!id) return null;
     const item = await ctx.db.get(id);
     if (!item) return null;
-    const [url, ogImageUrl] = await Promise.all([
-      ctx.storage.getUrl(item.storageId),
+    const storedFiles = item.files?.length
+      ? item.files
+      : [
+          {
+            storageId: item.storageId,
+            fileName: item.fileName,
+            fileSize: item.fileSize,
+            contentType: item.contentType,
+            fingerprint: item.fingerprint,
+          },
+        ];
+    const [fileUrls, ogImageUrl] = await Promise.all([
+      Promise.all(storedFiles.map((file) => ctx.storage.getUrl(file.storageId))),
       ctx.storage.getUrl(item.ogImageStorageId),
     ]);
-    if (!url) return null;
+    if (fileUrls.some((url) => !url)) return null;
+    const files = storedFiles.map((file, index) => ({
+      fileName: file.fileName,
+      fileSize: file.fileSize,
+      contentType: file.contentType,
+      url: fileUrls[index]!,
+    }));
+    const primary = files[0];
+    if (!primary) return null;
     return {
-      fileName: item.fileName,
-      fileSize: item.fileSize,
-      contentType: item.contentType,
+      fileName: primary.fileName,
+      fileSize: primary.fileSize,
+      contentType: primary.contentType,
+      files,
+      fileCount: files.length,
       createdAt: item.createdAt,
       vehicleDetails: item.vehicleDetails,
       description: item.description,
+      viewerWorkspace: item.viewerWorkspace,
       visitCount: item.visitCount ?? 0,
-      url,
+      url: primary.url,
       ogImageUrl,
     };
   },

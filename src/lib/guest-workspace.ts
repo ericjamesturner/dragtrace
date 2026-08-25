@@ -21,10 +21,11 @@ function getBrowserStorage(): Storage | null {
 export function loadGuestWorkspace(
   logs: LoadedLog[],
   storage: Storage | null = getBrowserStorage(),
+  storageKey = GUEST_WORKSPACE_STORAGE_KEY,
 ): ViewerConfig | null {
   if (!storage) return null;
   try {
-    const raw = storage.getItem(GUEST_WORKSPACE_STORAGE_KEY);
+    const raw = storage.getItem(storageKey);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -42,10 +43,11 @@ export function loadGuestWorkspace(
 export function saveGuestWorkspace(
   config: ViewerConfig,
   storage: Storage | null = getBrowserStorage(),
+  storageKey = GUEST_WORKSPACE_STORAGE_KEY,
 ): void {
   if (!storage) return;
   try {
-    storage.setItem(GUEST_WORKSPACE_STORAGE_KEY, JSON.stringify(config));
+    storage.setItem(storageKey, JSON.stringify(config));
   } catch {
     // Browsers can disable or fill localStorage. The viewer still works for
     // the current visit when persistence is unavailable.

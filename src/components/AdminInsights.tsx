@@ -138,6 +138,11 @@ export function AdminInsights() {
                       >
                         {item.fileName}
                       </a>
+                      {(item.files?.length ?? 1) > 1 && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {item.files!.length}-log comparison
+                        </p>
+                      )}
                       {item.vehicleDetails && (
                         <p className="mt-1 text-xs text-muted-foreground">
                           {item.vehicleDetails}

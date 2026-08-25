@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "convex/react";
 import {
   CheckIcon,
@@ -16,12 +16,16 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { errText } from "@/lib/error-text";
 import { createSharedLogImage } from "@/lib/share-image";
+import { markSharedLogOwned } from "@/lib/shared-log-owner";
+import { captureSharedViewerWorkspace } from "@/lib/shared-viewer-layout";
 import { getBrowserVisitorId } from "@/lib/visitor-id";
-import type { LoadedLog } from "@/lib/viewer-types";
+import type { LoadedLog, ViewerConfig } from "@/lib/viewer-types";
 
 const MAX_FILE_BYTES = 125 * 1024 * 1024;
+const MAX_SHARED_FILES = 10;
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -34,17 +38,23 @@ export function ShareLogDialog({
   onOpenChange,
   logs,
   getSourceFile,
+  getViewerConfig,
+  onShareCreated,
   copyAndOpen = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   logs: LoadedLog[];
   getSourceFile: (fileId: Id<"files">) => File | undefined;
+  getViewerConfig: () => ViewerConfig | null;
+  onShareCreated?: (shareId: string, logFileIds: string[]) => void;
   copyAndOpen?: boolean;
 }) {
   const generateUploadUrl = useMutation(api.sharedLogs.generateUploadUrl);
   const createShare = useMutation(api.sharedLogs.create);
-  const [selectedId, setSelectedId] = useState<string>("");
+  const [selectedIds, setSelectedIds] = useState<string[]>(() =>
+    logs.slice(0, MAX_SHARED_FILES).map((log) => log.fileId),
+  );
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("");
   const [shareUrl, setShareUrl] = useState("");
@@ -55,18 +65,16 @@ export function ShareLogDialog({
   const [vehicleDetails, setVehicleDetails] = useState("");
   const [description, setDescription] = useState("");
 
-  const selectedLog = useMemo(
-    () => logs.find((log) => log.fileId === selectedId) ?? logs[0],
-    [logs, selectedId],
+  const selectedLogs = useMemo(
+    () => logs.filter((log) => selectedIds.includes(log.fileId)),
+    [logs, selectedIds],
   );
-  const sourceFile = selectedLog
-    ? getSourceFile(selectedLog.fileId)
-    : undefined;
+  const primaryLog = selectedLogs[0];
+  const primaryFile = primaryLog ? getSourceFile(primaryLog.fileId) : undefined;
 
-  const handleOpenChange = (next: boolean) => {
-    onOpenChange(next);
-    if (next) {
-      setSelectedId(logs[0]?.fileId ?? "");
+  useEffect(() => {
+    if (open) {
+      setSelectedIds(logs.slice(0, MAX_SHARED_FILES).map((log) => log.fileId));
       setBusy(false);
       setStage("");
       setShareUrl("");
@@ -77,7 +85,9 @@ export function ShareLogDialog({
       setVehicleDetails("");
       setDescription("");
     }
-  };
+  }, [open, logs]);
+
+  const handleOpenChange = (next: boolean) => onOpenChange(next);
 
   const upload = async (body: Blob, contentType: string) => {
     const uploadUrl = await generateUploadUrl({
@@ -93,11 +103,15 @@ export function ShareLogDialog({
   };
 
   const publish = async () => {
-    if (!selectedLog || !sourceFile) {
-      setError("Choose a log from this browser session.");
+    const selected = selectedLogs.flatMap((log) => {
+      const file = getSourceFile(log.fileId);
+      return file ? [{ log, file }] : [];
+    });
+    if (!primaryLog || !primaryFile || selected.length !== selectedLogs.length) {
+      setError("Choose at least one available log from this browser session.");
       return;
     }
-    if (sourceFile.size > MAX_FILE_BYTES) {
+    if (selected.some(({ file }) => file.size > MAX_FILE_BYTES)) {
       setError("Shared logs must be 125 MB or smaller.");
       return;
     }
@@ -116,28 +130,53 @@ export function ShareLogDialog({
     setError(null);
     try {
       setStage("Drawing the social preview…");
-      const preview = await createSharedLogImage(selectedLog);
-      setStage("Uploading the log…");
-      const [{ storageId }, { storageId: ogImageStorageId }] =
-        await Promise.all([
-          upload(sourceFile, sourceFile.type || "application/octet-stream"),
-          upload(preview, "image/png"),
-        ]);
+      const preview = await createSharedLogImage(primaryLog);
+      setStage(
+        selected.length === 1
+          ? "Uploading the log…"
+          : `Uploading ${selected.length} compared logs…`,
+      );
+      const [uploadedFiles, { storageId: ogImageStorageId }] = await Promise.all([
+        Promise.all(
+          selected.map(({ file }) =>
+            upload(file, file.type || "application/octet-stream"),
+          ),
+        ),
+        upload(preview, "image/png"),
+      ]);
+      const files = selected.map(({ log, file }, index) => ({
+        storageId: uploadedFiles[index].storageId,
+        fileName: file.name,
+        contentType: file.type || "application/octet-stream",
+        fingerprint: log.contentFingerprint,
+      }));
+      const primary = files[0];
+      if (!primary) throw new Error("Choose at least one log to share.");
       setStage("Creating the public link…");
       const shareId = await createShare({
-        storageId,
+        storageId: primary.storageId,
         ogImageStorageId,
-        fileName: sourceFile.name,
-        contentType: sourceFile.type || "application/octet-stream",
+        fileName: primary.fileName,
+        contentType: primary.contentType,
         browserVisitorId: getBrowserVisitorId(),
         sharerName: name,
         sharerEmail: email,
         vehicleDetails: vehicleDetails.trim() || undefined,
         description: description.trim() || undefined,
-        fingerprint: selectedLog.contentFingerprint,
+        fingerprint: primary.fingerprint,
+        files,
+        viewerWorkspace: captureSharedViewerWorkspace(
+          getViewerConfig(),
+          selectedLogs,
+        ),
       });
       const url = `${window.location.origin}/share/${shareId}`;
       const viewerUrl = `/open?share=${encodeURIComponent(shareId)}`;
+      markSharedLogOwned(shareId);
+      onShareCreated?.(
+        shareId,
+        selectedLogs.map((log) => log.fileId as string),
+      );
       setShareUrl(url);
       setStage("");
       // Keep the already-open viewer in place, but promote the address bar to
@@ -180,10 +219,10 @@ export function ShareLogDialog({
           <div className="flex size-10 items-center justify-center rounded-xl bg-red-500/15 text-red-500 ring-1 ring-red-500/20">
             <Share2Icon className="size-5" />
           </div>
-          <DialogTitle className="mt-4 text-xl">Share a datalog</DialogTitle>
+          <DialogTitle className="mt-4 text-xl">Share datalogs</DialogTitle>
           <DialogDescription className="mt-2 leading-relaxed">
-            Create a public DragTrace link that opens the interactive log. Its
-            social preview plots RPM, TPS, MAP, and wideband when available.
+            Create one public DragTrace link for a log or a comparison. It opens
+            with your current pages, channels, overlays, and chart setup.
           </DialogDescription>
         </div>
 
@@ -234,40 +273,96 @@ export function ShareLogDialog({
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
               {copyAndOpen
-                ? "The button copies this link, then opens the public log in this browser. Anyone with the link can view it without an account."
-                : "Anyone with this link can open the log. The link does not expose your account or the other files in this browser."}
+                ? "The button copies this link, then opens the public viewer in this browser. Anyone with the link can view it without an account."
+                : "Anyone with this link can open the shared log or comparison. The link does not expose your account or unselected files in this browser."}
+            </p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Because this browser created the link, later channel and layout
+              changes you make to it will update the public starting view.
             </p>
           </div>
         ) : (
           <div className="space-y-5 px-6 py-5">
-            {logs.length > 1 && (
-              <label className="block space-y-2">
-                <span className="text-sm font-medium">Log to share</span>
-                <select
-                  value={selectedLog?.fileId ?? ""}
-                  disabled={busy}
-                  onChange={(event) => setSelectedId(event.target.value)}
-                  className="h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/50"
-                >
-                  {logs.map((log) => (
-                    <option key={log.fileId} value={log.fileId}>
-                      {log.fileName}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-
-            {selectedLog && sourceFile && (
+            {logs.length > 1 ? (
+              <div className="overflow-hidden rounded-xl border">
+                <div className="flex items-center justify-between border-b bg-muted/25 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium">Logs to include</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {selectedLogs.length} of {logs.length} selected
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      setSelectedIds(
+                        selectedLogs.length === Math.min(logs.length, MAX_SHARED_FILES)
+                          ? []
+                          : logs.slice(0, MAX_SHARED_FILES).map((log) => log.fileId),
+                      )
+                    }
+                    className="text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  >
+                    {selectedLogs.length === Math.min(logs.length, MAX_SHARED_FILES)
+                      ? "Clear"
+                      : "Select all"}
+                  </button>
+                </div>
+                <div className="max-h-52 divide-y overflow-y-auto">
+                  {logs.map((log) => {
+                    const file = getSourceFile(log.fileId);
+                    const checked = selectedIds.includes(log.fileId);
+                    return (
+                      <div
+                        key={log.fileId}
+                        className="flex items-center gap-3 px-4 py-3"
+                      >
+                        <Switch
+                          appearance="form"
+                          checked={checked}
+                          title={`Include ${log.fileName}`}
+                          onChange={(next) => {
+                            setError(null);
+                            setSelectedIds((current) => {
+                              if (!next) {
+                                return current.filter((id) => id !== log.fileId);
+                              }
+                              if (current.includes(log.fileId)) return current;
+                              if (current.length >= MAX_SHARED_FILES) {
+                                setError(
+                                  `A share can include up to ${MAX_SHARED_FILES} logs.`,
+                                );
+                                return current;
+                              }
+                              return [...current, log.fileId];
+                            });
+                          }}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium" title={log.fileName}>
+                            {log.fileName}
+                          </p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {log.parsed.format}
+                            {file ? ` · ${formatBytes(file.size)}` : " · unavailable"}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : primaryLog && primaryFile ? (
               <div className="rounded-xl border bg-muted/35 p-4">
-                <p className="truncate font-medium" title={selectedLog.fileName}>
-                  {selectedLog.fileName}
+                <p className="truncate font-medium" title={primaryLog.fileName}>
+                  {primaryLog.fileName}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {selectedLog.parsed.format} · {formatBytes(sourceFile.size)}
+                  {primaryLog.parsed.format} · {formatBytes(primaryFile.size)}
                 </p>
               </div>
-            )}
+            ) : null}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block space-y-2">
@@ -337,8 +432,8 @@ export function ShareLogDialog({
 
             <div className="rounded-xl border border-amber-500/20 bg-amber-500/7 p-4 text-xs leading-relaxed text-muted-foreground">
               Opening logs here is still private. Publishing is the step that
-              uploads this selected log and its preview image so anyone with the
-              link can view it.
+              uploads only the selected logs and a preview image so anyone with
+              the link can view the same comparison.
             </div>
 
             {stage && (
@@ -364,7 +459,8 @@ export function ShareLogDialog({
               <Button
                 disabled={
                   busy ||
-                  !sourceFile ||
+                  selectedLogs.length === 0 ||
+                  selectedLogs.some((log) => !getSourceFile(log.fileId)) ||
                   !sharerName.trim() ||
                   !sharerEmail.trim()
                 }
