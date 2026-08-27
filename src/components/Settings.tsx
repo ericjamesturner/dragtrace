@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { errText } from "@/lib/error-text";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { useAuthActions } from "@convex-dev/auth/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useNav } from "./Layout";
 import { UnitsPanel } from "./UnitsPanel";
 import { Button } from "@/components/ui/button";
 import { AdminInsights } from "./AdminInsights";
+import { useTrackedSignOut } from "@/hooks/useActivityLog";
 
 /**
  * Settings, rendered inside the normal app shell like any other page — the
@@ -19,7 +19,7 @@ export type SettingsSection = "profile" | "billing" | "units" | "insights";
 
 export function Settings({ section }: { section: SettingsSection }) {
   const { openSettings, goToChannelManager } = useNav();
-  const { signOut } = useAuthActions();
+  const signOut = useTrackedSignOut();
   const adminState = useQuery(api.admin.state);
   const isAdmin = adminState?.isAdmin ?? false;
 
@@ -59,7 +59,7 @@ export function Settings({ section }: { section: SettingsSection }) {
             <>
               <p className={groupLabel}>Admin</p>
               <button className={item(section === "insights")} onClick={() => openSettings("insights")}>
-                Usage &amp; feedback
+                Usage &amp; activity
               </button>
               <button className={item(false)} onClick={goToChannelManager}>
                 Channels

@@ -295,6 +295,43 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
 
+  // Authenticated, account-level audit trail. IP address and user-agent are
+  // attached by Convex from the request itself; the client cannot supply or
+  // override them. Raw rows are pruned after 90 days by activity mutations.
+  activityEvents: defineTable({
+    actorUserId: v.id("users"),
+    /** The customer account being viewed when an admin is impersonating. */
+    effectiveUserId: v.id("users"),
+    action: v.union(
+      v.literal("signed_in"),
+      v.literal("account_session_started"),
+      v.literal("signed_out"),
+      v.literal("vehicle_opened"),
+      v.literal("event_opened"),
+      v.literal("log_opened"),
+      v.literal("log_comparison_changed"),
+      v.literal("settings_opened"),
+    ),
+    occurredAt: v.number(),
+    /** Random per-tab id used only to group a person's app activity. */
+    sessionKey: v.optional(v.string()),
+    route: v.optional(v.string()),
+    vehicleId: v.optional(v.id("vehicles")),
+    eventId: v.optional(v.id("events")),
+    fileIds: v.optional(v.array(v.id("files"))),
+    section: v.optional(v.string()),
+    ipAddress: v.optional(v.string()),
+    userAgent: v.optional(v.string()),
+    requestId: v.string(),
+    timezone: v.optional(v.string()),
+    locale: v.optional(v.string()),
+    viewport: v.optional(v.string()),
+  })
+    .index("by_time", ["occurredAt"])
+    .index("by_user_time", ["actorUserId", "occurredAt"])
+    .index("by_session_time", ["sessionKey", "occurredAt"])
+    .index("by_request", ["requestId"]),
+
   /**
    * One row per user once they reach checkout. Stripe is the source of truth —
    * this is a local cache kept current by the webhook, so a query never has to

@@ -10,6 +10,7 @@ import { useScatterSuggestions } from "@/hooks/useScatterSuggestions";
 import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 import { useMathChannels } from "@/hooks/useMathChannels";
 import { useViewerAnalytics } from "@/hooks/useViewerAnalytics";
+import { useActivityLog } from "@/hooks/useActivityLog";
 import { buildDefaultConfig } from "@/lib/default-layout";
 import {
   loadGuestWorkspace,
@@ -187,10 +188,22 @@ export function LogViewerReady({
   goToViewer,
 }: ReadyProps) {
   const sync = useViewerSync();
+  const recordActivity = useActivityLog();
   useViewerAnalytics(
     publicMode ? "guest" : "account",
     logs.map((log) => log.contentFingerprint),
   );
+
+  const activityFileKey = fileIds.join(",");
+  useEffect(() => {
+    if (publicMode || !vehicleId || !eventId || fileIds.length === 0) return;
+    void recordActivity(
+      fileIds.length > 1 ? "log_comparison_changed" : "log_opened",
+      { vehicleId, eventId, fileIds },
+    );
+    // The joined key is the meaningful change; fileIds is stable between edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publicMode, vehicleId, eventId, activityFileKey, recordActivity]);
 
   // A vehicle has one layout and it saves itself, so this is only ever the id
   // the auto-save writes back to.

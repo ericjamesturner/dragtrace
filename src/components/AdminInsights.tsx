@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { CheckIcon, DownloadIcon, RotateCcwIcon, StarIcon } from "lucide-react";
 import { api } from "../../convex/_generated/api";
@@ -21,19 +22,80 @@ function dateTime(value: number) {
   });
 }
 
+const activityLabels: Record<string, string> = {
+  signed_in: "Signed in",
+  account_session_started: "Opened the app",
+  signed_out: "Signed out",
+  vehicle_opened: "Opened a vehicle",
+  event_opened: "Opened an event",
+  log_opened: "Opened a log",
+  log_comparison_changed: "Changed a comparison",
+  settings_opened: "Opened settings",
+};
+
+function browserLabel(userAgent?: string) {
+  if (!userAgent) return "Browser unavailable";
+  const browser = userAgent.includes("Edg/")
+    ? "Edge"
+    : userAgent.includes("Firefox/")
+      ? "Firefox"
+      : userAgent.includes("Chrome/")
+        ? "Chrome"
+        : userAgent.includes("Safari/")
+          ? "Safari"
+          : "Browser";
+  const device = /iPhone|iPad/.test(userAgent)
+    ? "iOS"
+    : userAgent.includes("Android")
+      ? "Android"
+      : userAgent.includes("Mac OS X")
+        ? "Mac"
+        : userAgent.includes("Windows")
+          ? "Windows"
+          : userAgent.includes("Linux")
+            ? "Linux"
+            : "device";
+  return `${browser} on ${device}`;
+}
+
 export function AdminInsights() {
+  const [activitySearch, setActivitySearch] = useState("");
   const summary = useQuery(api.analytics.summary);
   const feedback = useQuery(api.feedback.list);
   const sharedLogs = useQuery(api.sharedLogs.listForAdmin);
+  const activity = useQuery(api.activity.listRecent, { limit: 200 });
   const markReviewed = useMutation(api.feedback.markReviewed);
 
   if (
     summary === undefined ||
     feedback === undefined ||
-    sharedLogs === undefined
+    sharedLogs === undefined ||
+    activity === undefined
   ) {
-    return <p className="text-sm text-muted-foreground">Loading usage and feedback…</p>;
+    return <p className="text-sm text-muted-foreground">Loading usage and activity…</p>;
   }
+
+  const search = activitySearch.trim().toLowerCase();
+  const visibleActivity = activity.filter((item) =>
+    !search ||
+    [
+      item.actorName,
+      item.actorEmail,
+      item.effectiveUserName,
+      item.effectiveUserEmail,
+      item.action,
+      activityLabels[item.action],
+      item.vehicleName,
+      item.eventName,
+      ...item.fileNames,
+      item.ipAddress,
+      item.userAgent,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(search),
+  );
 
   const cards = [
     ["Unique people", summary.uniqueVisitors.toLocaleString()],
@@ -47,6 +109,89 @@ export function AdminInsights() {
   return (
     <div className="space-y-10">
       <section>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h3 className="text-base font-semibold">Account activity</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Who is using DragTrace and what they open. Raw activity, IP, and
+              browser details are kept for 90 days.
+            </p>
+          </div>
+          <input
+            type="search"
+            value={activitySearch}
+            onChange={(event) => setActivitySearch(event.target.value)}
+            placeholder="Find a person, IP, or log…"
+            className="h-9 w-full rounded-md border bg-background px-3 text-sm sm:w-64"
+          />
+        </div>
+
+        {visibleActivity.length === 0 ? (
+          <div className="mt-4 rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+            {activity.length === 0 ? "No account activity recorded yet." : "No matching activity."}
+          </div>
+        ) : (
+          <div className="mt-4 overflow-x-auto rounded-lg border">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">When</th>
+                  <th className="px-3 py-2 font-medium">Person</th>
+                  <th className="px-3 py-2 font-medium">Activity</th>
+                  <th className="px-3 py-2 font-medium">IP &amp; browser</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {visibleActivity.map((item) => {
+                  const target = item.fileNames.length > 0
+                    ? item.fileNames.join(", ")
+                    : item.eventName || item.vehicleName || item.section;
+                  const impersonating = item.actorUserId !== item.effectiveUserId;
+                  return (
+                    <tr key={item._id} className="align-top">
+                      <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
+                        {dateTime(item.occurredAt)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <p>{item.actorName || item.actorEmail || "Unknown account"}</p>
+                        {item.actorName && item.actorEmail && (
+                          <p className="text-xs text-muted-foreground">{item.actorEmail}</p>
+                        )}
+                        {impersonating && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400">
+                            Viewing as {item.effectiveUserName || item.effectiveUserEmail || "customer"}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <p>{activityLabels[item.action] || item.action}</p>
+                        {target && (
+                          <p className="max-w-72 truncate text-xs text-muted-foreground" title={target}>
+                            {target}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <p className="font-mono text-xs">{item.ipAddress || "Unavailable"}</p>
+                        <p className="text-xs text-muted-foreground" title={item.userAgent}>
+                          {browserLabel(item.userAgent)}
+                          {item.timezone ? ` · ${item.timezone}` : ""}
+                        </p>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="mt-2 text-xs text-muted-foreground">
+          Showing the newest {activity.length} events. “Signed in” is recorded by the authentication server;
+          other entries reflect authenticated app navigation.
+        </p>
+      </section>
+
+      <section className="border-t pt-8">
         <div>
           <h3 className="text-base font-semibold">Viewer usage</h3>
           <p className="mt-1 text-sm text-muted-foreground">

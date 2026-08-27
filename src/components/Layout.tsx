@@ -1,5 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, lazy, Suspense } from "react";
-import { useAuthActions } from "@convex-dev/auth/react";
+import { createContext, useContext, useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import type { Id } from "../../convex/_generated/dataModel";
 import { VehicleSidebar } from "./VehicleSidebar";
 import { Home } from "./Home";
@@ -20,6 +19,7 @@ import { Tip } from "@/components/ui/tooltip";
 import { AdminMenu } from "./AdminControls";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
+import { useActivityLog, useActivitySession, useTrackedSignOut } from "@/hooks/useActivityLog";
 
 const LogViewer = lazy(() => import("./LogViewer"));
 
@@ -117,9 +117,12 @@ function navToUrl(nav: NavState): string {
 }
 
 export function Layout() {
-  const { signOut } = useAuthActions();
+  const signOut = useTrackedSignOut();
+  const recordActivity = useActivityLog();
+  useActivitySession();
   const [nav, setNav] = useState<NavState>(parseNavFromUrl);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const lastTrackedNav = useRef("");
   // Sync nav state to URL
   useEffect(() => {
     const url = navToUrl(nav);
@@ -134,6 +137,24 @@ export function Layout() {
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
+
+  useEffect(() => {
+    const key = JSON.stringify(nav);
+    if (lastTrackedNav.current === key) return;
+    lastTrackedNav.current = key;
+    if (nav.view === "events") {
+      void recordActivity("vehicle_opened", { vehicleId: nav.vehicleId });
+    } else if (nav.view === "files") {
+      void recordActivity("event_opened", {
+        vehicleId: nav.vehicleId,
+        eventId: nav.eventId,
+      });
+    } else if (nav.view === "settings") {
+      void recordActivity("settings_opened", { section: nav.section });
+    } else if (nav.view === "channel-manager") {
+      void recordActivity("settings_opened", { section: "channels" });
+    }
+  }, [nav, recordActivity]);
 
   const goToVehicles = useCallback(() => setNav({ view: "vehicles" }), []);
   const goToEvents = useCallback(

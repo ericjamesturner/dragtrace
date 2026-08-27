@@ -12,7 +12,7 @@ import { SiteFooter, SiteHeader } from "./SiteChrome";
  * worth a real review once there are paying customers.
  */
 
-const UPDATED = "23 August 2026";
+const UPDATED = "26 August 2026";
 
 /** Fill these in before launch. */
 const CO = {
@@ -157,6 +157,15 @@ function Privacy() {
           log's filename or contents for analytics.
         </LI>
         <LI>
+          <strong className="text-white">Signed-in account activity.</strong>{" "}
+          When you use an account, we record sign-ins and the vehicles, events,
+          logs, comparisons and settings pages you open, along with the time,
+          IP address, browser/device information and page route. We use this to
+          understand whether the product is being used, provide support and
+          investigate security or reliability problems. This does not apply to
+          datalogs opened only in the guest viewer.
+        </LI>
+        <LI>
           <strong className="text-white">Feedback.</strong> The message and star
           rating you send, an email address if you provide one, the viewer page
           it came from, any files you choose to attach, and—only if you opt
@@ -237,7 +246,8 @@ function Privacy() {
         DragTrace staff can open your account to help you with a support problem
         or to investigate a fault. We do it to fix things, not to browse. If this
         bothers you, tell us and we will explain exactly what was accessed and
-        when.
+        when. The signed-in activity timeline is available only to DragTrace
+        administrators.
       </P>
 
       <H2>How long we keep it</H2>
@@ -246,7 +256,8 @@ function Privacy() {
         car, a race or a pass removes its files and timeslips from our storage.
         Publicly shared guest logs stay available at their link; email {CO.email}
         if you want one removed. Backups may hold copies for a short period
-        afterwards.
+        afterwards. Raw signed-in activity records, including IP address and
+        browser/device information, are kept for 90 days and then deleted.
       </P>
 
       <H2>Getting your data out, or deleting it</H2>
