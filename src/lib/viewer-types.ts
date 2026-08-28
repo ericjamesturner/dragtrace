@@ -6,6 +6,7 @@ import {
   type UnitSystem,
   type UnitOverrides,
 } from "./units";
+import type { ChannelSignalFilter } from "./signal-filter";
 
 export const CHART_COLORS = [
   "#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#8b5cf6",
@@ -79,6 +80,8 @@ export interface ChannelOnTrace {
   dash?: number[];
   axisMin?: number;
   axisMax?: number;
+  /** Optional trace-local display filtering; the parsed log remains raw. */
+  signalFilter?: ChannelSignalFilter;
   // Color-by-channel: color this line by a 3rd channel's value (gradient).
   colorBy?: string;
   colorByMin?: number;
@@ -264,6 +267,7 @@ export type ViewerAction =
   | { type: "setChannelWidth"; traceId: string; logFileId: Id<"files">; channelName: string; width: number }
   | { type: "setChannelDash"; traceId: string; logFileId: Id<"files">; channelName: string; dash: number[] | undefined }
   | { type: "setChannelAxisRange"; traceId: string; logFileId: Id<"files">; channelName: string; axisMin?: number; axisMax?: number }
+  | { type: "setChannelSignalFilter"; traceId: string; logFileId: Id<"files">; channelName: string; signalFilter?: ChannelSignalFilter }
   | { type: "toggleLogVisibility"; logFileId: Id<"files"> }
   | { type: "setMirroredLogs"; logFileIds: string[] }
   | { type: "loadConfig"; config: ViewerConfig }
@@ -592,6 +596,14 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         pages: mapChannelInPages(
           state.pages, action.traceId, action.logFileId, action.channelName,
           (c) => ({ ...c, axisMin: action.axisMin, axisMax: action.axisMax }),
+        ),
+      };
+    case "setChannelSignalFilter":
+      return {
+        ...state,
+        pages: mapChannelInPages(
+          state.pages, action.traceId, action.logFileId, action.channelName,
+          (c) => ({ ...c, signalFilter: action.signalFilter }),
         ),
       };
     case "toggleLogVisibility": {

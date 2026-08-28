@@ -16,6 +16,7 @@ import {
 import { readableTextColor } from "@/lib/colors";
 import { formatSlipTime, distanceAtTime, findSlipAtLaunch } from "@/lib/timeslip-zones";
 import { formatValue, formatDuration } from "@/lib/cursor-utils";
+import { applyChannelSignalFilter } from "@/lib/signal-filter";
 
 const GRID_POINTS = 2000;
 const Y_AXIS_SIZE = 45;
@@ -339,7 +340,7 @@ export function TraceChart({
   // Build a stable key for dependencies
   const groupsKey = logGroups
     .map((g) =>
-      `${g.log.fileId}:${g.timeOffset}:${g.channels.map((c) => `${c.channelName}:${channelUnitOverrides?.[c.channelName] ?? ""}:${c.color ?? ""}:${c.opacity ?? ""}:${c.width ?? ""}:${(c.dash ?? []).join(".")}:${c.axisMin ?? ""}:${c.axisMax ?? ""}:${c.colorBy ?? ""}:${c.colorBy ? channelUnitOverrides?.[c.colorBy] ?? "" : ""}:${c.colorByMin ?? ""}:${c.colorByMax ?? ""}:${c.colorByLowColor ?? ""}:${c.colorByHighColor ?? ""}`).join(",")}`
+      `${g.log.fileId}:${g.timeOffset}:${g.channels.map((c) => `${c.channelName}:${channelUnitOverrides?.[c.channelName] ?? ""}:${c.color ?? ""}:${c.opacity ?? ""}:${c.width ?? ""}:${(c.dash ?? []).join(".")}:${c.axisMin ?? ""}:${c.axisMax ?? ""}:${c.signalFilter?.kind ?? ""}:${c.signalFilter?.timeConstantMs ?? ""}:${c.colorBy ?? ""}:${c.colorBy ? channelUnitOverrides?.[c.colorBy] ?? "" : ""}:${c.colorByMin ?? ""}:${c.colorByMax ?? ""}:${c.colorByLowColor ?? ""}:${c.colorByHighColor ?? ""}`).join(",")}`
     )
     .join("|");
 
@@ -402,8 +403,13 @@ export function TraceChart({
 
       for (let chIdx = 0; chIdx < group.channels.length; chIdx++) {
         const ch = group.channels[chIdx];
-        const data = session.channels.get(ch.channelName);
-        if (!data) continue;
+        const rawData = session.channels.get(ch.channelName);
+        if (!rawData) continue;
+        const data = applyChannelSignalFilter(
+          session.timestamps,
+          rawData,
+          ch.signalFilter,
+        );
 
         const resampled = resampleToGrid(session.timestamps, data, group.timeOffset, gridTs);
         seriesData.push(resampled);

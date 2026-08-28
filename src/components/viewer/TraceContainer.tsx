@@ -25,6 +25,7 @@ import { api } from "../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { applyChannelSignalFilter, type ChannelSignalFilter } from "@/lib/signal-filter";
 
 /** Which channel's style dialog is open. Opened by clicking its row in the
  *  channels panel, or its line on the chart. */
@@ -65,6 +66,14 @@ const STYLE_OPTIONS: { label: string; dash: number[] | undefined }[] = [
   { label: "Solid", dash: undefined },
   { label: "Dashed", dash: [7, 5] },
   { label: "Dotted", dash: [2, 4] },
+];
+
+const SMOOTHING_OPTIONS: { label: string; timeConstantMs?: number }[] = [
+  { label: "Raw" },
+  { label: "25 ms", timeConstantMs: 25 },
+  { label: "50 ms", timeConstantMs: 50 },
+  { label: "100 ms", timeConstantMs: 100 },
+  { label: "250 ms", timeConstantMs: 250 },
 ];
 
 // Race line defaults to dashed when unset, so "Solid" is an explicit [] (empty)
@@ -451,6 +460,7 @@ interface Props {
   onSetChannelWidth: (logFileId: Id<"files">, channelName: string, width: number) => void;
   onSetChannelDash: (logFileId: Id<"files">, channelName: string, dash: number[] | undefined) => void;
   onSetChannelAxisRange: (logFileId: Id<"files">, channelName: string, axisMin?: number, axisMax?: number) => void;
+  onSetChannelSignalFilter: (logFileId: Id<"files">, channelName: string, signalFilter?: ChannelSignalFilter) => void;
   onSetChannelColorBy: (logFileId: Id<"files">, channelName: string, colorBy?: string, colorByMin?: number, colorByMax?: number, colorByLowColor?: string, colorByHighColor?: string) => void;
   isActive: boolean;
   onSetActive: () => void;
@@ -535,6 +545,7 @@ export function TraceContainer({
   onSetChannelWidth,
   onSetChannelDash,
   onSetChannelAxisRange,
+  onSetChannelSignalFilter,
   onSetChannelColorBy,
   isActive,
   onSetActive,
@@ -843,8 +854,13 @@ export function TraceContainer({
       if (!session) continue;
       const logChannels = channelsByLog.get(log.fileId) ?? [];
       for (const ch of logChannels) {
-        const data = session.channels.get(ch.channelName);
-        if (!data) continue;
+        const rawData = session.channels.get(ch.channelName);
+        if (!rawData) continue;
+        const data = applyChannelSignalFilter(
+          session.timestamps,
+          rawData,
+          ch.signalFilter,
+        );
         const existing = ranges.get(ch.channelName);
         let min = existing?.[0] ?? Infinity;
         let max = existing?.[1] ?? -Infinity;
@@ -953,7 +969,13 @@ export function TraceContainer({
         const visible = !!log && !isLogHidden;
         if (cursorTime !== null && log && visible) {
           const offset = offsets.get(log.fileId) ?? 0;
-          const val = findValueAtTime(log, ch.channelName, cursorTime, offset);
+          const val = findValueAtTime(
+            log,
+            ch.channelName,
+            cursorTime,
+            offset,
+            ch.signalFilter,
+          );
           if (val !== null) {
             const mu = def?.quantitySlug ?? "";
             if (def?.enumValues) {
@@ -979,7 +1001,13 @@ export function TraceContainer({
         }
         if (avgRange && log && visible && !def?.enumValues) {
           const offset = offsets.get(log.fileId) ?? 0;
-          const stats = computeRangeStats(log, ch.channelName, avgRange, offset);
+          const stats = computeRangeStats(
+            log,
+            ch.channelName,
+            avgRange,
+            offset,
+            ch.signalFilter,
+          );
           if (stats !== null) {
             const mu = def?.quantitySlug ?? "";
             const channelUnitKey = channelUnitOverrides?.[ch.channelName];
@@ -1960,7 +1988,10 @@ export function TraceContainer({
         // Data extent of the channel, for quick axis actions
         const cmLog = logs.find((l) => l.fileId === contextMenu.logFileId);
         const cmSession = cmLog?.parsed.sessions[cmLog.activeSessionIndex];
-        const cmData = cmSession?.channels.get(contextMenu.channelName);
+        const cmRawData = cmSession?.channels.get(contextMenu.channelName);
+        const cmData = cmSession && cmRawData
+          ? applyChannelSignalFilter(cmSession.timestamps, cmRawData, cmCh?.signalFilter)
+          : undefined;
         let cmExtent: { min: number; max: number } | null = null;
         if (cmData) {
           let min = Infinity;
@@ -1975,6 +2006,8 @@ export function TraceContainer({
         }
         const hasManualAxis = cmCh?.axisMin !== undefined || cmCh?.axisMax !== undefined;
         const cmDef = cmLog?.parsed.channelDefs.find((d) => d.name === contextMenu.channelName);
+        const cmSmoothingMs = cmCh?.signalFilter?.timeConstantMs;
+        const canSmooth = !cmDef?.enumValues;
         const cmMu = cmDef?.quantitySlug ?? "";
         const cmChannelUnitKey = channelUnitOverrides?.[contextMenu.channelName];
         const cmToDisplay = (v: number) =>
@@ -2020,7 +2053,7 @@ export function TraceContainer({
         );
         return (
           <Dialog open onOpenChange={(o) => { if (!o) { setContextMenu(null); setCustomColorOpen(false); } }}>
-            <DialogContent className="sm:max-w-3xl">
+            <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2 pr-8">
                   <span className="truncate">{cmDisplayName || contextMenu.channelName}</span>
@@ -2243,6 +2276,56 @@ export function TraceContainer({
 
                 {/* ── Scale, then identity ────────────────────────────────── */}
                 <div className="space-y-4">
+                  <div className={cardCls}>
+                    <div className="mb-2 flex items-baseline justify-between gap-2">
+                      <span className={cardTitle}>Signal</span>
+                      <span className="text-[11px] text-muted-foreground/70">
+                        {cmSmoothingMs ? `${cmSmoothingMs} ms` : "Raw"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {SMOOTHING_OPTIONS.map((option) => {
+                        const active = cmSmoothingMs === option.timeConstantMs;
+                        const disabled = !canSmooth && option.timeConstantMs !== undefined;
+                        return (
+                          <button
+                            key={option.label}
+                            type="button"
+                            disabled={disabled}
+                            title={
+                              disabled
+                                ? "State channels cannot be smoothed"
+                                : option.timeConstantMs
+                                  ? `Apply ${option.timeConstantMs} ms centered smoothing`
+                                  : "Show the raw logged signal"
+                            }
+                            onClick={() =>
+                              onSetChannelSignalFilter(
+                                contextMenu.logFileId,
+                                contextMenu.channelName,
+                                option.timeConstantMs
+                                  ? { kind: "zeroPhaseLowPass", timeConstantMs: option.timeConstantMs }
+                                  : undefined,
+                              )
+                            }
+                            className={`${segBtn} px-1 text-[11px] ${
+                              active
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-border hover:bg-muted"
+                            } disabled:cursor-not-allowed disabled:opacity-35`}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-2 text-[11px] leading-snug text-muted-foreground/80">
+                      {canSmooth
+                        ? "Centered low-pass smoothing reduces noise without shifting events in time. It affects this trace's line, readout, statistics, and automatic axis only; the source log stays raw."
+                        : "State channels are shown exactly as logged and cannot be smoothed."}
+                    </p>
+                  </div>
+
                   <div className={cardCls}>
                     <div className="mb-2 flex items-baseline justify-between gap-2">
                       <span className={cardTitle}>Axis{cmDisplayUnit ? ` (${cmDisplayUnit})` : ""}</span>

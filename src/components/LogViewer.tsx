@@ -674,6 +674,9 @@ export function LogViewerReady({
           onSetChannelAxisRange={(traceId, logFileId, channelName, axisMin, axisMax) =>
             dispatch({ type: "setChannelAxisRange", traceId, logFileId, channelName, axisMin, axisMax })
           }
+          onSetChannelSignalFilter={(traceId, logFileId, channelName, signalFilter) =>
+            dispatch({ type: "setChannelSignalFilter", traceId, logFileId, channelName, signalFilter })
+          }
           onSetChannelColorBy={(traceId, logFileId, channelName, colorBy, colorByMin, colorByMax, colorByLowColor, colorByHighColor) =>
             dispatch({ type: "setChannelColorBy", traceId, logFileId, channelName, colorBy, colorByMin, colorByMax, colorByLowColor, colorByHighColor })
           }

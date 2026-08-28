@@ -1,16 +1,19 @@
 import type { LoadedLog } from "./viewer-types";
+import { applyChannelSignalFilter, type ChannelSignalFilter } from "./signal-filter";
 
 export function findValueAtTime(
   log: LoadedLog,
   channelName: string,
   time: number,
   offset: number,
+  signalFilter?: ChannelSignalFilter,
 ): number | null {
   const session = log.parsed.sessions[log.activeSessionIndex];
   if (!session) return null;
-  const data = session.channels.get(channelName);
-  if (!data) return null;
+  const rawData = session.channels.get(channelName);
+  if (!rawData) return null;
   const ts = session.timestamps;
+  const data = applyChannelSignalFilter(ts, rawData, signalFilter);
   const targetTime = time - offset;
 
   if (targetTime < ts[0] || targetTime > ts[ts.length - 1]) return null;
@@ -48,12 +51,14 @@ export function computeRangeStats(
   channelName: string,
   range: [number, number],
   offset: number,
+  signalFilter?: ChannelSignalFilter,
 ): { avg: number; min: number; max: number; minTime: number; maxTime: number } | null {
   const session = log.parsed.sessions[log.activeSessionIndex];
   if (!session) return null;
-  const data = session.channels.get(channelName);
-  if (!data) return null;
+  const rawData = session.channels.get(channelName);
+  if (!rawData) return null;
   const ts = session.timestamps;
+  const data = applyChannelSignalFilter(ts, rawData, signalFilter);
   if (ts.length === 0) return null;
   const lo = Math.min(range[0], range[1]) - offset;
   const hi = Math.max(range[0], range[1]) - offset;

@@ -14,6 +14,7 @@ import { OverviewBar } from "./OverviewBar";
 import { PlusIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { inferPassWindow } from "@/lib/pass-window";
+import { applyChannelSignalFilter, type ChannelSignalFilter } from "@/lib/signal-filter";
 
 // Arrow-key nudge for a parked marker line. Fine ≈ one sample at 100Hz.
 const MARKER_STEP_FINE = 0.01;
@@ -65,6 +66,7 @@ interface Props {
   onSetChannelWidth: (traceId: string, logFileId: Id<"files">, channelName: string, width: number) => void;
   onSetChannelDash: (traceId: string, logFileId: Id<"files">, channelName: string, dash: number[] | undefined) => void;
   onSetChannelAxisRange: (traceId: string, logFileId: Id<"files">, channelName: string, axisMin?: number, axisMax?: number) => void;
+  onSetChannelSignalFilter: (traceId: string, logFileId: Id<"files">, channelName: string, signalFilter?: ChannelSignalFilter) => void;
   onSetChannelColorBy: (traceId: string, logFileId: Id<"files">, channelName: string, colorBy?: string, colorByMin?: number, colorByMax?: number, colorByLowColor?: string, colorByHighColor?: string) => void;
   onAddZone: (traceId: string, zone: HighlightZoneConfig) => void;
   onUpdateZone: (traceId: string, zoneId: string, updates: Partial<Omit<HighlightZoneConfig, "id">>) => void;
@@ -145,6 +147,7 @@ export function TracePanel({
   onSetChannelWidth,
   onSetChannelDash,
   onSetChannelAxisRange,
+  onSetChannelSignalFilter,
   onSetChannelColorBy,
   onAddZone,
   onUpdateZone,
@@ -243,8 +246,13 @@ export function TracePanel({
         const def = log.parsed.channelDefs.find((d) => d.name === ch.channelName);
         // "lambda" is the scale-group id; the quantity behind it is AFR.
         if (def?.quantitySlug !== "afr") continue;
-        const data = session.channels.get(ch.channelName);
-        if (!data) continue;
+        const rawData = session.channels.get(ch.channelName);
+        if (!rawData) continue;
+        const data = applyChannelSignalFilter(
+          session.timestamps,
+          rawData,
+          ch.signalFilter,
+        );
         for (let i = 0; i < data.length; i++) {
           const v = data[i];
           if (v !== v) continue;
@@ -771,6 +779,9 @@ export function TracePanel({
                 }
                 onSetChannelAxisRange={(logFileId, channelName, axisMin, axisMax) =>
                   onSetChannelAxisRange(trace.id, logFileId, channelName, axisMin, axisMax)
+                }
+                onSetChannelSignalFilter={(logFileId, channelName, signalFilter) =>
+                  onSetChannelSignalFilter(trace.id, logFileId, channelName, signalFilter)
                 }
                 onSetChannelColorBy={(logFileId, channelName, colorBy, colorByMin, colorByMax, colorByLowColor, colorByHighColor) =>
                   onSetChannelColorBy(trace.id, logFileId, channelName, colorBy, colorByMin, colorByMax, colorByLowColor, colorByHighColor)
