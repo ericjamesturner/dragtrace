@@ -68,13 +68,78 @@ const STYLE_OPTIONS: { label: string; dash: number[] | undefined }[] = [
   { label: "Dotted", dash: [2, 4] },
 ];
 
-const SMOOTHING_OPTIONS: { label: string; timeConstantMs?: number }[] = [
-  { label: "Raw" },
-  { label: "25 ms", timeConstantMs: 25 },
-  { label: "50 ms", timeConstantMs: 50 },
-  { label: "100 ms", timeConstantMs: 100 },
-  { label: "250 ms", timeConstantMs: 250 },
-];
+const MAX_SMOOTHING_MS = 250;
+const SMOOTHING_STEP_MS = 5;
+
+function SignalFilterSlider({
+  value,
+  disabled,
+  onCommit,
+}: {
+  value?: number;
+  disabled: boolean;
+  onCommit: (signalFilter?: ChannelSignalFilter) => void;
+}) {
+  const appliedMs = value ?? 0;
+  const [draftMs, setDraftMs] = useState(appliedMs);
+
+  const commit = (rawValue: string) => {
+    const nextMs = Math.max(
+      0,
+      Math.min(MAX_SMOOTHING_MS, Number(rawValue) || 0),
+    );
+    setDraftMs(nextMs);
+    if (nextMs === appliedMs) return;
+    onCommit(
+      nextMs === 0
+        ? undefined
+        : { kind: "zeroPhaseLowPass", timeConstantMs: nextMs },
+    );
+  };
+
+  return (
+    <div>
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Signal
+        </span>
+        <span className="font-mono text-[11px] text-muted-foreground/70">
+          {draftMs === 0 ? "Raw" : `${draftMs} ms`}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={MAX_SMOOTHING_MS}
+        step={SMOOTHING_STEP_MS}
+        value={draftMs}
+        disabled={disabled}
+        aria-label="Signal smoothing"
+        aria-valuetext={draftMs === 0 ? "Raw" : `${draftMs} milliseconds`}
+        onChange={(event) => setDraftMs(Number(event.target.value))}
+        onPointerUp={(event) => commit(event.currentTarget.value)}
+        onPointerCancel={(event) => commit(event.currentTarget.value)}
+        onKeyUp={(event) => {
+          if (
+            event.key.startsWith("Arrow") ||
+            event.key === "Home" ||
+            event.key === "End" ||
+            event.key === "PageUp" ||
+            event.key === "PageDown"
+          ) {
+            commit(event.currentTarget.value);
+          }
+        }}
+        onBlur={(event) => commit(event.currentTarget.value)}
+        className="h-1.5 w-full cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-35"
+      />
+      <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground/60">
+        <span>Raw</span>
+        <span>{MAX_SMOOTHING_MS} ms</span>
+      </div>
+    </div>
+  );
+}
 
 // Race line defaults to dashed when unset, so "Solid" is an explicit [] (empty)
 // to distinguish it from "use default".
@@ -2053,7 +2118,10 @@ export function TraceContainer({
         );
         return (
           <Dialog open onOpenChange={(o) => { if (!o) { setContextMenu(null); setCustomColorOpen(false); } }}>
-            <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+            <DialogContent
+              className="max-h-[90vh] overflow-y-auto sm:max-w-3xl"
+              overlayClassName="bg-transparent supports-backdrop-filter:backdrop-blur-none"
+            >
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2 pr-8">
                   <span className="truncate">{cmDisplayName || contextMenu.channelName}</span>
@@ -2277,48 +2345,18 @@ export function TraceContainer({
                 {/* ── Scale, then identity ────────────────────────────────── */}
                 <div className="space-y-4">
                   <div className={cardCls}>
-                    <div className="mb-2 flex items-baseline justify-between gap-2">
-                      <span className={cardTitle}>Signal</span>
-                      <span className="text-[11px] text-muted-foreground/70">
-                        {cmSmoothingMs ? `${cmSmoothingMs} ms` : "Raw"}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-5 gap-1.5">
-                      {SMOOTHING_OPTIONS.map((option) => {
-                        const active = cmSmoothingMs === option.timeConstantMs;
-                        const disabled = !canSmooth && option.timeConstantMs !== undefined;
-                        return (
-                          <button
-                            key={option.label}
-                            type="button"
-                            disabled={disabled}
-                            title={
-                              disabled
-                                ? "State channels cannot be smoothed"
-                                : option.timeConstantMs
-                                  ? `Apply ${option.timeConstantMs} ms centered smoothing`
-                                  : "Show the raw logged signal"
-                            }
-                            onClick={() =>
-                              onSetChannelSignalFilter(
-                                contextMenu.logFileId,
-                                contextMenu.channelName,
-                                option.timeConstantMs
-                                  ? { kind: "zeroPhaseLowPass", timeConstantMs: option.timeConstantMs }
-                                  : undefined,
-                              )
-                            }
-                            className={`${segBtn} px-1 text-[11px] ${
-                              active
-                                ? "border-primary bg-primary/10 text-primary"
-                                : "border-border hover:bg-muted"
-                            } disabled:cursor-not-allowed disabled:opacity-35`}
-                          >
-                            {option.label}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <SignalFilterSlider
+                      key={cmKey}
+                      value={cmSmoothingMs}
+                      disabled={!canSmooth}
+                      onCommit={(signalFilter) =>
+                        onSetChannelSignalFilter(
+                          contextMenu.logFileId,
+                          contextMenu.channelName,
+                          signalFilter,
+                        )
+                      }
+                    />
                     <p className="mt-2 text-[11px] leading-snug text-muted-foreground/80">
                       {canSmooth
                         ? "Centered low-pass smoothing reduces noise without shifting events in time. It affects this trace's line, readout, statistics, and automatic axis only; the source log stays raw."
