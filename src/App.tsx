@@ -17,6 +17,7 @@ import "./App.css";
  */
 const PublicLogPage = lazy(() => import("./components/PublicLogPage"));
 const SharedLogPage = lazy(() => import("./components/SharedLogPage"));
+const RacePage = lazy(() => import("./components/RacePage"));
 
 type Route =
   | null
@@ -26,6 +27,7 @@ type Route =
   | "terms"
   | "open"
   | "openShare"
+  | "race"
   | "share";
 type NavigableRoute = Exclude<Route, null | "share">;
 
@@ -37,6 +39,7 @@ function readShareId(): string | null {
 }
 
 function readRoute(): Route {
+  if (/^\/race\/?$/.test(window.location.pathname)) return "race";
   const params = new URLSearchParams(window.location.search);
   if (params.has("privacy")) return "privacy";
   if (params.has("terms")) return "terms";
@@ -55,6 +58,7 @@ const QUERY: Record<NavigableRoute, string> = {
   terms: "/?terms",
   open: "/open",
   openShare: "/open/share",
+  race: "/race",
 };
 
 function App() {
@@ -80,7 +84,16 @@ function App() {
     setRoute(null);
   }, []);
 
-  // Legal pages win over everything, so a link to them always works.
+  // Public rules are available without signing in or waiting for account access.
+  if (route === "race") {
+    return (
+      <Suspense fallback={<div className="loading">Loading race rules...</div>}>
+        <RacePage />
+      </Suspense>
+    );
+  }
+
+  // Legal pages are also available regardless of account access.
   if (route === "privacy" || route === "terms") {
     return <Legal page={route} onBack={goHome} onSignIn={go} onLegal={go} />;
   }
