@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, useEffect } from "react";
+import { Fragment, useCallback, useMemo, useRef, useState, useEffect } from "react";
 import type { LoadedLog, ChannelOnTrace, TraceConfig, HighlightZoneConfig } from "@/lib/viewer-types";
 import { resolveChannelStyle, CHART_COLORS, MIN_TRACE_HEIGHT } from "@/lib/viewer-types";
 import type { Id, Doc } from "../../../convex/_generated/dataModel";
@@ -25,6 +25,7 @@ import { api } from "../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { legendLabels } from "@/lib/legend-labels";
 import { applyChannelSignalFilter, type ChannelSignalFilter } from "@/lib/signal-filter";
 
 /** Which channel's style dialog is open. Opened by clicking its row in the
@@ -143,6 +144,18 @@ function SignalFilterSlider({
 
 // Race line defaults to dashed when unset, so "Solid" is an explicit [] (empty)
 // to distinguish it from "use default".
+/** Shared start of the long channel names below it, e.g. "Torque Management". */
+function LegendHeading({ text }: { text: string }) {
+  return (
+    <div
+      className="mt-1 truncate text-[10px] font-semibold uppercase tracking-wider text-white/40 first:mt-0"
+      title={text}
+    >
+      {text}
+    </div>
+  );
+}
+
 const RACE_STYLE_OPTIONS: { label: string; dash: number[] }[] = [
   { label: "Solid", dash: [] },
   { label: "Dashed", dash: [7, 5] },
@@ -1152,7 +1165,7 @@ export function TraceContainer({
         else byName.set(row.ch.channelName, [row]);
       }
     }
-    return [...byName.entries()].map(([name, rows]) => ({
+    const channels = [...byName.entries()].map(([name, rows]) => ({
       // Grouped by the logged name; shown under the display name when the
       // channel has been renamed.
       name: channelDisplayNames.get(name) ?? name,
@@ -1161,6 +1174,8 @@ export function TraceContainer({
       rows: [...rows].sort((a, b) => a.logIndex - b.logIndex),
       unitLabel: rows.find((r) => r.unitLabel)?.unitLabel ?? "",
     }));
+    const labels = legendLabels(channels.map((c) => c.name));
+    return channels.map((c, i) => ({ ...c, ...labels[i] }));
   }, [legendGroups, channelDisplayNames]);
 
   /**
@@ -1755,7 +1770,7 @@ export function TraceContainer({
                       <span className="w-14 text-right text-amber-400">AVG</span>
                       <span className="w-8 shrink-0" />
                     </div>
-                    {compactChannels.map(({ name, rows, unitLabel }) => {
+                    {compactChannels.map(({ name, rows, unitLabel, heading, label, grouped }) => {
                       const keys = rows.map((r) => r.chKey);
                       const allHidden = rows.every((r) => r.isChHidden);
                       const someHidden = rows.some((r) => r.isChHidden);
@@ -1791,7 +1806,9 @@ export function TraceContainer({
                         </>
                       );
                       return (
-                        <div key={name} {...channelDragProps(name)}>
+                        <Fragment key={name}>
+                        {heading && <LegendHeading text={heading} />}
+                        <div {...channelDragProps(name)} title={name} className={grouped ? "pl-2" : ""}>
                           <div className="flex cursor-grab items-center gap-1.5 text-xs leading-tight active:cursor-grabbing">
                             <Switch
                               checked={!allHidden}
@@ -1801,7 +1818,7 @@ export function TraceContainer({
                               color={rows[0]?.color}
                               opacity={rows[0]?.opacity ?? 1}
                             />
-                            <span className="min-w-0 flex-1 truncate text-white/70">{name}</span>
+                            <span className="min-w-0 flex-1 truncate text-white/70">{label}</span>
                             {/* One run: its numbers sit on the name row. */}
                             {!multiLogTrace && rows[0] && stats(rows[0], false)}
                           </div>
@@ -1819,6 +1836,7 @@ export function TraceContainer({
                               </div>
                             ))}
                         </div>
+                        </Fragment>
                       );
                     })}
                   </>
@@ -1828,12 +1846,18 @@ export function TraceContainer({
                         gets its own line under it. Side by side the values had
                         to live in narrow columns under a run tag, which read as
                         a table of tags rather than "RPM, this run vs that one". */}
-                    {compactChannels.map(({ name, rows, unitLabel }) => {
+                    {compactChannels.map(({ name, rows, unitLabel, heading, label, grouped }) => {
                       const keys = rows.map((r) => r.chKey);
                       const allHidden = rows.every((r) => r.isChHidden);
                       const someHidden = rows.some((r) => r.isChHidden);
                       return (
-                        <div key={name} className="mt-1 first:mt-0" {...channelDragProps(name)}>
+                        <Fragment key={name}>
+                        {heading && <LegendHeading text={heading} />}
+                        <div
+                          className={`${heading ? "" : "mt-1 first:mt-0"} ${grouped ? "pl-2" : ""}`}
+                          title={name}
+                          {...channelDragProps(name)}
+                        >
                           <div className="flex cursor-grab items-center gap-1.5 text-xs leading-tight active:cursor-grabbing">
                             <Switch
                               checked={!allHidden}
@@ -1842,7 +1866,7 @@ export function TraceContainer({
                               title={allHidden ? `Show ${name}` : `Hide ${name}`}
                             />
                             <span className="min-w-0 flex-1 truncate text-white/70">
-                              {name}
+                              {label}
                             </span>
                             <span className="text-[9px] text-white/40 whitespace-nowrap shrink-0">{unitLabel}</span>
                           </div>
@@ -1916,6 +1940,7 @@ export function TraceContainer({
                             );
                           })}
                         </div>
+                        </Fragment>
                       );
                     })}
                   </>
@@ -1935,17 +1960,30 @@ export function TraceContainer({
                             {log.fileName.replace(/\.[^.]+$/, "")}
                           </div>
                         )}
-                        {rows.map(({ chKey, ch, indent, isChHidden, color, opacity, valueStr, unitLabel }) => {
+                        {(() => {
+                          const labels = legendLabels(
+                            rows.map(({ ch }) => channelDisplayNames.get(ch.channelName) ?? ch.channelName),
+                          );
+                          return rows.map(({ chKey, ch, indent, isChHidden, color, opacity, valueStr, unitLabel }, ri) => {
                           const isHovered = hoveredChannel === chKey;
                           const isDimmed = hoveredChannel !== null && !isHovered;
                           const shownName =
                             channelDisplayNames.get(ch.channelName) ?? ch.channelName;
+                          const { heading, label, grouped } = labels[ri];
                           return (
+                            <Fragment key={chKey}>
+                            {heading && (
+                              <div className={indent ? "ml-3" : ""}>
+                                <LegendHeading text={heading} />
+                              </div>
+                            )}
                             <div
-                              key={chKey}
                               className={`flex cursor-pointer items-center gap-1.5 text-xs leading-tight transition-opacity ${
                                 isDimmed ? "opacity-40" : ""
-                              } ${isHovered ? "bg-white/10 -mx-1 px-1 rounded" : ""} ${indent ? "ml-3" : ""}`}
+                              } ${isHovered ? "bg-white/10 -mx-1 px-1 rounded" : ""} ${indent ? "ml-3" : ""} ${
+                                // The hover style pulls the row 4px left; pad the extra back.
+                                grouped ? (isHovered ? "pl-3" : "pl-2") : ""
+                              }`}
                               onDragOver={channelDragProps(ch.channelName).onDragOver}
                               onDrop={channelDragProps(ch.channelName).onDrop}
                               draggable
@@ -1983,7 +2021,7 @@ export function TraceContainer({
                                 opacity={opacity}
                               />
                               <span className="min-w-0 flex-1 truncate text-white/70">
-                                {shownName}
+                                {label}
                               </span>
                               <span className="font-mono font-medium text-white ml-auto pl-2 w-16 text-right tabular-nums">
                                 {valueStr ?? "---"}
@@ -1992,8 +2030,10 @@ export function TraceContainer({
                                 {unitLabel || ""}
                               </span>
                             </div>
+                            </Fragment>
                           );
-                        })}
+                        });
+                        })()}
                       </div>
                     );
                   });
