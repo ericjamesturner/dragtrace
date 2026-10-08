@@ -413,6 +413,79 @@ function formatScalar(hex: string | undefined, def: Def, defs: Record<string, De
   };
 }
 
+/**
+ * A table followed through a run of tunes at one spot — the cell that moved
+ * the most anywhere in the run — so it reads like a single setting: its value
+ * in each tune, and how far it moved from the tune before.
+ */
+export interface TableTrack {
+  /** Where the spot is, on the newest tune's axes. */
+  at: AxisPoint[];
+  /** The spot's value in each tune, display units; null where it can't be read. */
+  values: (number | null)[];
+  /** Per tune: other cells changed too, against the tune before. */
+  elsewhere: boolean[];
+  unit: string;
+  dp: number;
+}
+
+export function trackTable(tunes: Tune[], tableId: number, tuneDefs: TuneDefs, units: UnitChoice): TableTrack | null {
+  const { defs } = tuneDefs;
+  const table = defs[tableId];
+  const dataId = table?.c?._direct?.Data;
+  if (!table || dataId === undefined) return null;
+  const dataDef = defs[dataId] ?? table;
+  const dims = dimsOf(dataDef.D);
+  if (!dims) return null;
+  const [, rows, cols] = dims;
+  const alt = alternateFor(dataDef.u ? dataDef : table, units);
+  const dp = Math.min(4, alt?.dp ?? 0);
+  const threshold = 0.5 * 10 ** -dp;
+  const grids = tunes.map((t) => readValues(t.values.get(dataId), dataDef.t).map((v) => toDisplay(v, alt)));
+
+  // The spot that moved most between any two neighbouring tunes.
+  let best = -1;
+  let bestMove = 0;
+  for (let k = 1; k < grids.length; k++) {
+    const a = grids[k - 1];
+    const b = grids[k];
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      const move = Math.abs(b[i] - a[i]);
+      if (move > bestMove) {
+        bestMove = move;
+        best = i;
+      }
+    }
+  }
+  if (best < 0) return null;
+
+  const elsewhere = grids.map((g, k) => {
+    if (k === 0) return false;
+    const prev = grids[k - 1];
+    for (let i = 0; i < Math.min(g.length, prev.length); i++) {
+      if (i !== best && Math.abs(g[i] - prev[i]) >= threshold) return true;
+    }
+    return false;
+  });
+
+  const r = Math.floor(best / cols) % rows;
+  const c = best % cols;
+  const last = tunes[tunes.length - 1];
+  const point = (axis: AxisRead | null, i: number): AxisPoint | null =>
+    axis?.name && axis.labels[i] !== undefined ? { name: axis.name, unit: axis.unit, value: axis.labels[i] } : null;
+  const at = [point(readAxis(table, "RowAxis", last, defs, units), r), point(readAxis(table, "ColumnAxis", last, defs, units), c)].filter(
+    (x): x is AxisPoint => !!x,
+  );
+
+  return {
+    at,
+    values: grids.map((g) => (g[best] === undefined ? null : g[best])),
+    elsewhere,
+    unit: unitLabel(alt),
+    dp,
+  };
+}
+
 /** Path segments that only say "this is configuration". */
 const EMPTY_GROUP = /^(settings parameters|settings|parameters|setup)$/i;
 

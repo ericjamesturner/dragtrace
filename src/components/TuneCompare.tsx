@@ -9,9 +9,11 @@ import {
   describeChanges,
   diffTunes,
   loadTuneDefs,
+  trackTable,
   type AxisPoint,
   type AxisRange,
   type TableChange,
+  type TableTrack,
   type TuneChange,
   type TuneDefs,
   type UnitChoice,
@@ -46,6 +48,8 @@ interface Row {
   values?: string[];
   /** Per column (index 0 is always empty): the change into that column. */
   steps: (TuneChange | undefined)[];
+  /** Tables: one spot followed through every column. */
+  track?: TableTrack | null;
 }
 
 const CAR_KEY = (serial: string) => `dragtrace:tune-car:${serial}`;
@@ -119,12 +123,12 @@ function tablePhrase(t: TableChange): { text: string; tone: "up" | "down" | "mix
   const abs = (v: number) => plain(v, t.dp);
   if (t.cellsChanged === 0) return { text: "lookup points moved", tone: "mixed" };
   if (t.minDelta > 0) {
-    return { text: abs(t.minDelta) === abs(t.maxDelta) ? `raised ${abs(t.maxDelta)}${unit}` : `raised up to ${abs(t.maxDelta)}${unit}`, tone: "up" };
+    return { text: abs(t.minDelta) === abs(t.maxDelta) ? `raised ${abs(t.maxDelta)}${unit}` : `raised by ${abs(t.minDelta)} to ${abs(t.maxDelta)}${unit}`, tone: "up" };
   }
   if (t.maxDelta < 0) {
-    return { text: abs(t.minDelta) === abs(t.maxDelta) ? `lowered ${abs(t.minDelta)}${unit}` : `lowered up to ${abs(t.minDelta)}${unit}`, tone: "down" };
+    return { text: abs(t.minDelta) === abs(t.maxDelta) ? `lowered ${abs(t.minDelta)}${unit}` : `lowered by ${abs(t.maxDelta)} to ${abs(t.minDelta)}${unit}`, tone: "down" };
   }
-  return { text: `${signed(t.minDelta, t.dp)} to ${signed(t.maxDelta, t.dp)}${unit}`, tone: "mixed" };
+  return { text: `changed by ${signed(t.minDelta, t.dp)} to ${signed(t.maxDelta, t.dp)}${unit}`, tone: "mixed" };
 }
 
 /** Convex wraps server errors in request ids and paths; show the sentence. */
@@ -133,19 +137,6 @@ function summaryError(e: unknown): string {
   if (/could not find public function/i.test(raw)) return "The summary isn't available on this server yet.";
   const message = raw.replace(/^\[CONVEX[^\]]*\]\s*(\[Request ID:[^\]]*\]\s*)?/i, "").replace(/^(Server Error|Uncaught Error:)\s*/i, "").split("\n")[0].trim();
   return message || "The summary couldn't be written. Try again.";
-}
-
-/** "6.5–35.0 psi": the span of a table's values before a change. */
-function tableRange(t: TableChange): string {
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const row of t.before) for (const v of row) {
-    if (v < lo) lo = v;
-    if (v > hi) hi = v;
-  }
-  if (!Number.isFinite(lo)) return "";
-  const f = (v: number) => `${v < 0 ? "−" : ""}${plain(v, t.dp)}`;
-  return `${f(lo)}${hi !== lo ? ` to ${f(hi)}` : ""}${t.unit ? ` ${t.unit}` : ""}`;
 }
 
 const TONE = { up: "text-sky-400", down: "text-rose-400", mixed: "text-amber-300" } as const;
@@ -463,7 +454,10 @@ export function TuneCompare() {
     // A single setting reads as its value in every column: before its first
     // change it held that change's "before", after each change its "after".
     for (const row of byId.values()) {
-      if (row.kind === "table") continue;
+      if (row.kind === "table") {
+        row.track = defs ? trackTable(columns.map((c) => c.tune), row.id, defs, units) : null;
+        continue;
+      }
       const values: string[] = [];
       let current = row.steps.find((c) => c)?.before ?? "—";
       for (let j = 0; j < columns.length; j++) {
@@ -475,7 +469,7 @@ export function TuneCompare() {
     return [...byId.values()].sort(
       (a, b) => a.rank - b.rank || a.group.join("\u0000").localeCompare(b.group.join("\u0000")) || a.name.localeCompare(b.name),
     );
-  }, [steps, columns.length]);
+  }, [steps, columns, defs, units]);
 
   const areas = useMemo(() => {
     const counts = new Map<string, number>();
@@ -657,6 +651,9 @@ export function TuneCompare() {
             ))}
           </div>
 
+          <p className="text-xs text-muted-foreground">
+            Each column is one tune, oldest first. <span className="text-sky-400">▲</span> <span className="text-rose-400">▼</span> show how much a value moved from the column before it.
+          </p>
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full border-collapse text-sm">
               <thead>
@@ -704,7 +701,11 @@ export function TuneCompare() {
                               (isOpen ? <ChevronDownIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRightIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />)}
                             <span>
                               <span className="block">{row.name}</span>
-                              {row.group.length > 0 && <span className="block text-[11px] text-muted-foreground">{row.group.slice(-1)[0]}</span>}
+                              {row.track?.at.length ? (
+                                <span className="block text-[11px] text-muted-foreground">at {pointPhrase(row.track.at)}</span>
+                              ) : (
+                                row.group.length > 0 && <span className="block text-[11px] text-muted-foreground">{row.group.slice(-1)[0]}</span>
+                              )}
                             </span>
                           </button>
                         </td>
@@ -719,24 +720,27 @@ export function TuneCompare() {
                               </td>
                             );
                           }
-                          const c = row.steps[j];
-                          if (j === 0) {
-                            // Where the table started: its range before the first change.
-                            const first = row.steps.find((s) => s?.table)?.table;
-                            return (
-                              <td key={j} className="px-3 py-1.5 font-mono text-xs text-muted-foreground/70">
-                                {first ? tableRange(first) : ""}
-                              </td>
-                            );
-                          }
-                          if (!c?.table) return <td key={j} className="px-3 py-1.5 text-xs text-muted-foreground/40">·</td>;
-                          const p = tablePhrase(c.table);
+                          const track = row.track;
+                          if (!track) return <td key={j} className="px-3 py-1.5 text-xs text-muted-foreground/40">{j === 0 ? "" : "·"}</td>;
+                          const v = track.values[j];
+                          const prev = j > 0 ? track.values[j - 1] : null;
+                          const move = v !== null && prev !== null ? v - prev : 0;
+                          const moved = Math.abs(move) >= 0.5 * 10 ** -track.dp;
                           return (
-                            <td key={j} className="px-3 py-1.5 text-xs">
-                              <button type="button" onClick={() => toggle(row.id)} className={`cursor-pointer text-left font-medium ${TONE[p.tone]}`}>
-                                {p.text}
-                              </button>
-                              <div className="text-[11px] text-muted-foreground">{wherePhrase(c.table)}</div>
+                            <td key={j} className="px-3 py-1.5">
+                              <div className={`font-mono text-xs ${moved ? "font-semibold text-foreground" : "text-muted-foreground/60"}`}>
+                                {v === null ? "—" : `${v < 0 ? "−" : ""}${plain(v, track.dp)}${unitSuffix(track.unit)}`}
+                                {moved && (
+                                  <span className={`ml-2 ${TONE[move > 0 ? "up" : "down"]}`}>
+                                    {move > 0 ? "▲" : "▼"} {plain(move, track.dp)}
+                                  </span>
+                                )}
+                              </div>
+                              {track.elsewhere[j] && (
+                                <button type="button" onClick={() => toggle(row.id)} className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
+                                  {moved ? "+ more of the table" : "changed elsewhere in the table"}
+                                </button>
+                              )}
                             </td>
                           );
                         })}
