@@ -97,16 +97,37 @@ export function findGearChannel(defs: ChannelDef[]): string | undefined {
   )?.name;
 }
 
+/**
+ * A channel that reports throttle opening, used to tell a shift (throttle
+ * held) from the driver lifting (throttle closed). Pedal position stands in
+ * where there's no throttle reading.
+ */
+export function findThrottleChannel(defs: ChannelDef[]): string | undefined {
+  return (
+    defs.find((d) => /^throttle position$/i.test(d.name.trim()))?.name ??
+    defs.find((d) => /\b(throttle position|tps)\b/i.test(d.name) && !/derivative|filter|target|cable/i.test(d.name))?.name ??
+    defs.find((d) => /pedal position/i.test(d.name) && !/source|derivative/i.test(d.name))?.name
+  );
+}
+
 /** How far either side of a gear change to look for the peak and the dip. */
 const PEAK_BEFORE_S = 0.5;
 const PEAK_AFTER_S = 0.1;
-const TROUGH_WINDOW_S = 0.5;
+/** A converter-slip automatic takes most of half a second to pull down. */
+const TROUGH_WINDOW_S = 0.7;
+/** No car is in second gear this soon after launch. */
+const EARLIEST_SHIFT_S = 0.5;
+/** Throttle held above this share of its pass maximum counts as wide open. */
+const WOT_FRACTION = 0.8;
 /** A pass is over well before this; later "shifts" are the shutdown. */
 const PASS_LENGTH_S = 15;
-/** Without a gear channel: the smallest fall, as a share of the pass's peak, that counts. */
-const MIN_DROP_FRACTION = 0.07;
+/**
+ * Without a gear channel: the smallest fall, as a share of the pass's peak,
+ * that counts. An automatic slipping its converter only drops 4–7%.
+ */
+const MIN_DROP_FRACTION = 0.03;
 /** ...and it has to start climbing again: a tall top gear recovers slowly. */
-const MIN_RECOVERY_FRACTION = 0.01;
+const MIN_RECOVERY_FRACTION = 0.005;
 /**
  * A shift pulls RPM down by the ratio step — even a wide 1.76 first gear
  * leaves well over half. Lifting at the stripe falls toward idle.
@@ -138,15 +159,17 @@ function extremeIn(
  * Upshifts during the pass. With a gear channel, each step up in gear is a
  * shift and the peak and dip are read around it — the gear reading itself can
  * lag the RPM by a sample or two. Without one, a shift is a fall of at least
- * MIN_DROP_FRACTION of the pass's peak that stays above MIN_TROUGH_FRACTION
- * of where it fell from and starts climbing again within a second; a fall
- * toward idle is the driver lifting.
+ * MIN_DROP_FRACTION of the pass's peak, taken with the throttle still wide
+ * open, that stays above MIN_TROUGH_FRACTION of where it fell from and starts
+ * climbing again within a second. A fall with the throttle closing is the
+ * driver lifting, not a shift.
  */
 export function shiftMarkers(
   ts: Float64Array,
   vals: Float64Array,
   launch: number,
   gear?: Float64Array,
+  throttle?: Float64Array,
 ): ShiftMarker[] {
   const end = launch + PASS_LENGTH_S;
   const out: ShiftMarker[] = [];
@@ -179,24 +202,35 @@ export function shiftMarkers(
   if (!passPeak || passPeak.v <= 0) return out;
   const minDrop = passPeak.v * MIN_DROP_FRACTION;
   const minRecovery = passPeak.v * MIN_RECOVERY_FRACTION;
+  const throttlePeak = throttle ? extremeIn(ts, throttle, launch, end, "max") : null;
+  const wideOpen = (from: number, to: number) => {
+    if (!throttle || !throttlePeak) return true;
+    const low = extremeIn(ts, throttle, from, to, "min");
+    return !low || low.v >= throttlePeak.v * WOT_FRACTION;
+  };
 
-  let i = ts.findIndex((t) => t >= launch);
+  let i = ts.findIndex((t) => t >= launch + EARLIEST_SHIFT_S);
   if (i < 0) return out;
   while (i < ts.length && ts[i] <= end) {
     // Walk to a local peak: the next sample that the following ones fall from.
     const v = vals[i];
     if (v !== v) { i++; continue; }
-    const trough = extremeIn(ts, vals, ts[i], ts[i] + TROUGH_WINDOW_S, "min");
     const before = extremeIn(ts, vals, ts[i], ts[i] + PEAK_AFTER_S, "max");
+    const firstDip = extremeIn(ts, vals, ts[i], ts[i] + TROUGH_WINDOW_S, "min");
+    // A small local peak can sit just ahead of the real one — the flare as
+    // the shift begins. Measure from the highest point before the fall, and
+    // to the lowest point after that.
+    const top = firstDip && extremeIn(ts, vals, ts[i], firstDip.t, "max");
+    const trough = top && extremeIn(ts, vals, top.t, top.t + TROUGH_WINDOW_S, "min");
     if (
       // Shifts happen near the top of the rev range, not at idle after the pass.
       v < passPeak.v / 2 ||
-      !trough || !before || before.t !== ts[i] ||
-      v - trough.v < minDrop || trough.v < v * MIN_TROUGH_FRACTION
+      !top || !trough || !before || before.t !== ts[i] ||
+      top.v - trough.v < minDrop || trough.v < top.v * MIN_TROUGH_FRACTION
     ) { i++; continue; }
     const recovered = extremeIn(ts, vals, trough.t, trough.t + RECOVERY_WINDOW_S, "max");
-    if (recovered && recovered.v - trough.v >= minRecovery) {
-      out.push({ peakT: ts[i], peak: v, troughT: trough.t, trough: trough.v });
+    if (recovered && recovered.v - trough.v >= minRecovery && wideOpen(top.t, trough.t)) {
+      out.push({ peakT: top.t, peak: top.v, troughT: trough.t, trough: trough.v });
       // Past this shift before looking for the next.
       const resume = trough.t + MIN_SHIFT_SPACING_S;
       while (i < ts.length && ts[i] < resume) i++;

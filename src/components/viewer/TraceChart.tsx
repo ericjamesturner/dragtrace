@@ -19,6 +19,7 @@ import { formatValue, formatDuration } from "@/lib/cursor-utils";
 import { applyChannelSignalFilter } from "@/lib/signal-filter";
 import {
   findGearChannel,
+  findThrottleChannel,
   shiftMarkers,
   timeMarkers,
   type ShiftMarker,
@@ -440,12 +441,14 @@ export function TraceChart({
         if (ch.markers && launch !== null) {
           const gearName = ch.markers.shifts ? findGearChannel(group.log.parsed.channelDefs) : undefined;
           const gear = gearName && gearName !== ch.channelName ? session.channels.get(gearName) : undefined;
+          const throttleName = ch.markers.shifts ? findThrottleChannel(group.log.parsed.channelDefs) : undefined;
+          const throttle = throttleName && throttleName !== ch.channelName ? session.channels.get(throttleName) : undefined;
           markerSpecs.push({
             channelName: ch.channelName,
             color: resolved.color,
             offset: group.timeOffset,
             time: ch.markers.times ? timeMarkers(session.timestamps, data, launch, ch.markers.times) : [],
-            shifts: ch.markers.shifts ? shiftMarkers(session.timestamps, data, launch, gear) : [],
+            shifts: ch.markers.shifts ? shiftMarkers(session.timestamps, data, launch, gear, throttle) : [],
           });
         }
 
