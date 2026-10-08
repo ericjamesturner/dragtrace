@@ -2,6 +2,12 @@ import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Open delay for tips on dense rows people read by hovering, like the channel
+ * legend. The app-wide default is slower so icon buttons don't flash tips.
+ */
+const HOVER_TIP_DELAY = 150
+
 function TooltipProvider({
   delay = 0,
   ...props
@@ -64,22 +70,28 @@ function TooltipContent({
 /**
  * Simple tooltip wrapper for icon buttons and interactive elements.
  * Usage: <Tip content="Label"><button ...><Icon /></button></Tip>
+ *
+ * Empty `content` renders the child alone, so a tip can come and go with state.
+ * `delay` overrides the app-wide open delay for places read by hovering.
  */
 function Tip({
   children,
   content,
   side,
+  delay,
 }: {
   children: React.ReactElement
   content: React.ReactNode
   side?: "top" | "bottom" | "left" | "right"
+  delay?: number
 }) {
+  if (content == null || content === false || content === "") return children
   return (
     <Tooltip>
-      <TooltipTrigger render={children} />
+      <TooltipTrigger render={children} delay={delay} />
       <TooltipContent side={side}>{content}</TooltipContent>
     </Tooltip>
   )
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider, Tip }
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider, Tip, HOVER_TIP_DELAY }

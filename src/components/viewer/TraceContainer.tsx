@@ -19,7 +19,7 @@ import {
 } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon, MoveHorizontalIcon, HighlighterIcon, ListPlusIcon, BoxIcon } from "lucide-react";
-import { Tip } from "@/components/ui/tooltip";
+import { HOVER_TIP_DELAY, Tip } from "@/components/ui/tooltip";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
@@ -147,12 +147,11 @@ function SignalFilterSlider({
 /** Shared start of the long channel names below it, e.g. "Torque Management". */
 function LegendHeading({ text }: { text: string }) {
   return (
-    <div
-      className="mt-1 truncate text-[10px] font-semibold uppercase tracking-wider text-white/40 first:mt-0"
-      title={text}
-    >
-      {text}
-    </div>
+    <Tip content={text} delay={HOVER_TIP_DELAY} side="left">
+      <div className="mt-1 truncate text-[10px] font-semibold uppercase tracking-wider text-white/40 first:mt-0">
+        {text}
+      </div>
+    </Tip>
   );
 }
 
@@ -1384,14 +1383,14 @@ export function TraceContainer({
             {multiLogTrace && (
               <div className="flex items-baseline gap-2 shrink-0 pr-2.5">
                 {traceLogs.map((l) => (
-                  <span
-                    key={l.id}
-                    title={l.name}
-                    className="text-[10px] font-bold uppercase tracking-wider max-w-[84px] truncate"
-                    style={{ color: l.color }}
-                  >
-                    {l.tag}
-                  </span>
+                  <Tip key={l.id} content={l.name} delay={HOVER_TIP_DELAY}>
+                    <span
+                      className="text-[10px] font-bold uppercase tracking-wider max-w-[84px] truncate"
+                      style={{ color: l.color }}
+                    >
+                      {l.tag}
+                    </span>
+                  </Tip>
                 ))}
               </div>
             )}
@@ -1410,8 +1409,14 @@ export function TraceContainer({
                   const isDimmed = hoveredChannel !== null && !isHovered;
                   const muted = r.isChHidden || r.isLogHidden;
                   return (
-                    <span
+                    <Tip
                       key={r.chKey}
+                      delay={HOVER_TIP_DELAY}
+                      content={`${r.logName ? `${r.logName} · ` : ""}${name}${
+                        r.isChHidden ? " (hidden)" : ""
+                      } — click to ${r.isChHidden ? "show" : "hide"}, drag to move`}
+                    >
+                    <span
                       draggable
                       // The value IS the control: click toggles that series,
                       // so no checkbox chrome is needed in the strip.
@@ -1439,9 +1444,6 @@ export function TraceContainer({
                           channelName: r.ch.channelName,
                         });
                       }}
-                      title={`${r.logName ? `${r.logName} · ` : ""}${name}${
-                        r.isChHidden ? " (hidden)" : ""
-                      } — click to ${r.isChHidden ? "show" : "hide"}, drag to move`}
                       data-log={r.logName}
                       className={`font-mono text-[13px] font-semibold tabular-nums text-right min-w-[4ch] cursor-pointer rounded-sm px-0.5 transition-all ${
                         muted ? "line-through decoration-1" : ""
@@ -1462,6 +1464,7 @@ export function TraceContainer({
                     >
                       {r.valueStr ?? "–"}
                     </span>
+                    </Tip>
                   );
                 })}
                 {unitLabel && (
@@ -1473,9 +1476,11 @@ export function TraceContainer({
         ) : collapsed ? (
           // Collapsed hides the channels panel, so the header has to say what
           // this trace holds. Open, the panel says it — do not say it twice.
-          <span className="text-xs text-muted-foreground flex-1 truncate" title={traceTitle}>
-            {traceTitle}
-          </span>
+          <Tip content={traceTitle}>
+            <span className="text-xs text-muted-foreground flex-1 truncate">
+              {traceTitle}
+            </span>
+          </Tip>
         ) : (
           <span className="flex-1" />
         )}
@@ -1664,18 +1669,20 @@ export function TraceContainer({
             onClick={(e) => e.stopPropagation()}
           >
             {!legendCollapsed && onSetLegendWidth && (
-              <div
-                className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize hover:bg-primary/40 active:bg-primary/60"
-                onPointerDown={handleLegendResize}
-                style={{ touchAction: "none" }}
-                title="Drag to resize every channels panel"
-              />
+              <Tip content="Drag to resize every channels panel" side="left">
+                <div
+                  className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize hover:bg-primary/40 active:bg-primary/60"
+                  onPointerDown={handleLegendResize}
+                  style={{ touchAction: "none" }}
+                />
+              </Tip>
             )}
             {/* The header is also the door channels come in through. Building a
                 trace is a different job from reading one, so it gets a door of
                 its own rather than one-channel-at-a-time from the sidebar. */}
             <div className="flex shrink-0 items-center gap-1 px-1 py-1 border-b border-white/10">
               {!legendCollapsed && (
+                <Tip content="Add or remove channels — or drop a channel here to take it off this trace">
                 <button
                   onClick={() => setChannelsDialogOpen(true)}
                   // Same button, the other direction: the door channels come in
@@ -1708,7 +1715,6 @@ export function TraceContainer({
                       onRemoveChannel(parsed.logFileId, parsed.channelName);
                     }
                   }}
-                  title="Add or remove channels — or drop a channel here to take it off this trace"
                   className={`flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded px-1.5 py-0.5 text-xs transition-colors ${
                     dropToRemove
                       ? "bg-destructive/30 text-white"
@@ -1725,6 +1731,7 @@ export function TraceContainer({
                     </span>
                   )}
                 </button>
+                </Tip>
               )}
               <Tip content={legendCollapsed ? "Show channels on every trace" : "Hide channels on every trace"}>
                 <button
@@ -1785,22 +1792,30 @@ export function TraceContainer({
                             </span>
                           )}
                           <span className="font-mono font-medium text-white w-14 text-right tabular-nums">{r.valueStr ?? "---"}</span>
+                          <Tip
+                            content={r.minTime !== null ? "Put the cursor where this run hit its minimum" : null}
+                            delay={HOVER_TIP_DELAY}
+                          >
                           <button
-                            title={r.minTime !== null ? "Put the cursor where this run hit its minimum" : undefined}
                             disabled={r.minTime === null}
                             onClick={(e) => { e.stopPropagation(); if (r.minTime !== null) onSelection?.(r.minTime, r.minTime); }}
                             className="w-14 rounded-sm text-right font-mono font-medium tabular-nums text-white/70 enabled:cursor-pointer enabled:hover:bg-white/15"
                           >
                             {r.minStr ?? "---"}
                           </button>
+                          </Tip>
+                          <Tip
+                            content={r.maxTime !== null ? "Put the cursor where this run hit its maximum" : null}
+                            delay={HOVER_TIP_DELAY}
+                          >
                           <button
-                            title={r.maxTime !== null ? "Put the cursor where this run hit its maximum" : undefined}
                             disabled={r.maxTime === null}
                             onClick={(e) => { e.stopPropagation(); if (r.maxTime !== null) onSelection?.(r.maxTime, r.maxTime); }}
                             className="w-14 rounded-sm text-right font-mono font-medium tabular-nums text-white/70 enabled:cursor-pointer enabled:hover:bg-white/15"
                           >
                             {r.maxStr ?? "---"}
                           </button>
+                          </Tip>
                           <span className="font-mono font-medium text-amber-200/90 w-14 text-right tabular-nums">{r.avgStr ?? "---"}</span>
                           <span className="text-[9px] text-white/40 min-w-8 whitespace-nowrap shrink-0">{unitLabel}</span>
                         </>
@@ -1808,7 +1823,7 @@ export function TraceContainer({
                       return (
                         <Fragment key={name}>
                         {heading && <LegendHeading text={heading} />}
-                        <div {...channelDragProps(name)} title={name} className={grouped ? "pl-2" : ""}>
+                        <div {...channelDragProps(name)} className={grouped ? "pl-2" : ""}>
                           <div className="flex cursor-grab items-center gap-1.5 text-xs leading-tight active:cursor-grabbing">
                             <Switch
                               checked={!allHidden}
@@ -1818,7 +1833,9 @@ export function TraceContainer({
                               color={rows[0]?.color}
                               opacity={rows[0]?.opacity ?? 1}
                             />
-                            <span className="min-w-0 flex-1 truncate text-white/70">{label}</span>
+                            <Tip content={name} delay={HOVER_TIP_DELAY} side="left">
+                              <span className="min-w-0 flex-1 truncate text-white/70">{label}</span>
+                            </Tip>
                             {/* One run: its numbers sit on the name row. */}
                             {!multiLogTrace && rows[0] && stats(rows[0], false)}
                           </div>
@@ -1855,7 +1872,6 @@ export function TraceContainer({
                         {heading && <LegendHeading text={heading} />}
                         <div
                           className={`${heading ? "" : "mt-1 first:mt-0"} ${grouped ? "pl-2" : ""}`}
-                          title={name}
                           {...channelDragProps(name)}
                         >
                           <div className="flex cursor-grab items-center gap-1.5 text-xs leading-tight active:cursor-grabbing">
@@ -1865,9 +1881,11 @@ export function TraceContainer({
                               onChange={() => onSetChannelsHidden?.(keys, !allHidden)}
                               title={allHidden ? `Show ${name}` : `Hide ${name}`}
                             />
-                            <span className="min-w-0 flex-1 truncate text-white/70">
-                              {label}
-                            </span>
+                            <Tip content={name} delay={HOVER_TIP_DELAY} side="left">
+                              <span className="min-w-0 flex-1 truncate text-white/70">
+                                {label}
+                              </span>
+                            </Tip>
                             <span className="text-[9px] text-white/40 whitespace-nowrap shrink-0">{unitLabel}</span>
                           </div>
                           {traceLogs.map((l) => {
@@ -1885,8 +1903,13 @@ export function TraceContainer({
                             const isDimmed = hoveredChannel !== null && !isHovered;
                             const muted = r.isLogHidden;
                             return (
-                              <div
+                              <Tip
                                 key={l.id}
+                                content={`${l.name} · ${name}${r.isChHidden ? " (hidden)" : ""} — click to style, drag to move`}
+                                delay={HOVER_TIP_DELAY}
+                                side="left"
+                              >
+                              <div
                                 draggable
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1912,7 +1935,6 @@ export function TraceContainer({
                                     channelName: r.ch.channelName,
                                   });
                                 }}
-                                title={`${l.name} · ${name}${r.isChHidden ? " (hidden)" : ""} — click to style, drag to move`}
                                 className={`flex items-center gap-1.5 pl-[30px] text-xs leading-tight cursor-pointer rounded-sm transition-all ${
                                   isDimmed ? "opacity-40" : ""
                                 } ${isHovered ? "bg-white/10" : ""}`}
@@ -1937,6 +1959,7 @@ export function TraceContainer({
                                   {r.valueStr ?? "---"}
                                 </span>
                               </div>
+                              </Tip>
                             );
                           })}
                         </div>
@@ -1987,7 +2010,6 @@ export function TraceContainer({
                               onDragOver={channelDragProps(ch.channelName).onDragOver}
                               onDrop={channelDragProps(ch.channelName).onDrop}
                               draggable
-                              title={`${shownName} — click to style, drag to reorder or to another trace`}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setContextMenu({ logFileId: ch.logFileId, channelName: ch.channelName });
@@ -2020,9 +2042,15 @@ export function TraceContainer({
                                 color={color}
                                 opacity={opacity}
                               />
-                              <span className="min-w-0 flex-1 truncate text-white/70">
-                                {label}
-                              </span>
+                              <Tip
+                                content={`${shownName} — click to style, drag to reorder or to another trace`}
+                                delay={HOVER_TIP_DELAY}
+                                side="left"
+                              >
+                                <span className="min-w-0 flex-1 truncate text-white/70">
+                                  {label}
+                                </span>
+                              </Tip>
                               <span className="font-mono font-medium text-white ml-auto pl-2 w-16 text-right tabular-nums">
                                 {valueStr ?? "---"}
                               </span>

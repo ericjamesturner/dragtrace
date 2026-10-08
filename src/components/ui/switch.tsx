@@ -1,3 +1,5 @@
+import { HOVER_TIP_DELAY, Tip } from "@/components/ui/tooltip";
+
 /**
  * A switch sized to sit in a dense list row.
  *
@@ -39,12 +41,12 @@ export function Switch({
   const lit = on || mixed;
   const form = appearance === "form";
   return (
+    <Tip content={title} delay={HOVER_TIP_DELAY}>
     <button
       type="button"
       role="switch"
       aria-checked={mixed ? "mixed" : checked}
       aria-label={title}
-      title={title}
       onClick={(e) => {
         e.stopPropagation();
         onChange(!checked);
@@ -86,5 +88,6 @@ export function Switch({
         }}
       />
     </button>
+    </Tip>
   );
 }
