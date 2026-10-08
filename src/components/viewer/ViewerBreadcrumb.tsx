@@ -20,6 +20,7 @@ import { useNav } from "../Layout";
 import { useTimeslips } from "@/hooks/useTimeslips";
 import { usePassPreviews, LEAD_IN_SECONDS } from "@/hooks/usePassPreviews";
 import { sparklinePath, type RaceSeries } from "@/lib/preview";
+import { runTags } from "@/lib/run-tags";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -128,22 +129,6 @@ function useFileDocs(fileIds: Id<"files">[]): Map<string, Doc<"files">> {
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileIds.join(","), results]);
-}
-
-/**
- * What to call each run on its chip. One run gets its name; several get the
- * first word that tells them apart — "T1", "T2" — since the rest of the name
- * is usually the same weekend, and the chips have to sit side by side.
- */
-function chipNames(names: string[]): string[] {
-  if (names.length <= 1) return names;
-  const tokens = names.map((n) => n.trim().split(/\s+/).filter(Boolean));
-  const depth = Math.min(4, Math.max(0, ...tokens.map((t) => t.length)));
-  for (let i = 0; i < depth; i++) {
-    const candidate = tokens.map((t) => t[i] ?? "");
-    if (candidate.every(Boolean) && new Set(candidate).size === candidate.length) return candidate;
-  }
-  return names;
 }
 
 /** One run on the chart: its colour, its name, its time, and what you can do to it. */
@@ -579,7 +564,7 @@ export function ViewerBreadcrumb({
   const docs = useFileDocs(chipIds);
   const slips = useTimeslips(chipIds);
   const fullNames = chipIds.map((id) => shortPassName(docs.get(id as string)?.fileName ?? "…"));
-  const names = chipNames(fullNames);
+  const names = runTags(fullNames);
 
   const loaded = useMemo(() => new Set(loadedFileIds as string[]), [loadedFileIds]);
   const pending = useMemo(() => new Set((pendingFileIds ?? []) as string[]), [pendingFileIds]);

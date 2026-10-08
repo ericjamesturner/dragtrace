@@ -17,6 +17,7 @@ import { readableTextColor } from "@/lib/colors";
 import { formatSlipTime, distanceAtTime, findSlipAtLaunch } from "@/lib/timeslip-zones";
 import { formatValue, formatDuration } from "@/lib/cursor-utils";
 import { applyChannelSignalFilter } from "@/lib/signal-filter";
+import { runLabels } from "@/lib/run-tags";
 import {
   findGearChannel,
   findThrottleChannel,
@@ -410,7 +411,14 @@ export function TraceChart({
     const seriesMeta: SeriesMeta[] = [];
     // Markers are read off the same filtered data the line is drawn from, so a
     // dot always sits on its line.
+    // With several runs on the chart, a shift label says whose shift it is.
+    const runTagByFile = new Map<string, string>();
+    {
+      const tags = runLabels(logGroups.map((g) => g.log.fileName.replace(/\.[^.]+$/, "")));
+      if (logGroups.length > 1) logGroups.forEach((g, i) => runTagByFile.set(g.log.fileId as string, tags[i]));
+    }
     const markerSpecs: {
+      runTag?: string;
       channelName: string;
       color: string;
       offset: number;
@@ -444,6 +452,7 @@ export function TraceChart({
           const throttleName = ch.markers.shifts ? findThrottleChannel(group.log.parsed.channelDefs) : undefined;
           const throttle = throttleName && throttleName !== ch.channelName ? session.channels.get(throttleName) : undefined;
           markerSpecs.push({
+            runTag: runTagByFile.get(group.log.fileId as string),
             channelName: ch.channelName,
             color: resolved.color,
             offset: group.timeOffset,
@@ -1358,7 +1367,7 @@ export function TraceChart({
                     // Read at the start of the shift, where the fall begins.
                     labels.push({
                       ...p,
-                      text: `${drop}${unitText} drop`,
+                      text: `${spec.runTag ? `${spec.runTag} · ` : ""}${drop}${unitText} drop`,
                       color: MARKER_SHIFT_COLOR,
                       prefer: "shift",
                       lowY: q ? Math.max(p.y, q.y) : p.y,

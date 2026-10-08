@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { categoryLabels, legendLabels } from "@/lib/legend-labels";
+import { runLabels } from "@/lib/run-tags";
 import {
   DEFAULT_MARKER_TIMES,
   findGearChannel,
@@ -1288,21 +1289,10 @@ export function TraceContainer({
       }
     }
     const list = [...seen.values()].sort((a, b) => a.index - b.index);
-    // Short tag for the key: racers name runs "Q1", "SEATTLE E2 7.126 176.47".
-    // The first word is usually the round — but when two runs share a weekend
-    // it's the same word on both, so take the first one that actually tells
-    // them apart. Full name only if nothing does.
-    const tokens = list.map((l) => l.name.trim().split(/\s+/).filter(Boolean));
-    const depth = Math.min(4, Math.max(0, ...tokens.map((t) => t.length)));
-    let tags: string[] | null = null;
-    for (let i = 0; i < depth; i++) {
-      const candidate = tokens.map((t) => t[i] ?? "");
-      if (candidate.every(Boolean) && new Set(candidate).size === candidate.length) {
-        tags = candidate;
-        break;
-      }
-    }
-    return list.map((l, i) => ({ ...l, tag: tags ? tags[i] : l.name }));
+    // Short tag for the key — the round and its ET ("T2 - 4.15") where the
+    // names carry them.
+    const tags = runLabels(list.map((l) => l.name));
+    return list.map((l, i) => ({ ...l, tag: tags[i] }));
   }, [legendGroups]);
 
   // The channels panel is docked beside the chart rather than floating over
