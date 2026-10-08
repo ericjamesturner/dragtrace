@@ -26,6 +26,7 @@ import type * as scatterSuggestions from "../scatterSuggestions.js";
 import type * as sharedLogs from "../sharedLogs.js";
 import type * as stripe from "../stripe.js";
 import type * as timeslips from "../timeslips.js";
+import type * as tuneSummary from "../tuneSummary.js";
 import type * as userPreferences from "../userPreferences.js";
 import type * as users from "../users.js";
 import type * as vehicleChannelOverrides from "../vehicleChannelOverrides.js";
@@ -57,6 +58,7 @@ declare const fullApi: ApiFromModules<{
   sharedLogs: typeof sharedLogs;
   stripe: typeof stripe;
   timeslips: typeof timeslips;
+  tuneSummary: typeof tuneSummary;
   userPreferences: typeof userPreferences;
   users: typeof users;
   vehicleChannelOverrides: typeof vehicleChannelOverrides;

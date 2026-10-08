@@ -10,9 +10,11 @@
     "lint": "eslint .",
     "gen:quantities": "node scripts/gen-quantities.mjs",
     "gen:channels": "node scripts/gen-channel-defs.mjs",
+    "gen:tunes": "node scripts/gen-tune-defs.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.132.1",
     "@auth/core": "^0.37.0",
     "@base-ui/react": "^1.2.0",
     "@convex-dev/auth": "^0.0.91",

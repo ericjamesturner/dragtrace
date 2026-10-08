@@ -4,6 +4,7 @@ import { VehicleSidebar } from "./VehicleSidebar";
 import { Home } from "./Home";
 import { EventList } from "./EventList";
 import { FileList } from "./FileList";
+import { TuneCompare } from "./TuneCompare";
 import { ChannelManager } from "./ChannelManager";
 import { Settings, type SettingsSection } from "./Settings";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { ChevronsUpDownIcon, LogOutIcon, MenuIcon, SettingsIcon } from "lucide-react";
+import { ChevronsUpDownIcon, GitCompareArrowsIcon, LogOutIcon, MenuIcon, SettingsIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { AdminMenu } from "./AdminControls";
 import { useQuery } from "convex/react";
@@ -29,6 +30,7 @@ type NavState =
   | { view: "files"; vehicleId: Id<"vehicles">; eventId: Id<"events"> }
   | { view: "viewer"; vehicleId: Id<"vehicles">; eventId: Id<"events">; fileIds: Id<"files">[] }
   | { view: "channel-manager" }
+  | { view: "tunes" }
   | { view: "settings"; section: SettingsSection };
 
 interface NavContextValue {
@@ -53,6 +55,9 @@ function parseNavFromUrl(): NavState {
   const params = new URLSearchParams(window.location.search);
   if (params.has("channels")) {
     return { view: "channel-manager" };
+  }
+  if (params.has("tunes")) {
+    return { view: "tunes" };
   }
   if (params.has("settings") || params.has("account") || params.has("preferences")) {
     const value = params.get("settings");
@@ -97,6 +102,10 @@ function navToUrl(nav: NavState): string {
   const params = new URLSearchParams();
   if (nav.view === "channel-manager") {
     params.set("channels", "");
+    return `?${params.toString()}`;
+  }
+  if (nav.view === "tunes") {
+    params.set("tunes", "");
     return `?${params.toString()}`;
   }
   if (nav.view === "settings") {
@@ -199,6 +208,20 @@ export function Layout() {
   // one word "Settings".
   const settingsButton = (
     <div className="border-t">
+      <button
+        onClick={() => {
+          setMobileOpen(false);
+          setNav({ view: "tunes" });
+        }}
+        className={`flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-sm transition-colors hover:bg-muted ${
+          nav.view === "tunes"
+            ? "text-foreground font-medium"
+            : "text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        <GitCompareArrowsIcon className="size-4" />
+        Compare tunes
+      </button>
       <button
         onClick={() => {
           setMobileOpen(false);
@@ -337,6 +360,8 @@ function ContentArea() {
       return <FileList vehicleId={nav.vehicleId} eventId={nav.eventId} />;
     case "settings":
       return <Settings section={nav.section} />;
+    case "tunes":
+      return <TuneCompare />;
     case "channel-manager":
       return null; // Handled above as full-screen view
   }
