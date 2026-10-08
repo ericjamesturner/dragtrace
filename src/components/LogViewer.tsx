@@ -577,6 +577,7 @@ export function LogViewerReady({
               eventId={eventId}
               loadedFileIds={fileIds}
               pendingFileIds={pendingFileIds}
+              logColors={Object.fromEntries(logs.map((log) => [log.fileId as string, log.logColor]))}
               onOpen={(v, e, fileId) => goToViewer?.(v, e, [fileId])}
               onCompare={handleAddFile}
               onRemove={handleRemoveFile}
