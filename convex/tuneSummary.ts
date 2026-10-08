@@ -4,7 +4,7 @@ import { internal } from "./_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
-const SYSTEM_PROMPT = `You explain ECU tune changes to a drag racer. You get the settings that differ between saved tunes from one car, in the order they were saved, already grouped and in the racer's units. Write what changed and what it does to the car on a pass — launch, 60-foot, shifts, top end, safety margins — in plain words a racer uses. Lead with the changes that matter most for performance or engine safety; group small related edits (several cylinder trims, one table nudged in many cells) into one point. Say what a change likely aims at only when the settings make it clear, and call out anything that looks risky (leaner mixture at high load, more timing, protection turned off). Never invent settings or numbers that are not in the list. Keep it short: a one-sentence overview, then at most 8 bullets. Plain text with "- " bullets; no headings, no markdown emphasis.`;
+const SYSTEM_PROMPT = `You tell a drag racer, at a glance, what changed between saved tunes of one car. You get the setting changes in order, already in the racer's units. Reply with at most 3 bullets — fewer if fewer things matter — each under 10 words, most important first: what changed and which way, in the racer's own words ("Boost ramp starts ~0.25 s later on knob 8", "Launch RPM down 100", "Timing pulled 1° in 2nd gear"). Merge related edits into one bullet. Skip housekeeping (sensor setup, names) unless nothing else changed. Never invent settings or numbers. No intro, no headings, no closing line, no markdown emphasis — only lines starting with "- ".`;
 
 export const cached = internalQuery({
   args: { userId: v.id("users"), key: v.string() },
@@ -66,8 +66,9 @@ export const summarize = action({
     const client = new Anthropic();
     const response = await client.beta.messages.create({
       model: "claude-opus-5-5",
-      max_tokens: 4000,
-      output_config: { effort: "medium" },
+      // Thinking counts against max_tokens on this model; leave it room.
+      max_tokens: 3000,
+      output_config: { effort: "low" },
       // A safety classifier can decline a request; retry it server-side on
       // the model Anthropic recommends for that category instead of failing.
       betas: ["server-side-fallback-2026-07-01"],
