@@ -178,6 +178,12 @@ function isNoise(def: Def, groups: string[][]): boolean {
 
 // ── The diff ──
 
+export interface AxisPoint {
+  name: string;
+  unit: string;
+  value: string;
+}
+
 export interface AxisRange {
   name: string;
   unit: string;
@@ -196,7 +202,7 @@ export interface TableChange {
   minDelta: number;
   maxDelta: number;
   /** The single biggest move, and where on the table it is. */
-  largest: { delta: number; at: string[] };
+  largest: { delta: number; at: AxisPoint[] };
   unit: string;
   dp: number;
   /** Where on each axis the changed cells sit. Axes without a channel are left out. */
@@ -244,6 +250,31 @@ interface AxisRead {
   hex: string;
 }
 
+/**
+ * What a racer calls the thing a table is looked up by. The channel names are
+ * Haltech's full ones ("Rotary Trim Module Position 1", "Fuel - Load (MAP)");
+ * on a table axis the everyday word is enough.
+ */
+export function friendlyAxis(name: string): string {
+  const knob = /Rotary Trim Module(?: Position)? (\d+)/i.exec(name);
+  if (knob) return `trim knob ${knob[1]}`;
+  const rules: [RegExp, string][] = [
+    [/^race time$/i, "time"],
+    [/^(fuel|ignition) - load/i, "load"],
+    [/^manifold pressure/i, "boost"],
+    [/^engine demand|^throttle position/i, "throttle"],
+    [/^driveshaft rpm$/i, "driveshaft RPM"],
+    [/^rpm$/i, "RPM"],
+    [/engine rpm target error/i, "RPM over target"],
+    [/driveshaft rpm target error/i, "driveshaft RPM over target"],
+    [/coolant temperature/i, "coolant temp"],
+    [/intake air temperature/i, "intake temp"],
+    [/^gear$/i, "gear"],
+  ];
+  for (const [re, short] of rules) if (re.test(name.trim())) return short;
+  return name.trim().toLowerCase();
+}
+
 function readAxis(
   table: Def,
   which: "RowAxis" | "ColumnAxis",
@@ -263,9 +294,10 @@ function readAxis(
   const alt = alternateFor(channel ?? dataDef, units);
   const values = used.map((v) => toDisplay(v, alt));
   return {
-    name: channel?.L && !channel.L.startsWith("_") ? channel.L : null,
+    name: channel?.L && !channel.L.startsWith("_") ? friendlyAxis(channel.L) : null,
     values,
-    labels: values.map((v) => formatNumber(v, alt)),
+    // Axis points read as people say them: "0.75", "2", not "0.750", "2.000".
+    labels: values.map((v) => formatNumber(v, alt).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "")),
     unit: unitLabel(alt),
     hex: tune.values.get(m.Data) ?? "",
   };
@@ -333,8 +365,8 @@ function tableChange(
     axis?.name && hi >= 0 && axis.labels.length > hi
       ? { name: axis.name, unit: axis.unit, from: axis.labels[lo], to: axis.labels[hi] }
       : undefined;
-  const point = (axis: AxisRead | null, i: number) =>
-    axis?.name && axis.labels[i] !== undefined ? `${axis.name} ${axis.labels[i]}${axis.unit ? ` ${axis.unit}` : ""}` : null;
+  const point = (axis: AxisRead | null, i: number): AxisPoint | null =>
+    axis?.name && axis.labels[i] !== undefined ? { name: axis.name, unit: axis.unit, value: axis.labels[i] } : null;
 
   return {
     layers,
@@ -346,7 +378,7 @@ function tableChange(
     maxDelta: changed ? maxDelta : 0,
     largest: {
       delta: largest.delta,
-      at: [point(rowB, largest.r), point(colB, largest.c)].filter((x): x is string => !!x),
+      at: [point(rowB, largest.r), point(colB, largest.c)].filter((x): x is AxisPoint => !!x),
     },
     unit: unitLabel(alt),
     dp,
@@ -504,7 +536,7 @@ export function describeChanges(changes: TuneChange[]): string {
         t.cellsChanged ? `${t.cellsChanged} of ${t.cells} cells changed by ${deltaSpan(t)}${t.unit ? ` ${t.unit}` : ""}` : null,
         at ? `at ${at}` : null,
         t.cellsChanged && t.largest.at.length
-          ? `largest ${deltaSpan({ ...t, minDelta: t.largest.delta, maxDelta: t.largest.delta })}${t.unit ? ` ${t.unit}` : ""} at ${t.largest.at.join(", ")}`
+          ? `largest ${deltaSpan({ ...t, minDelta: t.largest.delta, maxDelta: t.largest.delta })}${t.unit ? ` ${t.unit}` : ""} at ${t.largest.at.map((p) => `${p.name} ${p.value}${p.unit ? ` ${p.unit}` : ""}`).join(", ")}`
           : null,
         t.axisChanged ? "axis breakpoints changed" : null,
       ].filter(Boolean);

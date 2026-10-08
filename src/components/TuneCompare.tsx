@@ -9,6 +9,7 @@ import {
   describeChanges,
   diffTunes,
   loadTuneDefs,
+  type AxisPoint,
   type AxisRange,
   type TableChange,
   type TuneChange,
@@ -69,13 +70,18 @@ const shortDate = (t: number) =>
 const firmwareText = (v: string) =>
   v.split(".").slice(0, 3).map((p) => String(Number(p) || 0)).join(".");
 
-const signed = (v: number, dp: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(dp)}`;
+/** "13", "0.04", "2.5" — a number without the zeros nobody says. */
+const plain = (v: number, dp: number) => {
+  const s = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: dp });
+  return s;
+};
+const signed = (v: number, dp: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${plain(v, dp)}`;
 
 /** A table's move in words: "raised 100 RPM", "lowered up to 28.2 psi". */
 function tablePhrase(t: TableChange): { text: string; tone: "up" | "down" | "mixed" } {
   const unit = t.unit ? ` ${t.unit}` : "";
-  const abs = (v: number) => Math.abs(v).toFixed(t.dp);
-  if (t.cellsChanged === 0) return { text: "axis moved", tone: "mixed" };
+  const abs = (v: number) => plain(v, t.dp);
+  if (t.cellsChanged === 0) return { text: "lookup points moved", tone: "mixed" };
   if (t.minDelta > 0) {
     return { text: abs(t.minDelta) === abs(t.maxDelta) ? `raised ${abs(t.maxDelta)}${unit}` : `raised up to ${abs(t.maxDelta)}${unit}`, tone: "up" };
   }
@@ -85,31 +91,101 @@ function tablePhrase(t: TableChange): { text: string; tone: "up" | "down" | "mix
   return { text: `${signed(t.minDelta, t.dp)} to ${signed(t.maxDelta, t.dp)}${unit}`, tone: "mixed" };
 }
 
+/** Convex wraps server errors in request ids and paths; show the sentence. */
+function summaryError(e: unknown): string {
+  const raw = e instanceof Error ? e.message : "";
+  if (/could not find public function/i.test(raw)) return "The summary isn't available on this server yet.";
+  const message = raw.replace(/^\[CONVEX[^\]]*\]\s*(\[Request ID:[^\]]*\]\s*)?/i, "").replace(/^(Server Error|Uncaught Error:)\s*/i, "").split("\n")[0].trim();
+  return message || "The summary couldn't be written. Try again.";
+}
+
+/** "6.5–35.0 psi": the span of a table's values before a change. */
+function tableRange(t: TableChange): string {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const row of t.before) for (const v of row) {
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  if (!Number.isFinite(lo)) return "";
+  const f = (v: number) => `${v < 0 ? "−" : ""}${plain(v, t.dp)}`;
+  return `${f(lo)}${hi !== lo ? ` to ${f(hi)}` : ""}${t.unit ? ` ${t.unit}` : ""}`;
+}
+
 const TONE = { up: "text-sky-400", down: "text-rose-400", mixed: "text-amber-300" } as const;
 
-const axisText = (r: AxisRange) => `${r.name} ${r.from}${r.from !== r.to ? `–${r.to}` : ""}${r.unit ? ` ${r.unit}` : ""}`;
+const unitSuffix = (u: string) => (u ? ` ${u}` : "");
 
-function TableDelta({ t }: { t: TableChange }) {
+/** "from 0.75 to 2 s", "trim knob 1 at 8", "RPM 2,000 to 8,750". */
+function rangePhrase(r: AxisRange): string {
+  const same = r.from === r.to;
+  if (r.name === "time") return same ? `at ${r.from} s` : `from ${r.from} to ${r.to} s`;
+  return same ? `${r.name} at ${r.from}${unitSuffix(r.unit)}` : `${r.name} ${r.from} to ${r.to}${unitSuffix(r.unit)}`;
+}
+
+/**
+ * Where on a table it changed, time first: "from 0.75 to 2 s · trim knob 1
+ * at 8" for a cell, or joined with ", with" to sit inside a sentence.
+ */
+function wherePhrase(t: TableChange, sentence = false): string {
+  return [t.rowRange, t.colRange]
+    .filter((r): r is AxisRange => !!r)
+    .sort((a, b) => Number(b.name === "time") - Number(a.name === "time"))
+    .map(rangePhrase)
+    .join(sentence ? ", with " : " · ");
+}
+
+/** "1.75 s, trim knob 1 at 8". */
+function pointPhrase(points: AxisPoint[]): string {
+  return [...points]
+    .sort((a, b) => Number(b.name === "time") - Number(a.name === "time"))
+    .map((p) => (p.name === "time" ? `${p.value} s` : `${p.name} at ${p.value}${unitSuffix(p.unit)}`))
+    .join(", ");
+}
+
+type GridMode = "before" | "after" | "diff";
+
+/**
+ * The changed corner of a table — one cell of context around the change, and
+ * never a wall of numbers — as the values before, after, or the difference.
+ * All three views show the same cells on the same colour scale, so flicking
+ * between Before and After shows only what moved.
+ */
+function TableGrid({ t, mode }: { t: TableChange; mode: GridMode }) {
   const still = (d: number) => Math.abs(d) < 0.5 * 10 ** -t.dp;
-  let r0 = Infinity, r1 = -1, c0 = Infinity, c1 = -1, max = 0;
+  let r0 = Infinity, r1 = -1, c0 = Infinity, c1 = -1;
   t.after.forEach((row, r) =>
     row.forEach((v, c) => {
-      const d = v - t.before[r][c];
-      if (still(d)) return;
+      if (still(v - t.before[r][c])) return;
       r0 = Math.min(r0, r); r1 = Math.max(r1, r);
       c0 = Math.min(c0, c); c1 = Math.max(c1, c);
-      max = Math.max(max, Math.abs(d));
     }),
   );
   if (r1 < 0) return null;
-  // One cell of context around the change, and never a wall of numbers.
   r0 = Math.max(0, r0 - 1); r1 = Math.min(t.rows - 1, r1 + 1, r0 + 15);
   c0 = Math.max(0, c0 - 1); c1 = Math.min(t.cols - 1, c1 + 1, c0 + 15);
   const rows = Array.from({ length: r1 - r0 + 1 }, (_, i) => r0 + i);
   const cols = Array.from({ length: c1 - c0 + 1 }, (_, i) => c0 + i);
 
+  // One scale for both Before and After, so a colour means the same value.
+  let lo = Infinity, hi = -Infinity, maxDelta = 0;
+  for (const r of rows) {
+    for (const c of cols) {
+      for (const v of [t.before[r][c], t.after[r][c]]) {
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+      maxDelta = Math.max(maxDelta, Math.abs(t.after[r][c] - t.before[r][c]));
+    }
+  }
+  const heat = (v: number) => {
+    const k = hi > lo ? (v - lo) / (hi - lo) : 0.5;
+    // Low blue to high red, kept dim enough for white text.
+    return `hsla(${Math.round(220 - 220 * k)}, 70%, 45%, 0.45)`;
+  };
+
   return (
-    <div className="mt-2 overflow-x-auto">
+    <div className="overflow-x-auto">
       <table className="border-separate border-spacing-0.5 font-mono text-[10px] tabular-nums">
         <thead>
           <tr>
@@ -124,19 +200,29 @@ function TableDelta({ t }: { t: TableChange }) {
             <tr key={r}>
               <th className="pr-1 text-right font-normal text-muted-foreground">{t.rowLabels[r] ?? r}</th>
               {cols.map((c) => {
-                const d = t.after[r][c] - t.before[r][c];
-                const k = max > 0 ? Math.abs(d) / max : 0;
-                const bg = still(d)
-                  ? "transparent"
-                  : d > 0 ? `rgba(56, 189, 248, ${0.15 + 0.55 * k})` : `rgba(251, 113, 133, ${0.15 + 0.55 * k})`;
+                const b = t.before[r][c];
+                const a = t.after[r][c];
+                const d = a - b;
+                const moved = !still(d);
+                let bg = "transparent";
+                let text: React.ReactNode;
+                if (mode === "diff") {
+                  const k = maxDelta > 0 ? Math.abs(d) / maxDelta : 0;
+                  bg = !moved ? "transparent" : d > 0 ? `rgba(56, 189, 248, ${0.15 + 0.55 * k})` : `rgba(251, 113, 133, ${0.15 + 0.55 * k})`;
+                  text = moved ? signed(d, t.dp) : <span className="text-muted-foreground/40">·</span>;
+                } else {
+                  const v = mode === "before" ? b : a;
+                  bg = heat(v);
+                  text = v.toFixed(t.dp);
+                }
                 return (
                   <td
                     key={c}
-                    title={`${t.before[r][c].toFixed(t.dp)} → ${t.after[r][c].toFixed(t.dp)}`}
-                    className="rounded-sm px-1 text-right"
+                    title={`${b.toFixed(t.dp)} → ${a.toFixed(t.dp)}`}
+                    className={`rounded-sm px-1 text-right ${moved && mode !== "diff" ? "outline outline-1 -outline-offset-1 outline-white/70" : ""}`}
                     style={{ backgroundColor: bg }}
                   >
-                    {still(d) ? <span className="text-muted-foreground/40">·</span> : signed(d, t.dp)}
+                    {text}
                   </td>
                 );
               })}
@@ -148,30 +234,66 @@ function TableDelta({ t }: { t: TableChange }) {
   );
 }
 
-
 /** Everything about one table change: where, the biggest move, the cells. */
 function TableDetail({ change, from, to }: { change: TuneChange; from: string; to: string }) {
   const t = change.table!;
-  const where = [t.rowRange, t.colRange].filter((r): r is AxisRange => !!r).map(axisText);
+  const [mode, setMode] = useState<GridMode>("diff");
+  const where = wherePhrase(t, true);
+  const tabs: { mode: GridMode; label: string }[] = [
+    { mode: "before", label: "Before" },
+    { mode: "after", label: "After" },
+    { mode: "diff", label: "Diff" },
+  ];
   return (
-    <div className="space-y-1">
+    <div
+      className="space-y-1.5 outline-none"
+      tabIndex={0}
+      // Space flicks between Before and After, the quickest way to see what moved.
+      onKeyDown={(e) => {
+        if (e.key !== " ") return;
+        e.preventDefault();
+        setMode((m) => (m === "before" ? "after" : "before"));
+      }}
+    >
       <div className="text-xs">
         <span className="text-muted-foreground">{from}</span>
         <span className="px-1.5 text-muted-foreground/60">→</span>
         <span className="font-medium">{to}</span>
       </div>
-      <div className="text-xs text-muted-foreground">
-        {t.cellsChanged > 0 && `${t.cellsChanged} of ${t.cells} cells changed`}
-        {where.length > 0 && ` · ${where.join(" · ")}`}
-        {t.axisChanged && " · axis breakpoints moved"}
-      </div>
-      {t.cellsChanged > 0 && t.largest.at.length > 0 && (
-        <div className="text-xs">
-          Biggest change: <span className="font-mono">{signed(t.largest.delta, t.dp)}{t.unit ? ` ${t.unit}` : ""}</span>
-          <span className="text-muted-foreground"> at {t.largest.at.join(", ")}</span>
-        </div>
+      <p className="text-sm">
+        {t.cellsChanged > 0 ? `${tablePhrase(t).text[0].toUpperCase()}${tablePhrase(t).text.slice(1)}` : "The values stayed the same"}
+        {where && `, ${where}`}.
+        {t.axisChanged && " The points the table is looked up by moved too."}
+      </p>
+      {t.cellsChanged > 0 && t.largest.at.length > 0 && t.minDelta !== t.maxDelta && (
+        <p className="text-sm text-muted-foreground">
+          Biggest change: <span className="text-foreground">{signed(t.largest.delta, t.dp)}{unitSuffix(t.unit)}</span> at {pointPhrase(t.largest.at)}.
+        </p>
       )}
-      <TableDelta t={t} />
+      {t.cellsChanged > 0 && (
+        <>
+          <div className="flex items-center gap-2 pt-1">
+            <div className="inline-flex rounded-md border p-0.5">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.mode}
+                  type="button"
+                  onClick={(e) => {
+                    setMode(tab.mode);
+                    // Keep focus on the panel so Space keeps working.
+                    (e.currentTarget.closest("[tabindex]") as HTMLElement | null)?.focus();
+                  }}
+                  className={`cursor-pointer rounded px-2.5 py-0.5 text-xs ${mode === tab.mode ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <span className="text-[11px] text-muted-foreground">Space switches Before / After</span>
+          </div>
+          <TableGrid t={t} mode={mode} />
+        </>
+      )}
     </div>
   );
 }
@@ -352,7 +474,7 @@ export function TuneCompare() {
       .then((text) => setSummary((s) => (s.key === summaryKey ? { key: summaryKey, text } : s)))
       .catch((e) =>
         setSummary((s) =>
-          s.key === summaryKey ? { key: summaryKey, error: e instanceof Error ? e.message : "The summary failed." } : s,
+          s.key === summaryKey ? { key: summaryKey, error: summaryError(e) } : s,
         ),
       );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -369,7 +491,7 @@ export function TuneCompare() {
   let lastArea: string | null = null;
 
   return (
-    <div className="max-w-6xl space-y-5 p-6">
+    <div className="space-y-5 p-6">
       <div>
         <h1 className="text-xl font-semibold">Compare tunes</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -477,6 +599,7 @@ export function TuneCompare() {
                     <th key={j} className="min-w-40 px-3 py-2 font-normal">
                       <Tip content={c.runs.map((r) => `${r.label} — ${shortDate(r.time)}`).join("\n")}>
                         <div className="max-w-56">
+                          {j === 0 && <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Starting tune</div>}
                           <div className="truncate text-sm font-medium">{c.runs[c.runs.length - 1].label}</div>
                           <div className="text-[11px] text-muted-foreground">
                             {shortDate(c.runs[0].time)}
@@ -530,16 +653,23 @@ export function TuneCompare() {
                             );
                           }
                           const c = row.steps[j];
-                          if (!c?.table) return <td key={j} className="px-3 py-1.5 text-xs text-muted-foreground/40">{j === 0 ? "" : "·"}</td>;
+                          if (j === 0) {
+                            // Where the table started: its range before the first change.
+                            const first = row.steps.find((s) => s?.table)?.table;
+                            return (
+                              <td key={j} className="px-3 py-1.5 font-mono text-xs text-muted-foreground/70">
+                                {first ? tableRange(first) : ""}
+                              </td>
+                            );
+                          }
+                          if (!c?.table) return <td key={j} className="px-3 py-1.5 text-xs text-muted-foreground/40">·</td>;
                           const p = tablePhrase(c.table);
                           return (
                             <td key={j} className="px-3 py-1.5 text-xs">
                               <button type="button" onClick={() => toggle(row.id)} className={`cursor-pointer text-left font-medium ${TONE[p.tone]}`}>
                                 {p.text}
                               </button>
-                              <div className="text-[11px] text-muted-foreground">
-                                {c.table.cellsChanged > 0 ? `${c.table.cellsChanged} cell${c.table.cellsChanged === 1 ? "" : "s"}` : ""}
-                              </div>
+                              <div className="text-[11px] text-muted-foreground">{wherePhrase(c.table)}</div>
                             </td>
                           );
                         })}
