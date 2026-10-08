@@ -18,7 +18,8 @@ import {
 } from "@/lib/tune-diff";
 import { inGroupLabel } from "@/lib/legend-labels";
 import { loadLastTune, saveLastTune } from "@/lib/tune-store";
-import type { UnitSystem } from "@/lib/ecu/types";
+import { useUnitPreferences } from "@/hooks/useUnitPreferences";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
 
 interface LoadedTune {
   label: string;
@@ -45,6 +46,41 @@ interface Row {
   values?: string[];
   /** Per column (index 0 is always empty): the change into that column. */
   steps: (TuneChange | undefined)[];
+}
+
+const CAR_KEY = (serial: string) => `dragtrace:tune-car:${serial}`;
+
+function rememberedCar(serial: string): string | null {
+  try {
+    return localStorage.getItem(CAR_KEY(serial));
+  } catch {
+    return null;
+  }
+}
+
+function rememberCar(serial: string, id: string | null) {
+  try {
+    if (id) localStorage.setItem(CAR_KEY(serial), id);
+    else localStorage.removeItem(CAR_KEY(serial));
+  } catch {
+    // Blocked storage: the choice just isn't remembered.
+  }
+}
+
+/**
+ * The vehicle a tune most likely belongs to, by name: "Chad Corvette" finds
+ * "Chad Vette" — words match when one contains the other.
+ */
+function guessCar(profileName: string, vehicles: Doc<"vehicles">[]): Doc<"vehicles"> | undefined {
+  const words = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+  const tune = words(profileName);
+  let best: { v: Doc<"vehicles">; score: number } | undefined;
+  for (const v of vehicles) {
+    const name = words([v.name, v.make, v.model].filter(Boolean).join(" "));
+    const score = tune.filter((t) => name.some((n) => n.includes(t) || t.includes(n))).length;
+    if (score > 0 && (!best || score > best.score)) best = { v, score };
+  }
+  return best?.v;
 }
 
 /** "2025-10-09_1042am" in a Haltech file name -> a timestamp. */
@@ -322,7 +358,9 @@ function SummaryText({ text }: { text: string }) {
  * and never uploaded; only the list of changes is sent for the AI summary.
  */
 export function TuneCompare() {
-  const prefs = useQuery(api.userPreferences.get);
+  const vehicles = useQuery(api.vehicles.list);
+  const [vehicleId, setVehicleId] = useState<Id<"vehicles"> | null>(null);
+  const unitPrefs = useUnitPreferences(vehicleId ?? undefined);
   const summarize = useAction(api.tuneSummary.summarize);
   const inputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
@@ -335,15 +373,12 @@ export function TuneCompare() {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [summary, setSummary] = useState<{ key?: string; text?: string; error?: string; busy?: boolean }>({});
 
-  const units: UnitChoice = useMemo(() => {
-    let overrides: Record<string, string> | undefined;
-    try {
-      overrides = prefs?.unitOverrides ? JSON.parse(prefs.unitOverrides) : undefined;
-    } catch {
-      overrides = undefined;
-    }
-    return { system: (prefs?.unitSystem as UnitSystem | undefined) ?? "imperial", overrides };
-  }, [prefs]);
+  // The car's units: the account's, with that vehicle's overrides on top —
+  // the same rule the viewer uses.
+  const units: UnitChoice = useMemo(
+    () => ({ system: unitPrefs.unitSystem, overrides: unitPrefs.resolved }),
+    [unitPrefs.unitSystem, unitPrefs.resolved],
+  );
 
   const open = useCallback(async (files: File[]) => {
     setLoading(true);
@@ -450,6 +485,15 @@ export function TuneCompare() {
   const shown = area ? rows.filter((r) => r.area === area) : rows;
 
   const meta = tunes[0]?.tune.meta;
+
+  // Which car this ECU is: the choice made for its serial before, else the
+  // vehicle whose name best matches the tune's own name.
+  useEffect(() => {
+    if (!meta || !vehicles) return;
+    const remembered = rememberedCar(meta.serial);
+    const pick = vehicles.find((v) => v._id === remembered) ?? guessCar(meta.profileName, vehicles);
+    setVehicleId(pick?._id ?? null);
+  }, [meta?.serial, meta?.profileName, vehicles]); // eslint-disable-line react-hooks/exhaustive-deps
   const colName = (c: Column) => c.runs.map((r) => r.label).join(" · ");
 
   // The summary writes itself once the comparison is ready; the same
@@ -540,6 +584,29 @@ export function TuneCompare() {
         <div className="space-y-1 text-sm">
           <div>
             <span className="font-medium">{meta.profileName || "Tune"}</span>
+            {vehicles && vehicles.length > 0 && (
+              <>
+                <span className="text-muted-foreground"> · </span>
+                <select
+                  value={vehicleId ?? ""}
+                  onChange={(e) => {
+                    const id = (e.target.value || null) as Id<"vehicles"> | null;
+                    setVehicleId(id);
+                    rememberCar(meta.serial, id);
+                  }}
+                  className="h-7 cursor-pointer rounded-md border bg-background px-1.5 text-sm"
+                  aria-label="Which car — sets the units"
+                  title="Which car this is — its units are used below"
+                >
+                  <option value="">Account units</option>
+                  {vehicles.map((v) => (
+                    <option key={v._id} value={v._id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
             <span className="text-muted-foreground">
               {" "}· {defs.name} {firmwareText(meta.firmware)} · {tunes.length} file{tunes.length === 1 ? "" : "s"}, {columns.length} different tune{columns.length === 1 ? "" : "s"}
             </span>
