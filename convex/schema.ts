@@ -354,4 +354,13 @@ export default defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_customer", ["stripeCustomerId"]),
+
+  // AI summaries of tune changes, so reopening the same comparison doesn't
+  // pay for the same summary twice. Keyed by a hash of exactly what was sent.
+  tuneSummaries: defineTable({
+    userId: v.id("users"),
+    key: v.string(),
+    text: v.string(),
+    createdAt: v.number(),
+  }).index("by_user_key", ["userId", "key"]),
 });

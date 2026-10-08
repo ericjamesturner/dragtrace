@@ -141,9 +141,10 @@ function formatNumber(v: number, alt: UnitAlternate | undefined): string {
   return v.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 
+/** A unit worth printing: "Raw" and "Position" (a knob detent) say nothing. */
 function unitLabel(alt: UnitAlternate | undefined): string {
   const l = alt?.label?.trim();
-  return l && l !== "Raw" ? l : "";
+  return l && l !== "Raw" && l !== "Position" ? l : "";
 }
 
 /** Text settings — custom names, descriptions — are NUL-padded ASCII. */
@@ -189,13 +190,16 @@ export interface TableChange {
   rows: number;
   cols: number;
   cells: number;
+  /** Cells whose shown value moved — rounding-level differences don't count. */
   cellsChanged: number;
   /** Change of the changed cells, in display units. */
   minDelta: number;
   maxDelta: number;
+  /** The single biggest move, and where on the table it is. */
+  largest: { delta: number; at: string[] };
   unit: string;
   dp: number;
-  /** Where on each axis the changed cells sit. */
+  /** Where on each axis the changed cells sit. Axes without a channel are left out. */
   rowRange?: AxisRange;
   colRange?: AxisRange;
   axisChanged: boolean;
@@ -213,6 +217,8 @@ export interface TuneChange {
   kind: "value" | "text" | "table";
   before?: string;
   after?: string;
+  /** For numeric values: which way it moved, for colour and wording. */
+  direction?: "up" | "down";
   table?: TableChange;
 }
 
@@ -230,7 +236,8 @@ function ownerIndex(defs: Record<string, Def>): Map<number, number> {
 const ownerCache = new WeakMap<object, Map<number, number>>();
 
 interface AxisRead {
-  name: string;
+  /** Null when the axis follows no channel — its numbers mean nothing alone. */
+  name: string | null;
   values: number[];
   labels: string[];
   unit: string;
@@ -256,7 +263,7 @@ function readAxis(
   const alt = alternateFor(channel ?? dataDef, units);
   const values = used.map((v) => toDisplay(v, alt));
   return {
-    name: channel?.L ?? (which === "RowAxis" ? "Row" : "Column"),
+    name: channel?.L && !channel.L.startsWith("_") ? channel.L : null,
     values,
     labels: values.map((v) => formatNumber(v, alt)),
     unit: unitLabel(alt),
@@ -277,6 +284,9 @@ function tableChange(
   if (!dims) return null;
   const [layers, rows, cols] = dims;
   const alt = alternateFor(dataDef.u ? dataDef : table, units);
+  const dp = Math.min(4, alt?.dp ?? 0);
+  // Two encodings that show the same number aren't a change anyone made.
+  const threshold = 0.5 * 10 ** -dp;
   const va = readValues(a.values.get(dataId), dataDef.t).map((v) => toDisplay(v, alt));
   const vb = readValues(b.values.get(dataId), dataDef.t).map((v) => toDisplay(v, alt));
 
@@ -291,6 +301,7 @@ function tableChange(
   let changed = 0;
   let minDelta = Infinity;
   let maxDelta = -Infinity;
+  let largest = { delta: 0, layer: 0, r: 0, c: 0 };
   let firstLayer = -1;
   let r0 = Infinity, r1 = -1, c0 = Infinity, c1 = -1;
   for (let l = 0; l < layers; l++) {
@@ -298,10 +309,11 @@ function tableChange(
       for (let c = 0; c < usedCols; c++) {
         const i = l * rows * cols + r * cols + c;
         const d = (vb[i] ?? 0) - (va[i] ?? 0);
-        if (Math.abs(d) < 1e-9) continue;
+        if (Math.abs(d) < threshold) continue;
         changed++;
         if (d < minDelta) minDelta = d;
         if (d > maxDelta) maxDelta = d;
+        if (Math.abs(d) > Math.abs(largest.delta)) largest = { delta: d, layer: l, r, c };
         if (firstLayer < 0) firstLayer = l;
         if (l === firstLayer) {
           r0 = Math.min(r0, r); r1 = Math.max(r1, r);
@@ -318,9 +330,11 @@ function tableChange(
       Array.from({ length: usedCols }, (_, c) => vals[layer * rows * cols + r * cols + c] ?? 0),
     );
   const range = (axis: AxisRead | null, lo: number, hi: number): AxisRange | undefined =>
-    axis && hi >= 0 && axis.labels.length > hi
+    axis?.name && hi >= 0 && axis.labels.length > hi
       ? { name: axis.name, unit: axis.unit, from: axis.labels[lo], to: axis.labels[hi] }
       : undefined;
+  const point = (axis: AxisRead | null, i: number) =>
+    axis?.name && axis.labels[i] !== undefined ? `${axis.name} ${axis.labels[i]}${axis.unit ? ` ${axis.unit}` : ""}` : null;
 
   return {
     layers,
@@ -330,8 +344,12 @@ function tableChange(
     cellsChanged: changed,
     minDelta: changed ? minDelta : 0,
     maxDelta: changed ? maxDelta : 0,
+    largest: {
+      delta: largest.delta,
+      at: [point(rowB, largest.r), point(colB, largest.c)].filter((x): x is string => !!x),
+    },
     unit: unitLabel(alt),
-    dp: Math.min(4, alt?.dp ?? 0),
+    dp,
     rowRange: range(rowB, r0, r1),
     colRange: range(colB, c0, c1),
     axisChanged,
@@ -342,26 +360,33 @@ function tableChange(
   };
 }
 
-function formatScalar(hex: string | undefined, def: Def, defs: Record<string, Def>, units: UnitChoice): string {
-  if (hex === undefined) return "—";
+function formatScalar(hex: string | undefined, def: Def, defs: Record<string, Def>, units: UnitChoice): { text: string; number?: number } {
+  if (hex === undefined) return { text: "—" };
   const values = readValues(hex, def.t);
-  if (values.length === 0) return "—";
+  if (values.length === 0) return { text: "—" };
   // A setting that picks a channel holds the channel's object id.
   if (!def.u && !def.e && values.length === 1 && /channel|input|source/i.test(def.L ?? "")) {
     const target = defs[values[0]];
-    if (target?.L && !target.L.startsWith("_")) return target.L;
+    if (target?.L && !target.L.startsWith("_")) return { text: target.L };
   }
   if (def.e) {
-    const labels = values.map((v) => def.e![String(v)] ?? String(v));
-    return labels.join(", ");
+    return { text: values.map((v) => def.e![String(v)] ?? String(v)).join(", ") };
   }
   const alt = alternateFor(def, units);
   const shown = values.slice(0, 8).map((v) => formatNumber(toDisplay(v, alt), alt));
   const unit = unitLabel(alt);
-  return `${shown.join(", ")}${values.length > 8 ? ", …" : ""}${unit ? ` ${unit}` : ""}`;
+  return {
+    text: `${shown.join(", ")}${values.length > 8 ? ", …" : ""}${unit ? ` ${unit}` : ""}`,
+    number: values.length === 1 ? toDisplay(values[0], alt) : undefined,
+  };
 }
 
-/** Every setting that differs from `a` to `b`, by Haltech group then name. */
+/** Path segments that only say "this is configuration". */
+const EMPTY_GROUP = /^(settings parameters|settings|parameters|setup)$/i;
+
+const cleanName = (name: string) => name.trim().replace(/[.:]+$/, "");
+
+/** Every setting that differs from `a` to `b`, most important first. */
 export function diffTunes(a: Tune, b: Tune, tuneDefs: TuneDefs, units: UnitChoice): TuneChange[] {
   const { defs, groups } = tuneDefs;
   let owner = ownerCache.get(defs);
@@ -369,6 +394,7 @@ export function diffTunes(a: Tune, b: Tune, tuneDefs: TuneDefs, units: UnitChoic
     owner = ownerIndex(defs);
     ownerCache.set(defs, owner);
   }
+  const groupOf = (d: Def) => (d.g !== undefined ? groups[d.g].filter((g) => !EMPTY_GROUP.test(g)) : []);
 
   const ids = new Set<number>([...a.values.keys(), ...b.values.keys()]);
   const tablesDone = new Set<number>();
@@ -391,8 +417,8 @@ export function diffTunes(a: Tune, b: Tune, tuneDefs: TuneDefs, units: UnitChoic
       if (change) {
         out.push({
           id: tableId,
-          name: table.L ?? `Table ${tableId}`,
-          group: table.g !== undefined ? groups[table.g] : [],
+          name: cleanName(table.L ?? `Table ${tableId}`),
+          group: groupOf(table),
           kind: "table",
           table: change,
         });
@@ -404,41 +430,82 @@ export function diffTunes(a: Tune, b: Tune, tuneDefs: TuneDefs, units: UnitChoic
 
     const ha = a.values.get(id);
     const hb = b.values.get(id);
-    const group = def.g !== undefined ? groups[def.g] : [];
+    const group = groupOf(def);
+    const name = cleanName(def.L!);
     const textA = !def.u && !def.e && ha ? asText(ha) : null;
     const textB = !def.u && !def.e && hb ? asText(hb) : null;
     if (textA !== null || textB !== null) {
       if ((textA ?? "") === (textB ?? "")) continue;
-      out.push({ id, name: def.L!, group, kind: "text", before: textA ?? "—", after: textB ?? "—" });
+      out.push({ id, name, group, kind: "text", before: textA ?? "—", after: textB ?? "—" });
       continue;
     }
     const before = formatScalar(ha, def, defs, units);
     const after = formatScalar(hb, def, defs, units);
     // Two raw encodings can display the same (rounding); not a change anyone made.
-    if (before === after) continue;
-    out.push({ id, name: def.L!, group, kind: "value", before, after });
+    if (before.text === after.text) continue;
+    const direction =
+      before.number !== undefined && after.number !== undefined
+        ? after.number > before.number ? "up" : "down"
+        : undefined;
+    out.push({ id, name, group, kind: "value", before: before.text, after: after.text, direction });
   }
 
-  const key = (c: TuneChange) => `${c.group.join("\u0000")}\u0001${c.name}`;
-  return out.sort((x, y) => key(x).localeCompare(key(y)));
+  return out.sort((x, y) => {
+    const ax = changeArea(x);
+    const ay = changeArea(y);
+    return ax.rank - ay.rank || x.group.join("\u0000").localeCompare(y.group.join("\u0000")) || x.name.localeCompare(y.name);
+  });
+}
+
+// ── What it's about ──
+
+/**
+ * The area of the car a change belongs to, in the order a racer reads a tune
+ * change: what makes power and keeps the engine alive first, setup last.
+ */
+const AREAS: { area: string; test: RegExp }[] = [
+  { area: "Ignition", test: /ignition|spark|timing|knock/i },
+  { area: "Boost", test: /boost|wastegate|turbo|anti.?lag/i },
+  { area: "Fuel", test: /fuel|lambda|injector|injection|o2 control/i },
+  { area: "Launch", test: /launch|trans.?brake|two.?step|rotary trim/i },
+  { area: "Torque Management", test: /torque management|traction|wheelie/i },
+  { area: "Nitrous", test: /nitrous|n2o/i },
+  { area: "Shifting", test: /transmission|shift|gear|clutch|torque converter/i },
+  { area: "Limits & protection", test: /limit|protection|cut|safety/i },
+  { area: "Sensors & setup", test: /sensor|input|output|calibration|trigger|switch|engine$/i },
+];
+
+export function changeArea(c: TuneChange): { area: string; rank: number } {
+  // The group says it most reliably; the name catches what the tree files oddly.
+  const where = [...c.group].reverse();
+  for (const text of [...where, c.name]) {
+    const i = AREAS.findIndex((a) => a.test.test(text));
+    if (i >= 0) return { area: AREAS[i].area, rank: i };
+  }
+  return { area: "Other", rank: AREAS.length };
+}
+
+/** "−3.5 to −1.0" style span of a table's changes. */
+export function deltaSpan(t: TableChange): string {
+  const fmt = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(t.dp)}`;
+  return fmt(t.minDelta) === fmt(t.maxDelta) ? fmt(t.minDelta) : `${fmt(t.minDelta)} to ${fmt(t.maxDelta)}`;
 }
 
 /** One line per change, for the AI summary: compact, but every number kept. */
 export function describeChanges(changes: TuneChange[]): string {
+  const axis = (r: AxisRange) => `${r.name} ${r.from}${r.from !== r.to ? `–${r.to}` : ""}${r.unit ? ` ${r.unit}` : ""}`;
   return changes
     .map((c) => {
       const where = c.group.length ? `${c.group.join(" > ")} > ` : "";
       if (c.kind !== "table" || !c.table) return `${where}${c.name}: ${c.before} -> ${c.after}`;
       const t = c.table;
-      const fmt = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(t.dp)}`;
-      const span = fmt(t.minDelta) === fmt(t.maxDelta) ? fmt(t.minDelta) : `${fmt(t.minDelta)} to ${fmt(t.maxDelta)}`;
-      const at = [t.rowRange, t.colRange]
-        .filter((r): r is AxisRange => !!r)
-        .map((r) => `${r.name} ${r.from}${r.from !== r.to ? `–${r.to}` : ""}${r.unit ? ` ${r.unit}` : ""}`)
-        .join(", ");
+      const at = [t.rowRange, t.colRange].filter((r): r is AxisRange => !!r).map(axis).join(", ");
       const parts = [
-        t.cellsChanged ? `${t.cellsChanged} of ${t.cells} cells changed by ${span}${t.unit ? ` ${t.unit}` : ""}` : null,
+        t.cellsChanged ? `${t.cellsChanged} of ${t.cells} cells changed by ${deltaSpan(t)}${t.unit ? ` ${t.unit}` : ""}` : null,
         at ? `at ${at}` : null,
+        t.cellsChanged && t.largest.at.length
+          ? `largest ${deltaSpan({ ...t, minDelta: t.largest.delta, maxDelta: t.largest.delta })}${t.unit ? ` ${t.unit}` : ""} at ${t.largest.at.join(", ")}`
+          : null,
         t.axisChanged ? "axis breakpoints changed" : null,
       ].filter(Boolean);
       return `${where}${c.name} (table): ${parts.join("; ")}`;
