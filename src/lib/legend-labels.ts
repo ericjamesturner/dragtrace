@@ -17,6 +17,8 @@ export interface LegendLabel {
   heading: string | null;
   /** Hover text for the heading, e.g. the group's full path. */
   headingTitle?: string;
+  /** On a heading row: how many rows the heading covers, this one included. */
+  run?: number;
   /** The text for the row itself. */
   label: string;
   /** Sits under a heading, so the row is indented to show it. */
@@ -80,6 +82,7 @@ function labelBySharedWords(names: string[], out: LegendLabel[], offset: number)
     const run = names.slice(i, end);
     if (run.length >= 2 && run.some((n) => n.length > FITS_CHARS)) {
       out[offset + i].heading = split[i].slice(0, prefixLen).join(" ");
+      out[offset + i].run = end - i;
       for (let k = i; k < end; k++) {
         out[offset + k].label = split[k].slice(prefixLen).join(" ");
         out[offset + k].grouped = true;
@@ -136,6 +139,7 @@ export function legendLabels(
       const leaf = path[path.length - 1];
       out[i].heading = leaf;
       out[i].headingTitle = path.join(" › ");
+      out[i].run = end - i;
       for (let r = i; r < end; r++) {
         out[r].label = inGroupLabel(names[r], leaf);
         out[r].grouped = true;
@@ -144,4 +148,68 @@ export function legendLabels(
     i = end;
   }
   return out;
+}
+
+/** Heading for channels the definition data puts in no category. */
+const UNCATEGORISED = "Other";
+
+/**
+ * The panel listed by category instead of in trace order: every channel under
+ * a heading, categories in the order they first appear, channels in trace
+ * order within them, and anything without a category last.
+ *
+ * A category is the channel's group, unless no other channel on the trace
+ * shares it — then its parent, so one oil-pressure channel sits under
+ * "Sensors" rather than a heading of its own. The top level always stands.
+ *
+ * @returns `order`: indexes into `names` in display order; `labels`: one per
+ *   display position.
+ */
+export function categoryLabels(
+  names: string[],
+  groups: (string[] | undefined)[],
+): { order: number[]; labels: LegendLabel[] } {
+  const key = (path: string[]) => path.join("\u0000");
+  const counts = new Map<string, number>();
+  for (const g of groups) {
+    if (!g) continue;
+    for (let depth = 1; depth <= g.length; depth++) {
+      const k = key(g.slice(0, depth));
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+  }
+
+  const categories = new Map<string, { path: string[] | null; members: number[] }>();
+  names.forEach((_, i) => {
+    const g = groups[i];
+    let path: string[] | null = null;
+    if (g && g.length > 0) {
+      let depth = g.length;
+      while (depth > 1 && (counts.get(key(g.slice(0, depth))) ?? 0) < 2) depth--;
+      path = g.slice(0, depth);
+    }
+    const k = path ? key(path) : "";
+    const cat = categories.get(k) ?? { path, members: [] };
+    cat.members.push(i);
+    categories.set(k, cat);
+  });
+
+  // Uncategorised last, whatever the trace order.
+  const ordered = [...categories.values()].sort((a, b) => Number(!a.path) - Number(!b.path));
+  const order: number[] = [];
+  const labels: LegendLabel[] = [];
+  for (const { path, members } of ordered) {
+    const leaf = path ? path[path.length - 1] : UNCATEGORISED;
+    members.forEach((i, m) => {
+      order.push(i);
+      labels.push({
+        heading: m === 0 ? leaf : null,
+        headingTitle: m === 0 && path ? path.join(" › ") : undefined,
+        run: m === 0 ? members.length : undefined,
+        label: path ? inGroupLabel(names[i], leaf) : names[i],
+        grouped: true,
+      });
+    });
+  }
+  return { order, labels };
 }

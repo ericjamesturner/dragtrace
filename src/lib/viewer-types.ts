@@ -137,6 +137,12 @@ export interface TraceConfig {
    * always been drawn, so an old config keeps doing what it did.
    */
   showZones?: boolean;
+  /**
+   * List the channels panel under each channel's ECU category ("Torque
+   * Management", "Sensors"), wherever the channels sit in the trace's order.
+   * Off: headings only join channels that are already next to each other.
+   */
+  groupByCategory?: boolean;
 }
 
 /** Smallest usable trace chart area, in px. Also the floor for a weight. */
@@ -293,6 +299,7 @@ export type ViewerAction =
   | { type: "toggleTraceCollapsed"; traceId: string }
   | { type: "toggleTraceTimeslip"; traceId: string }
   | { type: "toggleTraceZones"; traceId: string }
+  | { type: "toggleTraceGrouping"; traceId: string }
   | { type: "setLegendWidth"; width: number | undefined }
   | { type: "toggleLegendCollapsed" }
   | { type: "setChannelsHidden"; traceId: string; keys: string[]; hidden: boolean }
@@ -528,6 +535,14 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         pages: mapTraceById(state.pages, action.traceId, (t) => ({
           ...t,
           showZones: t.showZones === false,
+        })),
+      };
+    case "toggleTraceGrouping":
+      return {
+        ...state,
+        pages: mapTraceById(state.pages, action.traceId, (t) => ({
+          ...t,
+          groupByCategory: !t.groupByCategory || undefined,
         })),
       };
     case "toggleTraceCollapsed":

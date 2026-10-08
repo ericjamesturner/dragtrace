@@ -18,14 +18,14 @@ import {
   type UnitOverrides,
 } from "@/lib/units";
 import { useEvaluatedZones, type EvaluatedZone } from "@/hooks/useEvaluatedZones";
-import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon, MoveHorizontalIcon, HighlighterIcon, ListPlusIcon, BoxIcon } from "lucide-react";
+import { XIcon, SlidersHorizontalIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, GripVerticalIcon, TimerIcon, MoveHorizontalIcon, HighlighterIcon, ListPlusIcon, BoxIcon, FolderTreeIcon, CheckIcon } from "lucide-react";
 import { HOVER_TIP_DELAY, Tip } from "@/components/ui/tooltip";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { legendLabels } from "@/lib/legend-labels";
+import { categoryLabels, legendLabels } from "@/lib/legend-labels";
 import { applyChannelSignalFilter, type ChannelSignalFilter } from "@/lib/signal-filter";
 
 /** Which channel's style dialog is open. Opened by clicking its row in the
@@ -145,13 +145,32 @@ function SignalFilterSlider({
 // Race line defaults to dashed when unset, so "Solid" is an explicit [] (empty)
 // to distinguish it from "use default".
 /** Shared start of the long channel names below it, e.g. "Torque Management". */
-function LegendHeading({ text, title }: { text: string; title?: string }) {
+function LegendHeading({
+  text,
+  title,
+  toggle,
+}: {
+  text: string;
+  title?: string;
+  /** A switch for every channel under the heading at once. */
+  toggle?: { checked: boolean; mixed: boolean; onChange: () => void };
+}) {
   return (
-    <Tip content={title ?? text} delay={HOVER_TIP_DELAY} side="left">
-      <div className="mt-1 truncate text-[10px] font-semibold uppercase tracking-wider text-white/40 first:mt-0">
-        {text}
-      </div>
-    </Tip>
+    <div className="mt-1 flex items-center gap-1.5 first:mt-0">
+      {toggle && (
+        <Switch
+          checked={toggle.checked}
+          mixed={toggle.mixed}
+          onChange={toggle.onChange}
+          title={toggle.checked ? `Hide all of ${text}` : `Show all of ${text}`}
+        />
+      )}
+      <Tip content={title ?? text} delay={HOVER_TIP_DELAY} side="left">
+        <div className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wider text-white/40">
+          {text}
+        </div>
+      </Tip>
+    </div>
   );
 }
 
@@ -508,6 +527,8 @@ interface Props {
   suspensionOpen?: boolean;
   onToggleSuspension?: () => void;
   onToggleZones?: () => void;
+  /** Flip listing the channels panel by ECU category. */
+  onToggleGrouping?: () => void;
   /** Shared across every trace — the panel is one column down the page. */
   legendWidth?: number;
   legendCollapsed?: boolean;
@@ -601,6 +622,7 @@ export function TraceContainer({
   suspensionOpen,
   onToggleSuspension,
   onToggleZones,
+  onToggleGrouping,
   legendWidth,
   legendCollapsed = false,
   onSetLegendWidth,
@@ -1174,12 +1196,30 @@ export function TraceContainer({
       rows: [...rows].sort((a, b) => a.logIndex - b.logIndex),
       unitLabel: rows.find((r) => r.unitLabel)?.unitLabel ?? "",
     }));
-    const labels = legendLabels(
-      channels.map((c) => c.name),
-      channels.map((c) => c.rows.find((r) => r.group)?.group),
-    );
+    const names = channels.map((c) => c.name);
+    const groups = channels.map((c) => c.rows.find((r) => r.group)?.group);
+    if (trace.groupByCategory) {
+      const { order, labels } = categoryLabels(names, groups);
+      return order.map((idx, pos) => ({ ...channels[idx], ...labels[pos] }));
+    }
+    const labels = legendLabels(names, groups);
     return channels.map((c, i) => ({ ...c, ...labels[i] }));
-  }, [legendGroups, channelDisplayNames]);
+  }, [legendGroups, channelDisplayNames, trace.groupByCategory]);
+
+  /** The switch on a legend heading: every channel under it, on or off together. */
+  const headingToggle = (keys: string[]) => {
+    if (!onSetChannelsHidden || keys.length === 0) return undefined;
+    const hiddenCount = keys.filter((k) => hiddenChannels.has(k)).length;
+    const allHidden = hiddenCount === keys.length;
+    return {
+      checked: !allHidden,
+      mixed: hiddenCount > 0 && !allHidden,
+      onChange: () => onSetChannelsHidden(keys, !allHidden),
+    };
+  };
+  /** Keys of every channel under the compact-list heading at `pos`. */
+  const compactRunKeys = (pos: number, run: number | undefined) =>
+    compactChannels.slice(pos, pos + (run ?? 1)).flatMap((c) => c.rows.map((r) => r.chKey));
 
   /**
    * The logs represented on this trace, in log order. When there's more than
@@ -1781,7 +1821,7 @@ export function TraceContainer({
                       <span className="w-14 text-right text-amber-400">AVG</span>
                       <span className="w-8 shrink-0" />
                     </div>
-                    {compactChannels.map(({ name, rows, unitLabel, heading, headingTitle, label, grouped }) => {
+                    {compactChannels.map(({ name, rows, unitLabel, heading, headingTitle, run, label, grouped }, pos) => {
                       const keys = rows.map((r) => r.chKey);
                       const allHidden = rows.every((r) => r.isChHidden);
                       const someHidden = rows.some((r) => r.isChHidden);
@@ -1826,7 +1866,13 @@ export function TraceContainer({
                       );
                       return (
                         <Fragment key={name}>
-                        {heading && <LegendHeading text={heading} title={headingTitle} />}
+                        {heading && (
+                          <LegendHeading
+                            text={heading}
+                            title={headingTitle}
+                            toggle={headingToggle(compactRunKeys(pos, run))}
+                          />
+                        )}
                         <div {...channelDragProps(name)} className={grouped ? "pl-2" : ""}>
                           <div className="flex cursor-grab items-center gap-1.5 text-xs leading-tight active:cursor-grabbing">
                             <Switch
@@ -1867,13 +1913,19 @@ export function TraceContainer({
                         gets its own line under it. Side by side the values had
                         to live in narrow columns under a run tag, which read as
                         a table of tags rather than "RPM, this run vs that one". */}
-                    {compactChannels.map(({ name, rows, unitLabel, heading, headingTitle, label, grouped }) => {
+                    {compactChannels.map(({ name, rows, unitLabel, heading, headingTitle, run, label, grouped }, pos) => {
                       const keys = rows.map((r) => r.chKey);
                       const allHidden = rows.every((r) => r.isChHidden);
                       const someHidden = rows.some((r) => r.isChHidden);
                       return (
                         <Fragment key={name}>
-                        {heading && <LegendHeading text={heading} title={headingTitle} />}
+                        {heading && (
+                          <LegendHeading
+                            text={heading}
+                            title={headingTitle}
+                            toggle={headingToggle(compactRunKeys(pos, run))}
+                          />
+                        )}
                         <div
                           className={`${heading ? "" : "mt-1 first:mt-0"} ${grouped ? "pl-2" : ""}`}
                           {...channelDragProps(name)}
@@ -1988,21 +2040,27 @@ export function TraceContainer({
                           </div>
                         )}
                         {(() => {
-                          const labels = legendLabels(
-                            rows.map(({ ch }) => channelDisplayNames.get(ch.channelName) ?? ch.channelName),
-                            rows.map(({ group }) => group),
-                          );
-                          return rows.map(({ chKey, ch, indent, isChHidden, color, opacity, valueStr, unitLabel }, ri) => {
+                          const names = rows.map(({ ch }) => channelDisplayNames.get(ch.channelName) ?? ch.channelName);
+                          const groups = rows.map(({ group }) => group);
+                          const { order, labels } = trace.groupByCategory
+                            ? categoryLabels(names, groups)
+                            : { order: rows.map((_, i) => i), labels: legendLabels(names, groups) };
+                          const shown = order.map((i) => rows[i]);
+                          return shown.map(({ chKey, ch, indent, isChHidden, color, opacity, valueStr, unitLabel }, ri) => {
                           const isHovered = hoveredChannel === chKey;
                           const isDimmed = hoveredChannel !== null && !isHovered;
                           const shownName =
                             channelDisplayNames.get(ch.channelName) ?? ch.channelName;
-                          const { heading, headingTitle, label, grouped } = labels[ri];
+                          const { heading, headingTitle, run, label, grouped } = labels[ri];
                           return (
                             <Fragment key={chKey}>
                             {heading && (
                               <div className={indent ? "ml-3" : ""}>
-                                <LegendHeading text={heading} title={headingTitle} />
+                                <LegendHeading
+                                  text={heading}
+                                  title={headingTitle}
+                                  toggle={headingToggle(shown.slice(ri, ri + (run ?? 1)).map((r) => r.chKey))}
+                                />
                               </div>
                             )}
                             <div
@@ -2112,6 +2170,20 @@ export function TraceContainer({
             <ListPlusIcon className="size-4" />
             Channels
           </button>
+          {onToggleGrouping && (
+            <button
+              type="button"
+              onClick={() => {
+                setChannelPanelMenu(null);
+                onToggleGrouping();
+              }}
+              className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+            >
+              <FolderTreeIcon className="size-4" />
+              <span className="flex-1">Group by category</span>
+              {trace.groupByCategory && <CheckIcon className="size-4 text-primary" />}
+            </button>
+          )}
         </div>
       )}
 
