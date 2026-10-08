@@ -44,7 +44,7 @@ export function useChannelDefinitions(
     if (!pack) return out;
     for (const def of channelDefs) {
       if (def.computed || !def.id) continue;
-      const id = pack.identify(def.id);
+      const id = pack.identify(def.id, def.name);
       if (id) out.set(def.name, id);
     }
     return out;

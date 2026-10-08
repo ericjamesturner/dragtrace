@@ -145,9 +145,9 @@ function SignalFilterSlider({
 // Race line defaults to dashed when unset, so "Solid" is an explicit [] (empty)
 // to distinguish it from "use default".
 /** Shared start of the long channel names below it, e.g. "Torque Management". */
-function LegendHeading({ text }: { text: string }) {
+function LegendHeading({ text, title }: { text: string; title?: string }) {
   return (
-    <Tip content={text} delay={HOVER_TIP_DELAY} side="left">
+    <Tip content={title ?? text} delay={HOVER_TIP_DELAY} side="left">
       <div className="mt-1 truncate text-[10px] font-semibold uppercase tracking-wider text-white/40 first:mt-0">
         {text}
       </div>
@@ -1108,6 +1108,7 @@ export function TraceContainer({
 
         return {
           chKey, ch, indent: multiLog, isLogHidden, isChHidden,
+          group: def?.group,
           logName: log ? log.fileName.replace(/\.[^.]+$/, "") : "",
           logColor: log?.logColor ?? "#3b82f6",
           logIndex: log?.logIndex ?? 0,
@@ -1173,7 +1174,10 @@ export function TraceContainer({
       rows: [...rows].sort((a, b) => a.logIndex - b.logIndex),
       unitLabel: rows.find((r) => r.unitLabel)?.unitLabel ?? "",
     }));
-    const labels = legendLabels(channels.map((c) => c.name));
+    const labels = legendLabels(
+      channels.map((c) => c.name),
+      channels.map((c) => c.rows.find((r) => r.group)?.group),
+    );
     return channels.map((c, i) => ({ ...c, ...labels[i] }));
   }, [legendGroups, channelDisplayNames]);
 
@@ -1777,7 +1781,7 @@ export function TraceContainer({
                       <span className="w-14 text-right text-amber-400">AVG</span>
                       <span className="w-8 shrink-0" />
                     </div>
-                    {compactChannels.map(({ name, rows, unitLabel, heading, label, grouped }) => {
+                    {compactChannels.map(({ name, rows, unitLabel, heading, headingTitle, label, grouped }) => {
                       const keys = rows.map((r) => r.chKey);
                       const allHidden = rows.every((r) => r.isChHidden);
                       const someHidden = rows.some((r) => r.isChHidden);
@@ -1822,7 +1826,7 @@ export function TraceContainer({
                       );
                       return (
                         <Fragment key={name}>
-                        {heading && <LegendHeading text={heading} />}
+                        {heading && <LegendHeading text={heading} title={headingTitle} />}
                         <div {...channelDragProps(name)} className={grouped ? "pl-2" : ""}>
                           <div className="flex cursor-grab items-center gap-1.5 text-xs leading-tight active:cursor-grabbing">
                             <Switch
@@ -1863,13 +1867,13 @@ export function TraceContainer({
                         gets its own line under it. Side by side the values had
                         to live in narrow columns under a run tag, which read as
                         a table of tags rather than "RPM, this run vs that one". */}
-                    {compactChannels.map(({ name, rows, unitLabel, heading, label, grouped }) => {
+                    {compactChannels.map(({ name, rows, unitLabel, heading, headingTitle, label, grouped }) => {
                       const keys = rows.map((r) => r.chKey);
                       const allHidden = rows.every((r) => r.isChHidden);
                       const someHidden = rows.some((r) => r.isChHidden);
                       return (
                         <Fragment key={name}>
-                        {heading && <LegendHeading text={heading} />}
+                        {heading && <LegendHeading text={heading} title={headingTitle} />}
                         <div
                           className={`${heading ? "" : "mt-1 first:mt-0"} ${grouped ? "pl-2" : ""}`}
                           {...channelDragProps(name)}
@@ -1986,18 +1990,19 @@ export function TraceContainer({
                         {(() => {
                           const labels = legendLabels(
                             rows.map(({ ch }) => channelDisplayNames.get(ch.channelName) ?? ch.channelName),
+                            rows.map(({ group }) => group),
                           );
                           return rows.map(({ chKey, ch, indent, isChHidden, color, opacity, valueStr, unitLabel }, ri) => {
                           const isHovered = hoveredChannel === chKey;
                           const isDimmed = hoveredChannel !== null && !isHovered;
                           const shownName =
                             channelDisplayNames.get(ch.channelName) ?? ch.channelName;
-                          const { heading, label, grouped } = labels[ri];
+                          const { heading, headingTitle, label, grouped } = labels[ri];
                           return (
                             <Fragment key={chKey}>
                             {heading && (
                               <div className={indent ? "ml-3" : ""}>
-                                <LegendHeading text={heading} />
+                                <LegendHeading text={heading} title={headingTitle} />
                               </div>
                             )}
                             <div

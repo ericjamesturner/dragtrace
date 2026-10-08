@@ -55,7 +55,15 @@ function ChannelPicker({
   const results = useMemo(() => {
     if (!search) return [];
     const lower = search.toLowerCase();
-    return channelDefs.filter((d) => d.name.toLowerCase().includes(lower)).slice(0, 8);
+    // The ECU maker's group is searchable too: "torque" finds Torque
+    // Management's channels whatever they are called.
+    return channelDefs
+      .filter(
+        (d) =>
+          d.name.toLowerCase().includes(lower) ||
+          (d.group?.some((g) => g.toLowerCase().includes(lower)) ?? false),
+      )
+      .slice(0, 8);
   }, [search, channelDefs]);
 
   const selectedDef = channelDefs.find((d) => d.name === value);
@@ -112,7 +120,14 @@ function ChannelPicker({
                     }}
                     className="flex items-center justify-between w-full text-left px-2.5 py-1.5 text-xs hover:bg-muted cursor-pointer text-foreground border-b border-border last:border-b-0"
                   >
-                    <span className="truncate">{def.name}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate">{def.name}</span>
+                      {def.group && (
+                        <span className="block truncate text-[10px] text-muted-foreground">
+                          {def.group.join(" › ")}
+                        </span>
+                      )}
+                    </span>
                     {du && <span className="text-muted-foreground ml-2">{du}</span>}
                   </button>
                 );

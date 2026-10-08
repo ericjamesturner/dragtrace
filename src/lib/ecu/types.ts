@@ -39,6 +39,8 @@ export interface ChannelIdentity {
   description?: string;
   /** Canonical path, e.g. "Settings/InjectionSystem/STAGE_1/AVERAGE_DUTY_CYCLE". */
   path?: string;
+  /** The vendor's own groups above this channel, outermost first, e.g. ["Functions", "Torque Management"]. */
+  group?: string[];
   /** Enumerated value labels, e.g. { 0: "Off", 1: "On" }. */
   enumValues?: Record<number, string>;
 }

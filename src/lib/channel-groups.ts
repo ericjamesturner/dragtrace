@@ -1,4 +1,5 @@
 import type { ChannelDef } from "./log-types";
+import { inGroupLabel } from "./legend-labels";
 
 // ── Explicit channel → group path(s) mapping ──
 // Channels can appear in multiple groups. Path format: "Group" or "Group/Subgroup".
@@ -392,35 +393,29 @@ export function buildTree(defs: ChannelDef[]): GroupNode[] {
 
 // --- Definition-pack grouping ---------------------------------------------
 //
-// When the ECU's own definition data is available, its object paths give the
-// manufacturer's real hierarchy for every channel — which beats both the
-// hand-maintained CHANNEL_GROUPS table below and any keyword guessing, and
-// needs no upkeep as new channels appear.
-
-/** "AVERAGE_DUTY_CYCLE" / "InjectionSystem" -> "Average Duty Cycle". */
-function prettifySegment(seg: string): string {
-  if (!seg) return seg;
-  const spaced = seg.includes("_")
-    ? seg.toLowerCase().replace(/_+/g, " ")
-    : seg.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
-  return spaced.replace(/\b[a-z]/g, (c) => c.toUpperCase()).trim();
-}
-
-/** Path segments that carry no grouping information. */
-const SKIP_SEGMENTS = new Set(["settings", "value", "values"]);
-
-const MAX_DEPTH = 3;
+// When the ECU's own definition data is available, it gives the manufacturer's
+// real hierarchy for every channel — which beats both the hand-maintained
+// CHANNEL_GROUPS table below and any keyword guessing, and needs no upkeep as
+// new channels appear. The group names are the definition's own, resolved when
+// the pack is generated.
 
 /**
- * Group channels by their definition path. Channels with no identity fall back
- * to the keyword tree so a partially-resolved pack still produces a full list.
+ * Group channels the way the ECU maker does. Channels with no identity fall
+ * back to the keyword tree so a partially-resolved pack still produces a full
+ * list.
+ *
+ * Much of the maker's tree is one group per sensor ("Sensors > Oil Pressure
+ * Sensor"), which for a single log means folders of one. A group that would
+ * hold a single channel gives it to its parent instead.
  */
 export function buildTreeFromPaths(
   defs: ChannelDef[],
-  identities: Map<string, { path?: string; shortName?: string; longName?: string }>,
+  identities: Map<string, { group?: string[] }>,
 ): GroupNode[] {
   const roots: GroupNode[] = [];
   const unresolved: ChannelDef[] = [];
+  const key = (path: string[]) => path.join("\u0000");
+  const groupOf = (def: ChannelDef) => identities.get(def.name)?.group ?? def.group;
 
   const nodeAt = (segments: string[]): GroupNode => {
     let level = roots;
@@ -436,25 +431,28 @@ export function buildTreeFromPaths(
     return node!;
   };
 
+  const counts = new Map<string, number>();
   for (const def of defs) {
-    const path = identities.get(def.name)?.path;
-    if (!path) {
-      unresolved.push(def);
-      continue;
+    const group = groupOf(def);
+    if (!group) continue;
+    for (let depth = 1; depth <= group.length; depth++) {
+      const k = key(group.slice(0, depth));
+      counts.set(k, (counts.get(k) ?? 0) + 1);
     }
-    // The final segment names the channel itself, not a group.
-    const segments = path
-      .split("/")
-      .slice(0, -1)
-      .filter((s) => s && !SKIP_SEGMENTS.has(s.toLowerCase()))
-      .map(prettifySegment)
-      .slice(0, MAX_DEPTH);
+  }
 
-    if (segments.length === 0) {
+  for (const def of defs) {
+    const group = groupOf(def);
+    if (!group || group.length === 0) {
       unresolved.push(def);
       continue;
     }
-    nodeAt(segments).channels.push({ def, displayName: def.name });
+    let depth = group.length;
+    while (depth > 1 && (counts.get(key(group.slice(0, depth))) ?? 0) < 2) depth--;
+    nodeAt(group.slice(0, depth)).channels.push({
+      def,
+      displayName: inGroupLabel(def.name, group[depth - 1]),
+    });
   }
 
   if (unresolved.length > 0) {
@@ -467,5 +465,7 @@ export function buildTreeFromPaths(
     children: n.children.map(sortNode).sort((a, b) => a.tag.localeCompare(b.tag)),
   });
 
-  return roots.map(sortNode).sort((a, b) => a.tag.localeCompare(b.tag));
+  // Two channels cut to the same label would be indistinguishable; those
+  // keep their full names.
+  return dedupeDisplayNames(roots.map(sortNode).sort((a, b) => a.tag.localeCompare(b.tag)));
 }

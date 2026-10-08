@@ -22,12 +22,13 @@ export async function enrichWithDefinitions(
 
   for (const def of parsed.channelDefs) {
     if (def.computed || !def.id) continue;
-    const identity = pack.identify(def.id);
+    const identity = pack.identify(def.id, def.name);
     if (!identity) continue;
 
     if (identity.description) def.description = identity.description;
     if (identity.shortName) def.shortName = identity.shortName;
     if (identity.path) def.path = identity.path;
+    if (identity.group) def.group = identity.group;
     // The log's own name may be one the user customised in the tuning software
     // ("Generic Sensor 8 Value (Density Altitude)"), which beats the generic
     // name in the definition — so names supplement, never overwrite.

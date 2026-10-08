@@ -20,6 +20,8 @@ export interface ChannelDef {
   shortName?: string;
   /** Position in the ECU's own hierarchy. */
   path?: string;
+  /** The ECU maker's groups above this channel, outermost first, e.g. ["Functions", "Torque Management"]. */
+  group?: string[];
   /** Fault-code names for this specific channel, keyed by status code. */
   statusLabels?: Record<number, string>;
   /** Values meaning "not applicable" — excluded from the plotted series. */
