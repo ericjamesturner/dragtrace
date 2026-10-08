@@ -26,6 +26,13 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { categoryLabels, legendLabels } from "@/lib/legend-labels";
+import {
+  DEFAULT_MARKER_TIMES,
+  findGearChannel,
+  formatMarkerTimes,
+  parseMarkerTimes,
+  type ChannelMarkers,
+} from "@/lib/channel-markers";
 import { applyChannelSignalFilter, type ChannelSignalFilter } from "@/lib/signal-filter";
 
 /** Which channel's style dialog is open. Opened by clicking its row in the
@@ -171,6 +178,41 @@ function LegendHeading({
         </div>
       </Tip>
     </div>
+  );
+}
+
+/** Comma-separated seconds after launch; committed on Enter or leaving the field. */
+function MarkerTimesInput({
+  times,
+  onCommit,
+}: {
+  times: number[];
+  onCommit: (times: number[]) => void;
+}) {
+  const [text, setText] = useState(formatMarkerTimes(times));
+  const commit = () => {
+    const parsed = parseMarkerTimes(text);
+    // An empty or unreadable list would silently drop every marker; put the
+    // last good list back instead.
+    if (parsed.length === 0) {
+      setText(formatMarkerTimes(times));
+      return;
+    }
+    setText(formatMarkerTimes(parsed));
+    onCommit(parsed);
+  };
+  return (
+    <input
+      type="text"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit();
+      }}
+      className="h-8 w-full rounded-md border border-input bg-input/30 px-2 font-mono text-xs text-foreground outline-none focus:border-ring"
+      aria-label="Seconds after launch"
+    />
   );
 }
 
@@ -529,6 +571,8 @@ interface Props {
   onToggleZones?: () => void;
   /** Flip listing the channels panel by ECU category. */
   onToggleGrouping?: () => void;
+  /** Markers apply by channel name, to every run of it on the trace. */
+  onSetChannelMarkers?: (channelName: string, markers: ChannelMarkers | undefined) => void;
   /** Shared across every trace — the panel is one column down the page. */
   legendWidth?: number;
   legendCollapsed?: boolean;
@@ -623,6 +667,7 @@ export function TraceContainer({
   onToggleSuspension,
   onToggleZones,
   onToggleGrouping,
+  onSetChannelMarkers,
   legendWidth,
   legendCollapsed = false,
   onSetLegendWidth,
@@ -2508,6 +2553,68 @@ export function TraceContainer({
                         : "State channels are shown exactly as logged and cannot be smoothed."}
                     </p>
                   </div>
+
+                  {onSetChannelMarkers && !cmDef?.enumValues && (() => {
+                    const markers = cmCh?.markers;
+                    const set = (next: ChannelMarkers) =>
+                      onSetChannelMarkers(
+                        contextMenu.channelName,
+                        next.times || next.shifts ? next : undefined,
+                      );
+                    const gearName = cmLog ? findGearChannel(cmLog.parsed.channelDefs) : undefined;
+                    return (
+                      <div className={cardCls}>
+                        <div className="mb-3 flex items-baseline justify-between gap-2">
+                          <span className={cardTitle}>Markers</span>
+                          <span className="text-[11px] text-muted-foreground/70">Every run on this trace</span>
+                        </div>
+                        <div className="space-y-3">
+                          <div>
+                            <label className="flex cursor-pointer items-center justify-between gap-3">
+                              <span className={fieldLabel}>Values after launch</span>
+                              <Switch
+                                appearance="form"
+                                checked={!!markers?.times}
+                                onChange={(on) =>
+                                  set({ ...markers, times: on ? DEFAULT_MARKER_TIMES : undefined })
+                                }
+                              />
+                            </label>
+                            {markers?.times && (
+                              <div className="mt-2">
+                                <MarkerTimesInput
+                                  key={cmKey}
+                                  times={markers.times}
+                                  onCommit={(times) => set({ ...markers, times })}
+                                />
+                                <p className="mt-1 text-[11px] text-muted-foreground/70">Seconds after launch, separated by commas.</p>
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <label className="flex cursor-pointer items-center justify-between gap-3">
+                              <span className={fieldLabel}>Shift drops</span>
+                              <Switch
+                                appearance="form"
+                                checked={!!markers?.shifts}
+                                onChange={(on) => set({ ...markers, shifts: on || undefined })}
+                              />
+                            </label>
+                            <p className="mt-1 text-[11px] text-muted-foreground/70">
+                              {gearName
+                                ? `Finds each upshift from ${gearName}, then marks the peak and the low point after it.`
+                                : "This log has no gear channel, so shifts are found from sharp falls in this line."}
+                            </p>
+                          </div>
+                          {cmLog && cmLog.raceStartTime === null && (
+                            <p className="text-[11px] text-amber-400/90">
+                              No launch was found in this run, so it shows no markers.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   <div className={cardCls}>
                     <div className="mb-2 flex items-baseline justify-between gap-2">

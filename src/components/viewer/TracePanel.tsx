@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import type { ChannelMarkers } from "@/lib/channel-markers";
 import type { LoadedLog, TraceConfig, ChannelOnTrace, PageConfig, HighlightZoneConfig, ScatterConfig, HeatmapConfig, ScatterSuggestion } from "@/lib/viewer-types";
 import { MIN_TRACE_HEIGHT } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
@@ -54,6 +55,7 @@ interface Props {
   onToggleTraceTimeslip: (traceId: string) => void;
   onToggleTraceZones: (traceId: string) => void;
   onToggleTraceGrouping: (traceId: string) => void;
+  onSetChannelMarkers: (traceId: string, channelName: string, markers: ChannelMarkers | undefined) => void;
   legendWidth?: number;
   legendCollapsed?: boolean;
   onSetLegendWidth: (width: number) => void;
@@ -136,6 +138,7 @@ export function TracePanel({
   onToggleTraceTimeslip,
   onToggleTraceZones,
   onToggleTraceGrouping,
+  onSetChannelMarkers,
   legendWidth,
   legendCollapsed,
   onSetLegendWidth,
@@ -737,6 +740,7 @@ export function TracePanel({
                 onToggleTimeslip={() => onToggleTraceTimeslip(trace.id)}
                 onToggleZones={accountFeatures ? () => onToggleTraceZones(trace.id) : undefined}
                 onToggleGrouping={() => onToggleTraceGrouping(trace.id)}
+                onSetChannelMarkers={(channelName, markers) => onSetChannelMarkers(trace.id, channelName, markers)}
                 onSetChannelOrder={(names) => onSetTraceChannelOrder(trace.id, names)}
                 autoOpenChannels={pickChannelsFor === trace.id}
                 vehicleId={vehicleId}

@@ -1,5 +1,6 @@
 import type { Id } from "../../convex/_generated/dataModel";
 import type { ParsedLog } from "./log-types";
+import type { ChannelMarkers } from "./channel-markers";
 import {
   cycleUnit as cycleUnitFn,
   type ChannelUnitOverrides,
@@ -89,6 +90,8 @@ export interface ChannelOnTrace {
   // Optional custom gradient endpoints (hex); default LUT when unset.
   colorByLowColor?: string;
   colorByHighColor?: string;
+  /** Automatic markers on the line: values after launch, shift drops. */
+  markers?: ChannelMarkers;
 }
 
 export interface HighlightZoneConfig {
@@ -300,6 +303,7 @@ export type ViewerAction =
   | { type: "toggleTraceTimeslip"; traceId: string }
   | { type: "toggleTraceZones"; traceId: string }
   | { type: "toggleTraceGrouping"; traceId: string }
+  | { type: "setChannelMarkers"; traceId: string; channelName: string; markers: ChannelMarkers | undefined }
   | { type: "setLegendWidth"; width: number | undefined }
   | { type: "toggleLegendCollapsed" }
   | { type: "setChannelsHidden"; traceId: string; keys: string[]; hidden: boolean }
@@ -535,6 +539,18 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         pages: mapTraceById(state.pages, action.traceId, (t) => ({
           ...t,
           showZones: t.showZones === false,
+        })),
+      };
+    // By name, not per log: markers exist to compare runs, so every run of
+    // the channel on the trace gets the same ones.
+    case "setChannelMarkers":
+      return {
+        ...state,
+        pages: mapTraceById(state.pages, action.traceId, (t) => ({
+          ...t,
+          channels: t.channels.map((c) =>
+            c.channelName === action.channelName ? { ...c, markers: action.markers } : c,
+          ),
         })),
       };
     case "toggleTraceGrouping":

@@ -699,6 +699,9 @@ export function LogViewerReady({
           onToggleTraceTimeslip={(traceId) => dispatch({ type: "toggleTraceTimeslip", traceId })}
           onToggleTraceZones={(traceId) => dispatch({ type: "toggleTraceZones", traceId })}
           onToggleTraceGrouping={(traceId) => dispatch({ type: "toggleTraceGrouping", traceId })}
+          onSetChannelMarkers={(traceId, channelName, markers) =>
+            dispatch({ type: "setChannelMarkers", traceId, channelName, markers })
+          }
           pickChannelsFor={pickChannelsFor}
           vehicleId={vehicleId}
           accountFeatures={!publicMode}

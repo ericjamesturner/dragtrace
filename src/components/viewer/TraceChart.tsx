@@ -17,8 +17,19 @@ import { readableTextColor } from "@/lib/colors";
 import { formatSlipTime, distanceAtTime, findSlipAtLaunch } from "@/lib/timeslip-zones";
 import { formatValue, formatDuration } from "@/lib/cursor-utils";
 import { applyChannelSignalFilter } from "@/lib/signal-filter";
+import {
+  findGearChannel,
+  shiftMarkers,
+  timeMarkers,
+  type ShiftMarker,
+  type TimeMarker,
+} from "@/lib/channel-markers";
 
 const GRID_POINTS = 2000;
+/** Marker-time colours, early to late; bright enough for the dark chart. */
+const MARKER_TIME_COLORS = ["#f472b6", "#fb7185", "#fb923c", "#facc15", "#a3e635", "#34d399", "#22d3ee", "#60a5fa", "#a78bfa", "#e879f9"];
+/** Shift drops: one colour of their own, apart from the time markers. */
+const MARKER_SHIFT_COLOR = "#e5e7eb";
 const Y_AXIS_SIZE = 45;
 // Height (CSS px) of one timeslip zone's row in the bottom band. One row per
 // timeslip so two logs' slips stack instead of overprinting each other.
@@ -396,6 +407,15 @@ export function TraceChart({
     }
     const seriesData: (number | null)[][] = [];
     const seriesMeta: SeriesMeta[] = [];
+    // Markers are read off the same filtered data the line is drawn from, so a
+    // dot always sits on its line.
+    const markerSpecs: {
+      channelName: string;
+      color: string;
+      offset: number;
+      time: TimeMarker[];
+      shifts: ShiftMarker[];
+    }[] = [];
 
     for (const group of logGroups) {
       const session = group.log.parsed.sessions[group.log.activeSessionIndex];
@@ -415,6 +435,19 @@ export function TraceChart({
         seriesData.push(resampled);
 
         const resolved = resolveChannelStyle(ch, chIdx, group.log.logIndex);
+
+        const launch = group.log.raceStartTime;
+        if (ch.markers && launch !== null) {
+          const gearName = ch.markers.shifts ? findGearChannel(group.log.parsed.channelDefs) : undefined;
+          const gear = gearName && gearName !== ch.channelName ? session.channels.get(gearName) : undefined;
+          markerSpecs.push({
+            channelName: ch.channelName,
+            color: resolved.color,
+            offset: group.timeOffset,
+            time: ch.markers.times ? timeMarkers(session.timestamps, data, launch, ch.markers.times) : [],
+            shifts: ch.markers.shifts ? shiftMarkers(session.timestamps, data, launch, gear) : [],
+          });
+        }
 
         // Color-by: resample the 3rd channel onto the same grid + capture its unit.
         let colorByVals: (number | null)[] | null = null;
@@ -1227,6 +1260,200 @@ export function TraceChart({
         ],
       },
     });
+
+    // Channel markers, kept quiet: a small dot on the line, the bare value
+    // beside it in the line's colour, and the marker times once along the
+    // bottom like an axis rather than repeated on every label. Shift drops are
+    // placed first and win any collision — they're the rarer, more telling
+    // reading. A value with no free space is left off; the dot and the cursor
+    // readout still give it.
+    if (markerSpecs.length > 0) {
+      plugins.push({
+        hooks: {
+          draw: [
+            (u: uPlot) => {
+              const ctx = u.ctx;
+              const dpr = devicePixelRatio;
+              const left = u.bbox.left;
+              const right = left + u.bbox.width;
+              const top = u.bbox.top;
+              const bottom = top + u.bbox.height;
+              const placed: [number, number, number, number][] = [];
+              const toDisplay = (channelName: string, v: number) => {
+                const mu = quantitySlugByChannel.get(channelName);
+                return mu
+                  ? convertForDisplay(v, mu, unitSystem, unitOverrides, resolvedUnitKeyByChannel.get(channelName))
+                  : v;
+              };
+              const fmt = (channelName: string, v: number) => formatValue(toDisplay(channelName, v));
+              const point = (channelName: string, offset: number, t: number, v: number) => {
+                const scaleKey = scaleKeyById.get(scaleIdOf(channelName));
+                if (!scaleKey) return null;
+                const x = u.valToPos(t + offset, "x", true);
+                const y = u.valToPos(v, scaleKey, true);
+                if (x < left || x > right || y < top || y > bottom) return null;
+                return { x, y };
+              };
+
+              // Each marker time has its own colour — dot, value and the time on
+              // the ruler alike — so a value reads back to its time at a glance,
+              // and the same time is the same colour on every run. Spectrum
+              // order runs early to late; shifts take a colour of their own.
+              const allTimes = [...new Set(markerSpecs.flatMap((sp) => sp.time.map((m) => m.after)))].sort((a, b) => a - b);
+              const timeColor = (after: number) =>
+                MARKER_TIME_COLORS[
+                  Math.round(
+                    (allTimes.indexOf(after) / Math.max(1, allTimes.length - 1)) *
+                      (MARKER_TIME_COLORS.length - 1),
+                  )
+                ];
+
+              const dots: { x: number; y: number; color: string }[] = [];
+              const labels: {
+                x: number;
+                y: number;
+                text: string;
+                color: string;
+                prefer: "above" | "shift";
+                /** For a shift: the low point, so the label clears the whole fall. */
+                lowY?: number;
+              }[] = [];
+              /** Marker times along the bottom, one per distinct x. */
+              const ruler = new Map<number, { text: string; color: string }>();
+
+              for (const spec of markerSpecs) {
+                for (const sh of spec.shifts) {
+                  const p = point(spec.channelName, spec.offset, sh.peakT, sh.peak);
+                  const q = point(spec.channelName, spec.offset, sh.troughT, sh.trough);
+                  if (p && q) {
+                    ctx.save();
+                    ctx.setLineDash([2 * dpr, 2 * dpr]);
+                    ctx.strokeStyle = MARKER_SHIFT_COLOR;
+                    ctx.globalAlpha = 0.7;
+                    ctx.lineWidth = 1 * dpr;
+                    ctx.beginPath();
+                    ctx.moveTo(p.x, p.y);
+                    ctx.lineTo(q.x, q.y);
+                    ctx.stroke();
+                    ctx.restore();
+                  }
+                  if (q) dots.push({ ...q, color: MARKER_SHIFT_COLOR });
+                  if (p) {
+                    dots.push({ ...p, color: MARKER_SHIFT_COLOR });
+                    // Difference of the displayed values: converting the raw
+                    // difference would apply a unit's offset (gauge vs absolute).
+                    const drop = formatValue(
+                      toDisplay(spec.channelName, sh.peak) - toDisplay(spec.channelName, sh.trough),
+                    );
+                    const unit = getChannelDisplayUnit(
+                      channelDefByName.get(spec.channelName),
+                      unitSystem,
+                      unitOverrides,
+                      resolvedUnitKeyByChannel.get(spec.channelName),
+                    );
+                    const unitText = unit ? ` ${unit === "RPM" ? "rpm" : unit}` : "";
+                    // Read at the start of the shift, where the fall begins.
+                    labels.push({
+                      ...p,
+                      text: `${drop}${unitText} drop`,
+                      color: MARKER_SHIFT_COLOR,
+                      prefer: "shift",
+                      lowY: q ? Math.max(p.y, q.y) : p.y,
+                    });
+                  }
+                }
+              }
+              for (const spec of markerSpecs) {
+                for (const m of spec.time) {
+                  const p = point(spec.channelName, spec.offset, m.t, m.value);
+                  if (!p) continue;
+                  const color = timeColor(m.after);
+                  dots.push({ ...p, color });
+                  labels.push({ ...p, text: fmt(spec.channelName, m.value), color, prefer: "above" });
+                  const rx = Math.round(p.x);
+                  if (![...ruler.keys()].some((k) => Math.abs(k - rx) < 2 * dpr)) {
+                    // ".25", not "0.25s": the zero and the unit are noise here.
+                    ruler.set(rx, { text: String(m.after).replace(/^0\./, "."), color });
+                  }
+                }
+              }
+
+              ctx.save();
+              // Dots claim their space first, so no value is drawn over one.
+              for (const d of dots) {
+                const r = 2.5 * dpr;
+                placed.push([d.x - r - dpr, d.y - r - dpr, d.x + r + dpr, d.y + r + dpr]);
+                ctx.beginPath();
+                ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
+                ctx.fillStyle = d.color;
+                ctx.fill();
+                ctx.lineWidth = 1 * dpr;
+                ctx.strokeStyle = "#0a0a0a";
+                ctx.stroke();
+              }
+
+              // The time ruler, along the bottom edge.
+              ctx.font = `${9 * dpr}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+              ctx.textAlign = "center";
+              ctx.textBaseline = "bottom";
+              // Close-together times keep their tick; a label that would run
+              // into the one before it is dropped.
+              let rulerRight = -Infinity;
+              for (const [x, { text, color }] of [...ruler].sort((a, b) => a[0] - b[0])) {
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1 * dpr;
+                ctx.beginPath();
+                ctx.moveTo(x, bottom);
+                ctx.lineTo(x, bottom - 3 * dpr);
+                ctx.stroke();
+                const w = ctx.measureText(text).width;
+                if (x - w / 2 < rulerRight + 4 * dpr) continue;
+                rulerRight = x + w / 2;
+                const ly = bottom - 4 * dpr;
+                placed.push([x - w / 2, ly - 10 * dpr, x + w / 2, ly]);
+                ctx.fillStyle = color;
+                ctx.fillText(text, x, ly);
+              }
+
+              // Values: plain text with a dark halo instead of a box.
+              ctx.font = `${10 * dpr}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+              ctx.textAlign = "left";
+              ctx.textBaseline = "middle";
+              ctx.lineJoin = "round";
+              const h = 11 * dpr;
+              const gap = 4 * dpr;
+              for (const l of labels) {
+                const w = ctx.measureText(l.text).width;
+                const above = l.y - gap - h / 2;
+                const below = l.y + gap + h / 2;
+                // Beside the dot first — up-left and down-right are clear of a
+                // rising line — then straight above or below.
+                // A shift label starts at the shift and sits under the fall,
+                // in the clear space below the line rather than across it.
+                const under = (l.lowY ?? l.y) + gap * 2 + h / 2;
+                const spots: [number, number][] = l.prefer === "above"
+                  ? [[l.x - gap - w, above], [l.x + gap, below], [l.x - w / 2, above - gap], [l.x - w / 2, below + gap]]
+                  : [[l.x, under], [l.x - w, under], [l.x, under + h], [l.x, above - gap]];
+                for (const [sx, cy] of spots) {
+                  const lx = Math.min(Math.max(sx, left), right - w);
+                  const r: [number, number, number, number] = [lx, cy - h / 2, lx + w, cy + h / 2];
+                  if (r[1] < top || r[3] > bottom) continue;
+                  if (placed.some((p) => r[0] < p[2] && r[2] > p[0] && r[1] < p[3] && r[3] > p[1])) continue;
+                  placed.push(r);
+                  ctx.strokeStyle = "rgba(10, 10, 10, 0.9)";
+                  ctx.lineWidth = 3 * dpr;
+                  ctx.strokeText(l.text, lx, cy);
+                  ctx.fillStyle = l.color;
+                  ctx.fillText(l.text, lx, cy);
+                  break;
+                }
+              }
+              ctx.restore();
+            },
+          ],
+        },
+      });
+    }
 
     // Destroy old
     if (chartRef.current) {
