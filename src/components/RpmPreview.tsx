@@ -5,7 +5,7 @@ import type { Doc } from "../../convex/_generated/dataModel";
 import { detectRaceStartIndex } from "@/lib/haltech-parser";
 import { parseDatalogBytes } from "@/lib/datalog-parser";
 import { lttbDownsample } from "@/lib/downsample";
-import { readLaunch, type LaunchReading } from "@/lib/launch-readings";
+import { readKnobs, readLaunch, type KnobReading, type LaunchReading } from "@/lib/launch-readings";
 import { parsePreview } from "@/lib/preview";
 import { passSessionIndex } from "@/lib/load-haltech-log";
 import type { PassLift } from "@/lib/lift-estimate";
@@ -13,7 +13,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
 // Bump when the preview computation changes so stored previews recompute.
-const PREVIEW_VERSION = 3;
+const PREVIEW_VERSION = 4;
 
 // Stored window around the race — wider than the rendered window so the
 // dashboard lead-in/tail can be tuned without recomputing stored previews.
@@ -37,6 +37,8 @@ export interface PreviewPayload {
   logDuration: number;
   /** Temperatures and line readings just before the launch; null without race data. */
   launch: LaunchReading[] | null;
+  /** Dash knob positions at the launch (preview version 4); null without race data. */
+  knobs?: KnobReading[] | null;
 }
 
 /** A file's stored preview, or null when absent or from an older version. */
@@ -222,6 +224,7 @@ async function computePreview(bytes: ArrayBuffer, fileName: string): Promise<Pre
     raceEnd,
     logDuration: timestamps[timestamps.length - 1],
     launch: raceStart !== null ? readLaunch(parsed, session, raceStart) : null,
+    knobs: raceStart !== null ? readKnobs(session, raceStart) : null,
   };
 }
 

@@ -105,3 +105,47 @@ export function formatLaunch(
     return [{ label: spec.label, value: unit && spec.key !== "rpm" ? `${text} ${unit}` : text }];
   });
 }
+
+/** Where a knob on the dash was set for the pass: "Boost knob" on row 12. */
+export interface KnobReading {
+  name: string;
+  value: number;
+}
+
+/** "Boost (Rotary Trim Module Position 1)", "Rotary Trim Module 2", "Torque Management Knob". */
+const KNOB = /^(?:(.+?) \()?Rotary Trim Module(?: Position)? (\d+)\)?$/i;
+
+function knobName(channel: string): string | null {
+  if (/^torque management knob$/i.test(channel)) return "Torque Management knob";
+  const m = KNOB.exec(channel);
+  if (!m) return null;
+  return m[1] ? `${m[1]} knob` : `Knob ${m[2]}`;
+}
+
+/**
+ * The knob positions the car launched on: the most common position in the
+ * moment before the launch (a knob is a whole-number switch, so one stray
+ * sample can't move it).
+ */
+export function readKnobs(session: LogSession, launchAt: number): KnobReading[] {
+  const { timestamps } = session;
+  let lo = 0;
+  while (lo < timestamps.length && timestamps[lo] < launchAt - WINDOW_S) lo++;
+  let hi = lo;
+  while (hi < timestamps.length && timestamps[hi] < launchAt) hi++;
+  if (hi <= lo) return [];
+  const out: KnobReading[] = [];
+  for (const [channel, values] of session.channels) {
+    const name = knobName(channel);
+    if (!name) continue;
+    const counts = new Map<number, number>();
+    for (let i = lo; i < hi; i++) {
+      const v = values[i];
+      if (Number.isFinite(v)) counts.set(Math.round(v), (counts.get(Math.round(v)) ?? 0) + 1);
+    }
+    if (counts.size === 0) continue;
+    const [value] = [...counts].sort((a, b) => b[1] - a[1])[0];
+    out.push({ name, value });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}

@@ -8,7 +8,7 @@ import { TimeslipForm } from "./TimeslipForm";
 import { SlipCompareDialog, type CompareSlipRef } from "./SlipCompareDialog";
 import { SEGMENTS, segmentTimes, type SegmentKey } from "@/lib/timeslip-segments";
 import { estimatePowerFromTimeslip } from "@/lib/drag-performance";
-import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
+import { formatLaunch, type KnobReading, type LaunchLine } from "@/lib/launch-readings";
 import type { UnitOverrides, UnitSystem } from "@/lib/units";
 import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 import { correctionFactor } from "@/lib/weather-correction";
@@ -162,6 +162,34 @@ export function FileList({
   // The pass each change first ran on. Hardware changes made after a pass
   // start on the next one here and tag its strip; tune and firmware changes
   // read from the logs know their pass and fill its Tune tab.
+  // Knobs moved since the car's previous pass, read from both logs' launch.
+  const knobMovesAt = useMemo(() => {
+    const at = new Map<string, KnobMoves>();
+    if (!vehicleFiles || !vehicleEvents) return at;
+    const eventDate = new Map(vehicleEvents.map((e) => [e._id as string, e.date]));
+    // The car's passes in the order they ran: by event date, then run order.
+    const timeline = [...vehicleFiles].sort((a, b) => {
+      const da = eventDate.get(a.eventId) ?? "";
+      const db = eventDate.get(b.eventId) ?? "";
+      if (da !== db) return da < db ? -1 : 1;
+      return (b.order ?? 0) - (a.order ?? 0);
+    });
+    let prev: { file: Doc<"files">; knobs: KnobReading[] } | null = null;
+    for (const f of timeline) {
+      const knobs = parsePreviewPayload(f.preview)?.knobs;
+      if (!knobs?.length) continue;
+      if (prev) {
+        const moves = knobs.flatMap((k) => {
+          const was = prev!.knobs.find((p) => p.name === k.name);
+          return was && was.value !== k.value ? [{ name: k.name, from: was.value, to: k.value }] : [];
+        });
+        if (moves.length) at.set(f._id, { moves, fromLabel: prev.file.round ?? roundOf(prev.file.fileName) });
+      }
+      prev = { file: f, knobs };
+    }
+    return at;
+  }, [vehicleFiles, vehicleEvents]);
+
   const { changesAt, tuneAt } = useMemo(() => {
     const changesAt = new Map<string, Doc<"changes">[]>();
     const tuneAt = new Map<string, TuneTabChange[]>();
@@ -778,6 +806,7 @@ export function FileList({
                   onOpenLogs={handleOpenLogs}
                   slipRefs={slipRefs}
                   tuneChanges={tuneAt.get(file._id)}
+                  knobMoves={knobMovesAt.get(file._id)}
                 />
               </div>
             );
@@ -810,6 +839,7 @@ function PassCard({
   onOpenLogs,
   slipRefs,
   tuneChanges,
+  knobMoves,
 }: {
   file: Doc<"files">;
   raceWeightLb?: number;
@@ -832,6 +862,8 @@ function PassCard({
   onOpenViewer: () => void;
   /** What this pass's tune changed, read from its log and the one before. */
   tuneChanges?: TuneTabChange[];
+  /** Dash knobs moved since the car's previous pass. */
+  knobMoves?: KnobMoves;
   onOpenLogs: (fileIds: Id<"files">[]) => void;
   slipRefs: CompareSlipRef[];
 }) {
@@ -1274,7 +1306,7 @@ function PassCard({
           this pass ran a tune that differs from the pass before it. */}
       <div className="flex gap-1 px-3 pt-2" onClick={(e) => e.stopPropagation()}>
         {(["slip", "tune"] as const).map((t) => {
-          const off = t === "tune" && !tuneChanges?.length;
+          const off = t === "tune" && !tuneChanges?.length && !knobMoves;
           return (
             <button
               key={t}
@@ -1296,8 +1328,8 @@ function PassCard({
         })}
       </div>
 
-      {tab === "tune" && tuneChanges?.length ? (
-        <TuneTab changes={tuneChanges} />
+      {tab === "tune" && (tuneChanges?.length || knobMoves) ? (
+        <TuneTab changes={tuneChanges ?? []} knobMoves={knobMoves} />
       ) : (
       /* Timeslip lines */
       <div className="flex-1 px-3 pb-1 pt-2 font-mono text-sm">
@@ -1967,6 +1999,12 @@ function SlipLines({
   );
 }
 
+/** Dash knobs that moved between a pass and the car's pass before it. */
+interface KnobMoves {
+  moves: { name: string; from: number; to: number }[];
+  fromLabel: string;
+}
+
 /** A tune or firmware change shown on a pass, with the pass it's measured from. */
 interface TuneTabChange {
   change: Doc<"changes">;
@@ -1979,9 +2017,23 @@ function roundOf(fileName: string): string {
 }
 
 /** What this pass ran differently from the one before. */
-function TuneTab({ changes }: { changes: TuneTabChange[] }) {
+function TuneTab({ changes, knobMoves }: { changes: TuneTabChange[]; knobMoves?: KnobMoves }) {
   return (
     <div className="flex-1 space-y-3 px-3 pb-1 pt-2">
+      {knobMoves && (
+        <div>
+          <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Knobs since {knobMoves.fromLabel}
+          </div>
+          <div className="mt-1 divide-y divide-border/50">
+            {knobMoves.moves.map((m) => (
+              <p key={m.name} className="py-2 text-[13px] leading-snug text-foreground/90">
+                Moved {m.name} from row {m.from} to <span className="font-semibold text-foreground">row {m.to}</span>
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
       {changes.map(({ change, fromLabel }) => (
         <div key={change._id}>
           <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
