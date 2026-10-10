@@ -13,6 +13,7 @@ import type { UnitOverrides, UnitSystem } from "@/lib/units";
 import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel, isBigChange } from "@/lib/changes";
+import { runLabel } from "@/lib/tune-changes";
 import { bestForAir, type DialPass } from "@/lib/dial-predictor";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -157,21 +158,31 @@ export function FileList({
   );
   const removeFile = useMutation(api.files.remove);
   const vehicleChanges = useQuery(api.changes.listByVehicle, { vehicleId });
-  // The pass each change first ran on: a tune change knows it, a change made
-  // after a pass starts on the next one here.
-  const changesAt = useMemo(() => {
-    const at = new Map<string, Doc<"changes">[]>();
-    if (!vehicleChanges || !files) return at;
+  // The pass each change first ran on. Hardware changes made after a pass
+  // start on the next one here and tag its strip; tune and firmware changes
+  // read from the logs know their pass and fill its Tune tab.
+  const { changesAt, tuneAt } = useMemo(() => {
+    const changesAt = new Map<string, Doc<"changes">[]>();
+    const tuneAt = new Map<string, TuneTabChange[]>();
+    if (!vehicleChanges || !files) return { changesAt, tuneAt };
+    const byId = new Map((vehicleFiles ?? []).map((f) => [f._id as string, f]));
     for (const c of vehicleChanges) {
+      if (!isBigChange(c)) {
+        if (!c.toFileId) continue;
+        const from = c.afterFileId ? byId.get(c.afterFileId) : undefined;
+        const fromLabel = from ? from.round ?? roundOf(from.fileName) : undefined;
+        tuneAt.set(c.toFileId, [...(tuneAt.get(c.toFileId) ?? []), { change: c, fromLabel }]);
+        continue;
+      }
       let id: string | undefined = c.toFileId;
       if (!id && c.afterFileId) {
         const i = files.findIndex((f) => f._id === c.afterFileId);
         if (i >= 0 && i + 1 < files.length) id = files[i + 1]._id;
       }
-      if (id) at.set(id, [...(at.get(id) ?? []), c]);
+      if (id) changesAt.set(id, [...(changesAt.get(id) ?? []), c]);
     }
-    return at;
-  }, [vehicleChanges, files]);
+    return { changesAt, tuneAt };
+  }, [vehicleChanges, files, vehicleFiles]);
   const reorderFiles = useMutation(api.files.reorder);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
@@ -765,6 +776,7 @@ export function FileList({
                   onOpenViewer={() => handleOpenViewer(file._id)}
                   onOpenLogs={handleOpenLogs}
                   slipRefs={slipRefs}
+                  tuneChanges={tuneAt.get(file._id)}
                 />
               </div>
             );
@@ -796,6 +808,7 @@ function PassCard({
   onOpenViewer,
   onOpenLogs,
   slipRefs,
+  tuneChanges,
 }: {
   file: Doc<"files">;
   raceWeightLb?: number;
@@ -816,6 +829,8 @@ function PassCard({
   onSlipStats: (fileId: string, info: FileSlipStats) => void;
   alignWindow?: { preRace: number; postRace: number };
   onOpenViewer: () => void;
+  /** What this pass's tune changed, read from its log and the one before. */
+  tuneChanges?: TuneTabChange[];
   onOpenLogs: (fileIds: Id<"files">[]) => void;
   slipRefs: CompareSlipRef[];
 }) {
@@ -834,6 +849,7 @@ function PassCard({
   const [roundDraft, setRoundDraft] = useState("");
   const [showTimeslipForm, setShowTimeslipForm] = useState(false);
   const [editingTimeslip, setEditingTimeslip] = useState<Doc<"timeslips"> | null>(null);
+  const [tab, setTab] = useState<"slip" | "tune">("slip");
   const [showCompare, setShowCompare] = useState(false);
 
   useEffect(() => {
@@ -1253,7 +1269,36 @@ function PassCard({
         </DropdownMenu>
       </div>
 
-      {/* Timeslip lines */}
+      {/* Slip or what the tune changed: the Tune tab lights up only when
+          this pass ran a tune that differs from the pass before it. */}
+      <div className="flex gap-1 px-3 pt-2" onClick={(e) => e.stopPropagation()}>
+        {(["slip", "tune"] as const).map((t) => {
+          const off = t === "tune" && !tuneChanges?.length;
+          return (
+            <button
+              key={t}
+              type="button"
+              disabled={off}
+              onClick={() => setTab(t)}
+              className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
+                tab === t
+                  ? "bg-muted text-foreground"
+                  : off
+                    ? "cursor-default text-muted-foreground/30"
+                    : "cursor-pointer text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t}
+              {t === "tune" && !off && <span className="size-1.5 rounded-full bg-sky-400" />}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === "tune" && tuneChanges?.length ? (
+        <TuneTab changes={tuneChanges} />
+      ) : (
+      /* Timeslip lines */
       <div className="flex-1 px-3 pb-1 pt-2 font-mono text-sm">
         {timeslips === undefined ? null : timeslips.length === 0 ? (
           // A ghost slip keeps this card the same height as its neighbours;
@@ -1406,6 +1451,7 @@ function PassCard({
           ))
         )}
       </div>
+      )}
 
       {/* Notes footer */}
       <div className="px-3 py-2">
@@ -1915,6 +1961,56 @@ function SlipLines({
           valueClassName={segBestClass(s.key)}
           valueStyle={shadeStyle(s.key, segs[s.key], ranges)}
         />
+      ))}
+    </div>
+  );
+}
+
+/** A tune or firmware change shown on a pass, with the pass it's measured from. */
+interface TuneTabChange {
+  change: Doc<"changes">;
+  fromLabel?: string;
+}
+
+/** The round in a file name ("BOISE TOP GUN Q2 4.14" -> "Q2"), else the name before NSP's stamp. */
+function roundOf(fileName: string): string {
+  return fileName.split(/\s+/).find((w) => /^[A-Z]{1,2}\d{1,2}$/i.test(w))?.toUpperCase() ?? runLabel(fileName);
+}
+
+/**
+ * What this pass ran differently from the one before: one setting per row,
+ * the change in bold, where on the table under it. More in amber, less in
+ * sky, so the direction reads at a glance.
+ */
+function TuneTab({ changes }: { changes: TuneTabChange[] }) {
+  return (
+    <div className="flex-1 space-y-3 px-3 pb-1 pt-2">
+      {changes.map(({ change, fromLabel }) => (
+        <div key={change._id}>
+          <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            {change.category === "firmware" ? "ECU firmware" : `Changed since ${fromLabel ?? "the pass before"}`}
+          </div>
+          {change.category === "firmware" && <div className="mt-1 text-sm font-medium">{change.title}</div>}
+          <div className="mt-1 divide-y divide-border/50">
+            {(change.items ?? []).map((line, i) => {
+              const split = line.indexOf(": ");
+              const label = split > 0 ? line.slice(0, split) : line;
+              const [value, ...where] = (split > 0 ? line.slice(split + 2) : "").split(" · ");
+              const step = /\(([+−-])/.exec(value)?.[1] ?? value.trim().charAt(0);
+              const tone = step === "+" ? "text-amber-300" : step === "−" || step === "-" ? "text-sky-300" : "text-foreground";
+              return (
+                <div key={i} className="py-1.5">
+                  <div className="text-xs text-muted-foreground">{label}</div>
+                  <div className={`font-mono text-sm font-semibold tabular-nums ${tone}`}>{value}</div>
+                  {where.length > 0 && (
+                    <div className="font-mono text-[10px] text-muted-foreground/80">{where.join(" · ")}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {change.notes && <p className="mt-1 text-[10px] leading-snug text-muted-foreground/60">{change.notes}</p>}
+        </div>
       ))}
     </div>
   );

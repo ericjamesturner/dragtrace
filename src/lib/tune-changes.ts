@@ -5,7 +5,7 @@
  * change log.
  */
 import type { Tune } from "./haltech-tune";
-import { changeArea, deltaSpan, diffTunes, type TuneChange, type TuneDefs, type UnitChoice } from "./tune-diff";
+import { changeArea, deltaSpan, diffTunes, type AxisRange, type TuneChange, type TuneDefs, type UnitChoice } from "./tune-diff";
 import { inGroupLabel } from "./legend-labels";
 
 /** When NSP wrote the log, from its file name stamp: "2026-10-08_1248pm". */
@@ -75,9 +75,61 @@ export function compareTunes(a: Tune, b: Tune, defs: TuneDefs | null, units: Uni
   };
 }
 
+/** What a racer calls a setting, given the tree it sits in. */
+const FRIENDLY: { group?: RegExp; name: RegExp; label: string | ((m: RegExpExecArray) => string) }[] = [
+  { group: /boost control/i, name: /^target pressure/i, label: "Boost target" },
+  { name: /shift point/i, label: "Shift point" },
+  { name: /timed ignition correction/i, label: "TM timing" },
+  { name: /engine rpm cut percentage/i, label: "TM cut" },
+  { name: /engine rpm target error ignition correction/i, label: "TM timing on RPM error" },
+  { name: /engine rpm target$/i, label: "TM RPM line" },
+  { name: /driveshaft rpm target$/i, label: "TM driveshaft line" },
+  { name: /target lambda/i, label: "Target lambda" },
+  { name: /base fuel/i, label: "Base fuel" },
+  { name: /^fuel cylinder (\d+) correction/i, label: (m) => `Cyl ${m[1]} fuel trim` },
+  { name: /^fuel generic (\d+) correction/i, label: (m) => `Fuel trim ${m[1]}` },
+  { group: /launch control/i, name: /end rpm/i, label: "Launch end RPM" },
+  { group: /launch control/i, name: /^ignition/i, label: "Launch timing" },
+  { group: /launch control/i, name: /fuel correction/i, label: "Launch fuel" },
+  { group: /launch control/i, name: /^enable/i, label: "Launch control" },
+  { group: /trans-?brake/i, name: /rpm limiter method/i, label: "Trans-brake limiter" },
+  { name: /number of teeth/i, label: "Driveshaft sensor teeth" },
+  { group: /o2 control/i, name: /min rpm/i, label: "O2 control min RPM" },
+];
+
+/** Names that mean nothing without the group they sit in. */
+const GENERIC = /^(enable|pull up enable|method|type|channel \d+|condition \d+|operator \d+|number of operations)$/i;
+
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+
+function friendlyName(c: TuneChange): string {
+  const leaf = c.group[c.group.length - 1];
+  const where = c.group.join(" > ");
+  for (const f of FRIENDLY) {
+    if (f.group && !f.group.test(where)) continue;
+    const m = f.name.exec(inGroupLabel(c.name, leaf)) ?? f.name.exec(c.name);
+    if (m) return typeof f.label === "string" ? f.label : f.label(m);
+  }
+  const own = inGroupLabel(c.name, leaf);
+  return GENERIC.test(own) && leaf ? sentence(`${leaf} ${own}`) : own;
+}
+
+/** "trim knob 1 12" -> "knob 12"; a single throttle value says nothing. */
+function friendlyRange(r: AxisRange): string | null {
+  const span = r.from !== r.to ? `${r.from}–${r.to}` : r.from;
+  if (/^trim knob \d+$/i.test(r.name)) return `knob ${span}`;
+  if (/torque management knob/i.test(r.name)) return `TM knob ${span}`;
+  if (/^throttle$/i.test(r.name) && r.from === r.to) return null;
+  if (/^time$/i.test(r.name)) return `${span} s`;
+  return `${r.name} ${span}${r.unit ? ` ${r.unit}` : ""}`;
+}
+
+const onOff = (v: string | undefined) => (v === "Enable" ? "on" : v === "Disable" ? "off" : v);
+
 /**
  * A change-log entry for one tune change: a title naming the areas that
- * moved ("Boost, Ignition"), and one plain line per setting.
+ * moved ("Boost, Ignition"), and one line per setting, "Name: change", the
+ * change first and where on the table after it.
  */
 export function tuneChangeEntry(changes: TuneChange[]): { title: string; items: string[] } {
   const ranked = changes
@@ -85,16 +137,30 @@ export function tuneChangeEntry(changes: TuneChange[]): { title: string; items: 
     .sort((a, b) => a.rank - b.rank || a.c.name.localeCompare(b.c.name));
   const areas = [...new Set(ranked.map((r) => r.area))];
   const items = ranked.map(({ c }) => {
-    const name = inGroupLabel(c.name, c.group[c.group.length - 1]);
-    if (c.kind !== "table" || !c.table) return `${name}: ${c.before} → ${c.after}`;
+    const name = friendlyName(c);
+    if (c.kind !== "table" || !c.table) return `${name}: ${onOff(c.before)} → ${onOff(c.after)}`;
     const t = c.table;
+    if (!t.cellsChanged) return `${name}: breakpoints moved`;
     const unit = t.unit ? ` ${t.unit}` : "";
-    const where = [t.rowRange, t.colRange]
-      .filter((r) => !!r)
-      .map((r) => `${r!.name} ${r!.from}${r!.from !== r!.to ? `–${r!.to}` : ""}${r!.unit ? ` ${r!.unit}` : ""}`)
-      .join(", ");
-    if (!t.cellsChanged) return `${name}: axis changed`;
-    return `${name}: ${deltaSpan(t)}${unit}${where ? ` at ${where}` : ""}`;
+    // An axis with one breakpoint says nothing about where.
+    const where = [t.rows > 1 ? t.rowRange : undefined, t.cols > 1 ? t.colRange : undefined]
+      .filter((r): r is AxisRange => !!r)
+      .map(friendlyRange)
+      .filter((r): r is string => !!r);
+    // One cell: its old and new value say more than the step alone.
+    let change = `${deltaSpan(t)}${unit}`;
+    if (t.cellsChanged === 1) {
+      const fmt = (v: number) =>
+        v.toLocaleString("en-US", { minimumFractionDigits: t.dp, maximumFractionDigits: t.dp }).replace("-", "−");
+      for (let r = 0; r < t.after.length; r++) {
+        const col = t.after[r].findIndex((v, j) => fmt(v) !== fmt(t.before[r][j]));
+        if (col >= 0) {
+          change = `${fmt(t.before[r][col])} → ${fmt(t.after[r][col])}${unit} (${deltaSpan(t)})`;
+          break;
+        }
+      }
+    }
+    return `${name}: ${[change, ...where].join(" · ")}`;
   });
   return { title: `${areas.slice(0, 3).join(", ")}${areas.length > 3 ? " and more" : ""}`, items };
 }
