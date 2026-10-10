@@ -126,6 +126,16 @@
   html {
     @apply font-sans;
     }
+  /* Numbers are typed, never nudged: no stepper arrows on number inputs. */
+  input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
 }
 
 /* Prevent uPlot axis label elements from intercepting mouse events */
