@@ -105,6 +105,44 @@ export function airSensitivity(history: DialPass[], atCf: number): AirSensitivit
   return { secPerCf: textbook, textbookSecPerCf: textbook, sensitivity: "textbook" };
 }
 
+/** Hand-picked passes only need to differ this much in air to teach a slope. */
+const MIN_PICKED_CF_RANGE = 0.01;
+
+/**
+ * How much the air moves the car, learned from passes the racer picked — the
+ * ones on the current tune, say. Needs two in different enough air, and the
+ * same sanity bounds as the history fit. Null when they can't teach it.
+ */
+export function pickedSensitivity(picked: DialPass[], atCf: number): AirSensitivity | null {
+  if (picked.length < 2) return null;
+  const cfs = picked.map((p) => p.cf);
+  if (Math.max(...cfs) - Math.min(...cfs) < MIN_PICKED_CF_RANGE) return null;
+  const textbook = mean(picked.map((p) => p.et)) / (3 * atCf);
+  const fitted = slope(picked);
+  if (!(fitted > 0) || fitted > 2 * textbook) return null;
+  return { secPerCf: fitted, textbookSecPerCf: textbook, sensitivity: "learned", learnedFrom: picked.length };
+}
+
+/** Each picked pass moved to the target air by `correct`, then averaged. */
+export function correctPicked(
+  picked: DialPass[],
+  correct: (p: DialPass) => number
+): Pick<DialPrediction, "et" | "spread" | "basis"> | null {
+  if (picked.length === 0) return null;
+  const basis = picked.map((p) => ({ ...p, corrected: correct(p) }));
+  const et = mean(basis.map((b) => b.corrected));
+  const spread =
+    basis.length > 1
+      ? Math.sqrt(basis.reduce((a, b) => a + (b.corrected - et) ** 2, 0) / (basis.length - 1))
+      : undefined;
+  return { et, spread, basis };
+}
+
+/** The textbook move to the target air: ET goes with the cube root of the factor. */
+export function textbookCorrected(p: DialPass, targetCf: number): number {
+  return p.et * Math.cbrt(targetCf / p.cf);
+}
+
 /**
  * `history` is every clean pass the car has with weather, newest first, at
  * the distance being predicted.
@@ -175,7 +213,7 @@ const SPEED_CLOCKS = ["eighthMph", "mph"] as const;
  * A whole predicted slip: every clock of each basis pass moved to the target
  * air by the same factor its ET moved, then averaged clock by clock.
  */
-export function predictSlip(prediction: DialPrediction): SlipClocks {
+export function predictSlip(prediction: Pick<DialPrediction, "basis">): SlipClocks {
   const out: SlipClocks = {};
   const average = (key: keyof SlipClocks, scaled: (b: DialBasisPass, v: number) => number, dp: number) => {
     const vals = prediction.basis

@@ -5,6 +5,7 @@ import { Home } from "./Home";
 import { EventList } from "./EventList";
 import { FileList } from "./FileList";
 import { TuneCompare } from "./TuneCompare";
+import { DialPage } from "./DialPage";
 import { ChannelManager } from "./ChannelManager";
 import { Settings, type SettingsSection } from "./Settings";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { ChevronsUpDownIcon, GitCompareArrowsIcon, LogOutIcon, MenuIcon, SettingsIcon } from "lucide-react";
+import { ChevronsUpDownIcon, GaugeIcon, GitCompareArrowsIcon, LogOutIcon, MenuIcon, SettingsIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { AdminMenu } from "./AdminControls";
 import { useQuery } from "convex/react";
@@ -31,6 +32,7 @@ type NavState =
   | { view: "viewer"; vehicleId: Id<"vehicles">; eventId: Id<"events">; fileIds: Id<"files">[] }
   | { view: "channel-manager" }
   | { view: "tunes" }
+  | { view: "predict"; vehicleId?: Id<"vehicles"> }
   | { view: "settings"; section: SettingsSection };
 
 interface NavContextValue {
@@ -40,6 +42,7 @@ interface NavContextValue {
   goToFiles: (vehicleId: Id<"vehicles">, eventId: Id<"events">) => void;
   goToViewer: (vehicleId: Id<"vehicles">, eventId: Id<"events">, fileIds: Id<"files">[]) => void;
   goToChannelManager: () => void;
+  goToPredict: (vehicleId?: Id<"vehicles">) => void;
   openSettings: (section?: SettingsSection) => void;
 }
 
@@ -58,6 +61,10 @@ function parseNavFromUrl(): NavState {
   }
   if (params.has("tunes")) {
     return { view: "tunes" };
+  }
+  if (params.has("predict")) {
+    const id = params.get("predict");
+    return { view: "predict", vehicleId: id ? (id as Id<"vehicles">) : undefined };
   }
   if (params.has("settings") || params.has("account") || params.has("preferences")) {
     const value = params.get("settings");
@@ -106,6 +113,10 @@ function navToUrl(nav: NavState): string {
   }
   if (nav.view === "tunes") {
     params.set("tunes", "");
+    return `?${params.toString()}`;
+  }
+  if (nav.view === "predict") {
+    params.set("predict", nav.vehicleId ?? "");
     return `?${params.toString()}`;
   }
   if (nav.view === "settings") {
@@ -181,6 +192,10 @@ export function Layout() {
     []
   );
   const goToChannelManager = useCallback(() => setNav({ view: "channel-manager" }), []);
+  const goToPredict = useCallback(
+    (vehicleId?: Id<"vehicles">) => setNav({ view: "predict", vehicleId }),
+    []
+  );
   const openSettings = useCallback(
     (section: SettingsSection = "profile") =>
       setNav({ view: "settings", section }),
@@ -199,6 +214,7 @@ export function Layout() {
     goToFiles,
     goToViewer,
     goToChannelManager,
+    goToPredict,
     openSettings,
   };
 
@@ -221,6 +237,20 @@ export function Layout() {
       >
         <GitCompareArrowsIcon className="size-4" />
         Compare tunes
+      </button>
+      <button
+        onClick={() => {
+          setMobileOpen(false);
+          goToPredict("vehicleId" in nav ? nav.vehicleId : undefined);
+        }}
+        className={`flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-sm transition-colors hover:bg-muted ${
+          nav.view === "predict"
+            ? "text-foreground font-medium"
+            : "text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        <GaugeIcon className="size-4" />
+        Dial-in
       </button>
       <button
         onClick={() => {
@@ -362,6 +392,8 @@ function ContentArea() {
       return <Settings section={nav.section} />;
     case "tunes":
       return <TuneCompare />;
+    case "predict":
+      return <DialPage vehicleId={nav.vehicleId} />;
     case "channel-manager":
       return null; // Handled above as full-screen view
   }

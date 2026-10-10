@@ -6,6 +6,8 @@ import { detectRaceStartIndex } from "@/lib/haltech-parser";
 import { parseDatalogBytes } from "@/lib/datalog-parser";
 import { lttbDownsample } from "@/lib/downsample";
 import { readLaunch, type LaunchReading } from "@/lib/launch-readings";
+import { parsePreview } from "@/lib/preview";
+import type { PassLift } from "@/lib/lift-estimate";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
@@ -98,6 +100,31 @@ export function detectLift(
   }
   if (!sawWot) return null;
   return { finalLift: liftedAt, pedals };
+}
+
+/**
+ * The log's launch is the trans-brake letting go; the slip's clock starts a
+ * little later, when the car rolls out of the stage beam. Without this, a
+ * lift in the last few hundredths before the stripe reads as after it. Fitted
+ * on seven Boise passes against the Computech "Full Run" column: anything
+ * from 0.142 to 0.218 s sorted all seven right.
+ */
+const RELEASE_TO_CLOCK = 0.18;
+
+/**
+ * Whether the driver lifted or pedaled before `passLen` seconds on the slip's
+ * clock — the finish of the distance that matters. Reads the throttle trace
+ * of any stored preview version: the trace and the launch time mean the same
+ * in all of them, so a pass needn't be reopened to be judged. Null when the
+ * pass was flat to that finish, or the preview has no throttle trace.
+ */
+export function slipLift(preview: string | undefined, passLen: number | undefined): PassLift | null {
+  const p = parsePreview(preview);
+  if (!p || passLen === undefined || passLen <= 0) return null;
+  const lift = detectLift({ ...p, launch: p.launch ?? null }, passLen + RELEASE_TO_CLOCK);
+  // Reported on the slip's clock, so it compares with the 60', 330' and ET.
+  if (lift?.finalLift != null) return { kind: "lifted", at: lift.finalLift - RELEASE_TO_CLOCK };
+  return lift && lift.pedals.length > 0 ? { kind: "pedaled", at: lift.pedals[0] - RELEASE_TO_CLOCK } : null;
 }
 
 type Status =

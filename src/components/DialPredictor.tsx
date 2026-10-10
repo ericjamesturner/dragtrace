@@ -56,6 +56,7 @@ export function DialPredictor({
   latestAir,
   daPoints,
   onPrediction,
+  onPickPasses,
 }: {
   eventId: string;
   distance: "1/8" | "1/4";
@@ -66,6 +67,8 @@ export function DialPredictor({
   /** The car's slips that carry both D.A. and enough weather for a factor. */
   daPoints: { da: number; cf: number }[];
   onPrediction?: (run: PredictedRun | null) => void;
+  /** Opens the dial-in page, to choose which passes it goes from. */
+  onPickPasses?: () => void;
 }) {
   const storageKey = `dialAir:${eventId}`;
   const [draft, setDraft] = useState<AirDraft>(() => {
@@ -193,6 +196,15 @@ export function DialPredictor({
         <div className="text-xs text-muted-foreground">
           {targetCf === null ? "Enter air temp and barometer" : "No clean passes with weather yet"}
         </div>
+      )}
+      {onPickPasses && (
+        <button
+          type="button"
+          onClick={onPickPasses}
+          className="ml-auto cursor-pointer text-xs text-muted-foreground hover:text-foreground"
+        >
+          Pick passes →
+        </button>
       )}
     </div>
   );

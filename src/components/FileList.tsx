@@ -167,7 +167,7 @@ export function FileList({
     setArmedIdx(i);
     window.addEventListener("mouseup", () => setArmedIdx(null), { once: true });
   }, []);
-  const { goToEvents, goToViewer } = useNav();
+  const { goToEvents, goToViewer, goToPredict } = useNav();
 
   // Cards flow left-to-right and wrap, so the insertion point considers the
   // row (Y) first, then the position within the row (X).
@@ -639,6 +639,7 @@ export function FileList({
           latestAir={dialData.latestAir}
           daPoints={dialData.daPoints}
           onPrediction={setPredicted}
+          onPickPasses={() => goToPredict(vehicleId)}
         />
       )}
 

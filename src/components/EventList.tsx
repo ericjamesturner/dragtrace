@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -64,6 +64,31 @@ export function EventList({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<Id<"events"> | null>(null);
 
+  const files = useQuery(api.files.listByVehicle, { vehicleId });
+  const slips = useQuery(api.timeslips.listByVehicle, { vehicleId });
+
+  // The air each event ran in, from its slips' weather.
+  const air = useMemo(() => {
+    if (!files || !slips) return null;
+    const eventOf = new Map(files.map((f) => [f._id as string, f.eventId as string]));
+    const perEvent = new Map<string, { das: number[]; temps: number[] }>();
+    for (const s of slips) {
+      const eventId = eventOf.get(s.fileId);
+      if (!eventId) continue;
+      const e = perEvent.get(eventId) ?? { das: [], temps: [] };
+      perEvent.set(eventId, e);
+      if (s.densityAltitudeFt !== undefined) e.das.push(s.densityAltitudeFt);
+      if (s.airTemperatureF !== undefined) e.temps.push(s.airTemperatureF);
+    }
+    return perEvent;
+  }, [files, slips]);
+
+  const range = (xs: number[], fmt: (x: number) => string) => {
+    const lo = Math.min(...xs);
+    const hi = Math.max(...xs);
+    return fmt(lo) === fmt(hi) ? fmt(lo) : `${fmt(lo)}–${fmt(hi)}`;
+  };
+
   const editingEvent = editingId
     ? events?.find((e) => e._id === editingId)
     : null;
@@ -81,11 +106,11 @@ export function EventList({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
   );
 
   return (
-    <div className="max-w-3xl p-6">
-      <div className="mb-6 flex items-center gap-2">
-        <h2 className="text-lg font-semibold">{vehicle?.name ?? "..."}</h2>
+    <div className="max-w-4xl p-6">
+      <div className="mb-6 flex flex-wrap items-center gap-2">
+        <h2 className="whitespace-nowrap text-lg font-semibold">{vehicle?.name ?? "..."}</h2>
         {(vehicle?.year || vehicle?.make || vehicle?.model) && (
-          <span className="text-sm text-muted-foreground">
+          <span className="whitespace-nowrap text-sm text-muted-foreground">
             — {[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ")}
           </span>
         )}
@@ -164,10 +189,18 @@ export function EventList({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
                 <div className="font-medium text-sm truncate">{event.name}</div>
                 <div className="text-xs text-muted-foreground truncate">
                   {event.date}{event.endDate && event.endDate !== event.date && ` → ${event.endDate}`}
-                  {event.fileCount > 0 && ` · ${event.fileCount} ${event.fileCount === 1 ? "log" : "logs"}`}
-                  {event.timeslipCount > 0 && ` · ${event.timeslipCount} ${event.timeslipCount === 1 ? "slip" : "slips"}`}
                   {event.notes && ` — ${event.notes}`}
                 </div>
+                {(() => {
+                  const e = air?.get(event._id);
+                  const parts = [
+                    e && e.das.length > 0 && `D.A. ${range(e.das, (x) => x.toLocaleString())} ft`,
+                    e && e.temps.length > 0 && `${range(e.temps, (x) => String(Math.round(x)))} °F`,
+                  ].filter(Boolean);
+                  return parts.length > 0 ? (
+                    <div className="truncate text-xs text-muted-foreground">{parts.join(" · ")}</div>
+                  ) : null;
+                })()}
               </div>
               {event.timeslipCount === 0 ? (
                 <span className="shrink-0 text-xs text-muted-foreground/60">
