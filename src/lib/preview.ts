@@ -1,3 +1,5 @@
+import type { LaunchReading } from "./launch-readings";
+
 /**
  * The precomputed shape of a pass, stored on the file when its dashboard
  * thumbnail is first drawn. Reused wherever a run needs to be recognised at a
@@ -12,6 +14,8 @@ export interface PreviewPayload {
   raceStart: number | null;
   raceEnd: number | null;
   logDuration: number;
+  /** Readings just before the launch (stored from preview version 3). */
+  launch?: LaunchReading[] | null;
 }
 
 export function parsePreview(raw: string | undefined | null): PreviewPayload | null {

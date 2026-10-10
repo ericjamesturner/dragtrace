@@ -5,11 +5,12 @@ import type { Doc } from "../../convex/_generated/dataModel";
 import { detectRaceStartIndex } from "@/lib/haltech-parser";
 import { parseDatalogBytes } from "@/lib/datalog-parser";
 import { lttbDownsample } from "@/lib/downsample";
+import { readLaunch, type LaunchReading } from "@/lib/launch-readings";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
 // Bump when the preview computation changes so stored previews recompute.
-const PREVIEW_VERSION = 2;
+const PREVIEW_VERSION = 3;
 
 // Stored window around the race — wider than the rendered window so the
 // dashboard lead-in/tail can be tuned without recomputing stored previews.
@@ -31,6 +32,8 @@ export interface PreviewPayload {
   raceStart: number | null;
   raceEnd: number | null;
   logDuration: number;
+  /** Temperatures and line readings just before the launch; null without race data. */
+  launch: LaunchReading[] | null;
 }
 
 /** A file's stored preview, or null when absent or from an older version. */
@@ -110,8 +113,8 @@ interface RpmPreviewProps {
   height?: number;
 }
 
-function computePreview(bytes: ArrayBuffer, fileName: string): PreviewPayload | string {
-  const parsed = parseDatalogBytes(bytes, fileName);
+async function computePreview(bytes: ArrayBuffer, fileName: string): Promise<PreviewPayload | string> {
+  const parsed = await parseDatalogBytes(bytes, fileName);
   if (parsed.sessions.length === 0) return "No sessions";
 
   const session = parsed.sessions[0];
@@ -173,6 +176,7 @@ function computePreview(bytes: ArrayBuffer, fileName: string): PreviewPayload | 
     raceStart,
     raceEnd,
     logDuration: timestamps[timestamps.length - 1],
+    launch: raceStart !== null ? readLaunch(parsed, session, raceStart) : null,
   };
 }
 
@@ -204,9 +208,10 @@ export function RpmPreview({ file, onRaceTiming, alignWindow, height = 176 }: Rp
 
     fetch(url)
       .then((res) => res.arrayBuffer())
-      .then((bytes) => {
+      .then(async (bytes) => {
         if (cancelled) return;
-        const result = computePreview(bytes, file.fileName);
+        const result = await computePreview(bytes, file.fileName);
+        if (cancelled) return;
         if (typeof result === "string") {
           setStatus({ kind: "no-data", message: result });
           return;

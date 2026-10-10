@@ -8,6 +8,9 @@ import { TimeslipForm } from "./TimeslipForm";
 import { SlipCompareDialog, type CompareSlipRef } from "./SlipCompareDialog";
 import { SEGMENTS, segmentTimes, type SegmentKey } from "@/lib/timeslip-segments";
 import { estimatePowerFromTimeslip } from "@/lib/drag-performance";
+import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
+import type { UnitOverrides, UnitSystem } from "@/lib/units";
+import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
@@ -99,6 +102,7 @@ export function FileList({
   eventId: Id<"events">;
 }) {
   const vehicle = useQuery(api.vehicles.get, { id: vehicleId });
+  const units = useUnitPreferences(vehicleId);
   const event = useQuery(api.events.get, { id: eventId });
   const filesNewestFirst = useQuery(api.files.listByEvent, { eventId });
   // The car's whole history, for estimation ratios that can reach past this
@@ -217,6 +221,18 @@ export function FileList({
     if (lengths.length === 0) return undefined;
     return { preRace: PASS_PAD_S, postRace: Math.max(...lengths) + PASS_PAD_S };
   }, [files, slipStats, raceTimings]);
+
+  // An eighth-mile event: every slip is 1/8 only, so the quarter-mile rows
+  // would be nothing but dashes. Until a slip exists, keep the full layout.
+  const eighthOnly = useMemo(() => {
+    if (!files || !vehicleSlips) return false;
+    const ids = new Set<string>(files.map((f) => f._id));
+    const slips = vehicleSlips.filter((s) => ids.has(s.fileId));
+    return (
+      slips.length > 0 &&
+      slips.every((s) => s.et === undefined && s.mph === undefined && s.thousandFt === undefined)
+    );
+  }, [files, vehicleSlips]);
 
   const bestFileId = useMemo(() => {
     if (!files) return null;
@@ -545,6 +561,9 @@ export function FileList({
                 <PassCard
                   file={file}
                   raceWeightLb={vehicle?.raceWeightLb}
+                  unitSystem={units.unitSystem}
+                  unitOverrides={units.resolved}
+                  eighthOnly={eighthOnly}
                   passNumber={i + 1}
                   onArmDrag={() => armDrag(i)}
                   isBest={file._id === bestFileId}
@@ -575,6 +594,9 @@ export function FileList({
 function PassCard({
   file,
   raceWeightLb,
+  unitSystem,
+  unitOverrides,
+  eighthOnly,
   passNumber,
   isBest,
   eventBests,
@@ -591,6 +613,9 @@ function PassCard({
 }: {
   file: Doc<"files">;
   raceWeightLb?: number;
+  unitSystem: UnitSystem;
+  unitOverrides: UnitOverrides;
+  eighthOnly: boolean;
   passNumber: number;
   isBest: boolean;
   eventBests: MetricBests;
@@ -729,6 +754,12 @@ function PassCard({
     const payload = parsePreviewPayload(file.preview);
     return payload ? detectLift(payload, passLen) : null;
   }, [file.preview, passLen]);
+
+  // Temperatures and line readings from the log, just before the launch.
+  const launchLines = useMemo(() => {
+    const launch = parsePreviewPayload(file.preview)?.launch;
+    return launch ? formatLaunch(launch, unitSystem, unitOverrides) : [];
+  }, [file.preview, unitSystem, unitOverrides]);
 
   // Ran under the dial — a breakout reads red, like it costs you the round.
   const heroBreakout =
@@ -1033,9 +1064,9 @@ function PassCard({
           // the button floats over it as the empty state's one action.
           <div className="relative">
             <div className="pointer-events-none opacity-30" aria-hidden>
-              <SlipLines ts={EMPTY_SLIP} bests={{}} />
+              <SlipLines ts={EMPTY_SLIP} bests={{}} eighthOnly={eighthOnly} />
               <Separator className="my-1.5" />
-              <TimeslipLine label="LIFT BEFORE 1/4" value={undefined} />
+              <TimeslipLine label={eighthOnly ? "LIFT BEFORE 1/8" : "LIFT BEFORE 1/4"} value={undefined} />
             </div>
             <div className="absolute inset-0 flex items-center justify-center">
               <Button
@@ -1060,6 +1091,8 @@ function PassCard({
                 ts={ts}
                 bests={eventBests}
                 raceWeightLb={raceWeightLb}
+                launchLines={idx === 0 ? launchLines : undefined}
+                eighthOnly={eighthOnly}
               />
               {idx === timeslips.length - 1 && lift !== null && passLen !== null && (
                 <>
@@ -1441,10 +1474,16 @@ function SlipLines({
   ts,
   bests,
   raceWeightLb,
+  launchLines,
+  eighthOnly = false,
 }: {
   ts: Doc<"timeslips">;
   bests: MetricBests;
   raceWeightLb?: number;
+  /** Read from this pass's log; only the card's first slip carries them. */
+  launchLines?: LaunchLine[];
+  /** Every slip in the event is 1/8 mile — leave out the quarter-mile rows. */
+  eighthOnly?: boolean;
 }) {
   const redLight = ts.rt !== undefined && ts.rt < 0;
   const breakout =
@@ -1513,19 +1552,23 @@ function SlipLines({
       />
       <TimeslipLine label="MPH" value={ts.eighthMph} valueClassName={bestClass("eighthMph")} />
 
-      <Separator className="my-1.5" />
+      {!eighthOnly && (
+        <>
+          <Separator className="my-1.5" />
 
-      <TimeslipLine label="1000'" value={ts.thousandFt} valueClassName={bestClass("thousandFt")} />
+          <TimeslipLine label="1000'" value={ts.thousandFt} valueClassName={bestClass("thousandFt")} />
 
-      <Separator className="my-1.5" />
+          <Separator className="my-1.5" />
 
-      <TimeslipLine
-        label="1/4"
-        value={ts.et}
-        bold
-        valueClassName={breakout ? "text-red-400" : bestClass("et")}
-      />
-      <TimeslipLine label="MPH" value={ts.mph} bold valueClassName={bestClass("mph")} />
+          <TimeslipLine
+            label="1/4"
+            value={ts.et}
+            bold
+            valueClassName={breakout ? "text-red-400" : bestClass("et")}
+          />
+          <TimeslipLine label="MPH" value={ts.mph} bold valueClassName={bestClass("mph")} />
+        </>
+      )}
 
       {hasRunConditions && (
         <>
@@ -1571,6 +1614,18 @@ function SlipLines({
                 .join(" · ")}
             />
           )}
+        </>
+      )}
+
+      {launchLines && launchLines.length > 0 && (
+        <>
+          <Separator className="my-1.5" />
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+            At launch
+          </div>
+          {launchLines.map((l) => (
+            <TimeslipLine key={l.label} label={l.label} value={l.value} />
+          ))}
         </>
       )}
 
@@ -1636,9 +1691,10 @@ function SlipLines({
 
       <Separator className="my-1.5" />
 
-      {/* Marker-to-marker splits. Always all four rows, so the gallery stays
-          aligned; an eighth-mile slip simply dashes the back half. */}
-      {SEGMENTS.map((s) => (
+      {/* Marker-to-marker splits. Always the same rows on every card, so the
+          gallery stays aligned; an eighth-mile slip dashes the back half, and
+          an eighth-mile event drops it. */}
+      {(eighthOnly ? SEGMENTS.slice(0, 2) : SEGMENTS).map((s) => (
         <TimeslipLine
           key={s.key}
           label={s.label}
