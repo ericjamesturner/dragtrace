@@ -95,7 +95,7 @@ export function ChangesPage({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
                     </div>
                     {(after || to) && (
                       <div className="text-xs text-muted-foreground">
-                        {after && to ? `${after} → ${to}` : `after ${after}`}
+                        {after && to ? `${after} → ${to}` : after ? `after ${after}` : `first on ${to}`}
                       </div>
                     )}
                     {c.notes && <p className="mt-1 text-sm text-muted-foreground">{c.notes}</p>}
