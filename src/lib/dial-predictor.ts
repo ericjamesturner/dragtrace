@@ -1,6 +1,6 @@
 /**
- * Next-round dial-in from the car's own passes: correct each recent clean pass
- * to the air right now, then average them. The spread of those corrected times
+ * Next-round dial-in from the car's own passes: correct each picked pass to
+ * the air right now, then average them. The spread of those corrected times
  * is how far to trust the number.
  *
  * How much the air moves this car's ET is learned from its own history once
@@ -42,19 +42,9 @@ export interface DialPrediction {
   et: number;
   /** Standard deviation of the corrected times; absent with a single pass. */
   spread?: number;
-  /** Seconds of ET per 1.00 of correction factor. */
-  secPerCf: number;
-  /** What the textbook rule would say, for comparison. */
-  textbookSecPerCf: number;
-  sensitivity: "learned" | "textbook";
-  /** Passes the sensitivity was learned from, when learned. */
-  learnedFrom?: number;
   basis: DialBasisPass[];
-  scope: "event" | "all";
 }
 
-/** Recent passes averaged when the event alone has too few. */
-const MAX_BASIS = 5;
 /** History needed before the car's own sensitivity replaces the textbook. */
 const MIN_LEARN_PASSES = 5;
 /** ...and the air must have varied this much, or the slope is just noise. */
@@ -127,7 +117,7 @@ export function pickedSensitivity(picked: DialPass[], atCf: number): AirSensitiv
 export function correctPicked(
   picked: DialPass[],
   correct: (p: DialPass) => number
-): Pick<DialPrediction, "et" | "spread" | "basis"> | null {
+): DialPrediction | null {
   if (picked.length === 0) return null;
   const basis = picked.map((p) => ({ ...p, corrected: correct(p) }));
   const et = mean(basis.map((b) => b.corrected));
@@ -141,29 +131,6 @@ export function correctPicked(
 /** The textbook move to the target air: ET goes with the cube root of the factor. */
 export function textbookCorrected(p: DialPass, targetCf: number): number {
   return p.et * Math.cbrt(targetCf / p.cf);
-}
-
-/**
- * `history` is every clean pass the car has with weather, newest first, at
- * the distance being predicted.
- */
-export function predictDial(history: DialPass[], targetCf: number): DialPrediction | null {
-  if (history.length === 0 || !(targetCf > 0)) return null;
-  const { secPerCf, textbookSecPerCf, sensitivity, learnedFrom } = airSensitivity(history, targetCf);
-
-  const atEvent = history.filter((p) => p.thisEvent);
-  const scope = atEvent.length >= 2 ? "event" : "all";
-  const picked = (scope === "event" ? atEvent : history).slice(0, MAX_BASIS);
-  const basis = picked.map((p) => ({
-    ...p,
-    corrected: p.et + secPerCf * (targetCf - p.cf),
-  }));
-  const et = mean(basis.map((b) => b.corrected));
-  const spread =
-    basis.length > 1
-      ? Math.sqrt(basis.reduce((a, b) => a + (b.corrected - et) ** 2, 0) / (basis.length - 1))
-      : undefined;
-  return { et, spread, secPerCf, textbookSecPerCf, sensitivity, learnedFrom, basis, scope };
 }
 
 /** Typical change in correction factor per 1,000 ft of density altitude. */

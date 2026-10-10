@@ -6,6 +6,7 @@ import { loadDatalog } from "@/lib/load-haltech-log";
 import {
   isSupportedLogFile,
   SUPPORTED_LOG_ACCEPT,
+  SUPPORTED_LOG_DESCRIPTION,
 } from "@/lib/datalog-parser";
 import type { LoadedLog, ViewerConfig } from "@/lib/viewer-types";
 import { captureSharedViewerWorkspace } from "@/lib/shared-viewer-layout";
@@ -306,6 +307,7 @@ export default function PublicLogPage({
                   ? "or click to choose a file"
                   : "or click to choose one or more files"}
               </span>
+              <span className="mt-3 text-sm text-white/45">{SUPPORTED_LOG_DESCRIPTION}</span>
             </>
           )}
         </button>

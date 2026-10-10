@@ -6,6 +6,8 @@ import { useNav } from "./Layout";
 import { Input } from "@/components/ui/input";
 import { slipLift } from "./RpmPreview";
 import { liftRefs, runAt, type PassLift, type RunAt } from "@/lib/lift-estimate";
+import { categoryLabel, isBigChange } from "@/lib/changes";
+import { WrenchIcon } from "lucide-react";
 import { correctionFactor } from "@/lib/weather-correction";
 import {
   airSensitivity,
@@ -124,6 +126,7 @@ function DialBody({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
   const files = useQuery(api.files.listByVehicle, { vehicleId });
   const slips = useQuery(api.timeslips.listByVehicle, { vehicleId });
   const events = useQuery(api.events.listByVehicle, { vehicleId });
+  const changes = useQuery(api.changes.listByVehicle, { vehicleId });
 
   // Every pass with a slip, newest event first, each event in run order.
   const groups = useMemo(() => {
@@ -162,12 +165,22 @@ function DialBody({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
 
   const picksKey = `dialPicks:${vehicleId}`;
   const [storedPicks, setStoredPicks] = useState<string[] | null>(() => load<string[]>(picksKey));
-  // Until the racer picks, go from the newest clean pass with weather.
+  // Until the racer picks: every clean pass with weather since the last big
+  // change (another converter makes another car), else the newest one.
   const picks = useMemo(() => {
     if (storedPicks) return new Set(storedPicks);
-    const first = newestFirst.find((r) => r.cf !== null && !r.liftEighth && r.slip.eighthEt !== undefined);
+    const clean = (r: PassRow) => r.cf !== null && !r.liftEighth && r.slip.eighthEt !== undefined;
+    const lastBig = changes?.find(isBigChange);
+    if (lastBig && groups) {
+      const oldestFirst = [...groups].reverse().flatMap((g) => g.rows.map((r) => ({ r, date: g.event.date })));
+      const after = lastBig.afterFileId ? oldestFirst.findIndex(({ r }) => r.id === lastBig.afterFileId) : -1;
+      const from = after >= 0 ? after + 1 : oldestFirst.findIndex(({ date }) => date >= lastBig.date);
+      const since = from >= 0 ? oldestFirst.slice(from).map(({ r }) => r).filter(clean) : [];
+      if (since.length > 0) return new Set(since.map((r) => r.id));
+    }
+    const first = newestFirst.find(clean);
     return new Set(first ? [first.id] : []);
-  }, [storedPicks, newestFirst]);
+  }, [storedPicks, newestFirst, changes, groups]);
   const setPicked = (ids: string[], on: boolean) => {
     const next = new Set(picks);
     for (const id of ids) {
@@ -346,13 +359,54 @@ function DialBody({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
       )}
 
       <div className="space-y-4">
-        {groups.map(({ event, rows: eventRows }) => {
+        {groups.map(({ event, rows: eventRows }, groupIndex) => {
+          // Big changes made since the event below and on or before this one.
+          const changesHere = (changes ?? []).filter(
+            (c) =>
+              isBigChange(c) &&
+              c.date >= event.date &&
+              (groupIndex === 0 || c.date < groups[groupIndex - 1].event.date)
+          );
           // The whole event at once: on when every usable pass is picked.
           const usableIds = eventRows.filter(usable).map((r) => r.id);
           const pickedCount = usableIds.filter((id) => picks.has(id)).length;
           const all = usableIds.length > 0 && pickedCount === usableIds.length;
+          // The event's bests. The 60' and 330' are real on any pass; the
+          // finish only on passes the driver ran flat to it.
+          const min = (xs: (number | undefined)[]) => {
+            const v = xs.filter((x): x is number => x !== undefined && x > 0);
+            return v.length ? Math.min(...v) : undefined;
+          };
+          const flat = eventRows.filter((r) => runOf(r).state === "clean");
+          const best = {
+            sixtyFt: min(eventRows.map((r) => r.slip.sixtyFt)),
+            threeThirty: min(eventRows.map((r) => r.slip.threeThirty)),
+            et: min(flat.map((r) => (distance === "1/8" ? r.slip.eighthEt : r.slip.et))),
+            mph: (() => {
+              const v = flat
+                .map((r) => (distance === "1/8" ? r.slip.eighthMph : r.slip.mph))
+                .filter((x): x is number => x !== undefined);
+              return v.length ? Math.max(...v) : undefined;
+            })(),
+          };
+          const bestPass = flat.find((r) => (distance === "1/8" ? r.slip.eighthEt : r.slip.et) === best.et);
+          const green = (v: number | undefined, b: number | undefined) =>
+            v !== undefined && v === b ? "text-green-400" : "";
           return (
             <div key={event._id}>
+              {changesHere.map((c) => (
+                <div
+                  key={c._id}
+                  className="mb-3 flex items-center gap-3 rounded-lg border border-dashed px-3 py-2 text-xs"
+                >
+                  <WrenchIcon className="size-4 shrink-0 text-amber-400" />
+                  <span className="font-mono tabular-nums text-muted-foreground">{c.date}</span>
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-amber-400">
+                    {categoryLabel(c.category)}
+                  </span>
+                  <span className="truncate">{c.title}</span>
+                </div>
+              ))}
               <label
                 className={`mb-1 flex items-center gap-2 pl-3 text-xs ${
                   usableIds.length > 0 ? "cursor-pointer" : "text-muted-foreground/50"
@@ -371,9 +425,35 @@ function DialBody({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
                 />
                 <span className="font-medium">{event.name}</span>
                 <span className="text-muted-foreground">{event.date}</span>
+                <span className="ml-auto hidden pr-3 font-mono tabular-nums text-muted-foreground sm:inline">
+                  {best.et !== undefined && (
+                    <>
+                      best <span className="text-green-400">{best.et.toFixed(3)}</span>
+                      {bestPass && (distance === "1/8" ? bestPass.slip.eighthMph : bestPass.slip.mph) !== undefined && (
+                        <> @ {(distance === "1/8" ? bestPass.slip.eighthMph : bestPass.slip.mph)!.toFixed(2)}</>
+                      )}
+                    </>
+                  )}
+                  {best.sixtyFt !== undefined && <> · 60&apos; <span className="text-green-400">{best.sixtyFt.toFixed(3)}</span></>}
+                  {best.threeThirty !== undefined && (
+                    <> · 330&apos; <span className="text-green-400">{best.threeThirty.toFixed(3)}</span></>
+                  )}
+                </span>
               </label>
               <div className="overflow-x-auto rounded-lg border">
                 <table className="w-full table-fixed text-xs tabular-nums">
+                  <thead>
+                    <tr className="border-b text-left text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                      <th className="w-9 py-1 pl-3 font-medium" />
+                      <th className="w-40 py-1 pr-3 font-medium">Round</th>
+                      <th className="w-14 py-1 pr-3 text-right font-medium">60&apos;</th>
+                      <th className="w-14 py-1 pr-3 text-right font-medium">330&apos;</th>
+                      <th className="w-40 py-1 pr-3 font-medium">{distance}</th>
+                      <th className="w-20 py-1 pr-3 font-medium">D.A.</th>
+                      <th className="py-1 pr-3 text-right font-medium">Textbook</th>
+                      <th className="py-1 pr-3 text-right font-medium">Actual</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     {eventRows.map((r) => {
                       const s = r.slip;
@@ -413,7 +493,7 @@ function DialBody({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
                               className="cursor-pointer accent-green-500"
                             />
                           </td>
-                          <td className="w-44 py-1.5 pr-3 align-top">
+                          <td className="w-40 py-1.5 pr-3 align-top">
                             <div className="truncate font-medium">
                               {r.label}
                               {lift && (
@@ -435,6 +515,12 @@ function DialBody({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
                               </div>
                             )}
                           </td>
+                          <td className={`w-14 py-1.5 pr-3 text-right align-top font-mono ${green(s.sixtyFt, best.sixtyFt)}`}>
+                            {s.sixtyFt?.toFixed(3) ?? "—"}
+                          </td>
+                          <td className={`w-14 py-1.5 pr-3 text-right align-top font-mono ${green(s.threeThirty, best.threeThirty)}`}>
+                            {s.threeThirty?.toFixed(3) ?? "—"}
+                          </td>
                           <td className="w-40 py-1.5 pr-3 align-top font-mono">
                             {estimated ? (
                               <>
@@ -451,23 +537,27 @@ function DialBody({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
                               </>
                             ) : (
                               <>
-                                {et?.toFixed(3) ?? "—"}
-                                {mph !== undefined && <span className="text-muted-foreground"> @ {mph.toFixed(2)}</span>}
+                                <span className={run.state === "clean" ? green(et, best.et) : ""}>{et?.toFixed(3) ?? "—"}</span>
+                                {mph !== undefined && (
+                                  <span className={run.state === "clean" && mph === best.mph ? "text-green-400" : "text-muted-foreground"}>
+                                    {" "}@ {mph.toFixed(2)}
+                                  </span>
+                                )}
                               </>
                             )}
                           </td>
-                          <td className="w-24 py-1.5 pr-3 align-top text-muted-foreground">
+                          <td className="w-20 py-1.5 pr-3 align-top text-muted-foreground">
                             {r.cf === null
                               ? "no weather"
                               : s.densityAltitudeFt !== undefined
-                                ? `${s.densityAltitudeFt.toLocaleString()} ft`
+                                ? s.densityAltitudeFt.toLocaleString()
                                 : `CF ${r.cf.toFixed(3)}`}
                           </td>
                           <td className="py-1.5 pr-3 text-right align-top font-mono text-muted-foreground">
-                            {basisT && <>textbook {basisT.corrected.toFixed(3)}</>}
+                            {basisT?.corrected.toFixed(3)}
                           </td>
                           <td className="py-1.5 pr-3 text-right align-top font-mono text-green-400">
-                            {basisA && <>actual {basisA.corrected.toFixed(3)}</>}
+                            {basisA?.corrected.toFixed(3)}
                           </td>
                         </tr>
                       );

@@ -12,8 +12,8 @@ import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
 import type { UnitOverrides, UnitSystem } from "@/lib/units";
 import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 import { correctionFactor } from "@/lib/weather-correction";
+import { categoryLabel, isBigChange } from "@/lib/changes";
 import { bestForAir, type DialPass } from "@/lib/dial-predictor";
-import { DialPredictor, type PredictedRun } from "./DialPredictor";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
@@ -32,11 +32,12 @@ import {
   PencilIcon,
   MoreVerticalIcon,
   GripHorizontalIcon,
+  GaugeIcon,
 } from "lucide-react";
 import {
   RpmPreview,
   parsePreviewPayload,
-  detectLift,
+  readLift,
   type RaceTimingInfo,
 } from "./RpmPreview";
 import {
@@ -155,6 +156,22 @@ export function FileList({
     [filesNewestFirst]
   );
   const removeFile = useMutation(api.files.remove);
+  const vehicleChanges = useQuery(api.changes.listByVehicle, { vehicleId });
+  // The pass each change first ran on: a tune change knows it, a change made
+  // after a pass starts on the next one here.
+  const changesAt = useMemo(() => {
+    const at = new Map<string, Doc<"changes">[]>();
+    if (!vehicleChanges || !files) return at;
+    for (const c of vehicleChanges) {
+      let id: string | undefined = c.toFileId;
+      if (!id && c.afterFileId) {
+        const i = files.findIndex((f) => f._id === c.afterFileId);
+        if (i >= 0 && i + 1 < files.length) id = files[i + 1]._id;
+      }
+      if (id) at.set(id, [...(at.get(id) ?? []), c]);
+    }
+    return at;
+  }, [vehicleChanges, files]);
   const reorderFiles = useMutation(api.files.reorder);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
@@ -271,9 +288,9 @@ export function FileList({
     );
   }, [files, vehicleSlips]);
 
-  // The dial-in predictor's inputs: the car's clean passes with weather,
-  // newest first (events by date, then the event's own pass order), at the
-  // distance this event runs.
+  // The car's clean passes with weather, newest first (events by date, then
+  // the event's own pass order), at the distance this event runs — what the
+  // best-for-air tag weighs this event's passes with.
   const dialDistance: "1/8" | "1/4" = eighthOnly ? "1/8" : "1/4";
   const dialData = useMemo(() => {
     if (!vehicleFiles || !vehicleSlips || !vehicleEvents) return null;
@@ -291,15 +308,11 @@ export function FileList({
     // the latest pass here even if another event shares the date.
     ordered.sort((a, b) => Number(b.eventId === eventId) - Number(a.eventId === eventId));
     const history: DialPass[] = [];
-    const daPoints: { da: number; cf: number }[] = [];
-    let latestAir: Doc<"timeslips"> | null = null;
     for (const f of ordered) {
       const s = slipFor.get(f._id);
       if (!s) continue;
       const cf = correctionFactor(s);
       if (cf === null) continue;
-      if (!latestAir) latestAir = s;
-      if (s.densityAltitudeFt !== undefined) daPoints.push({ da: s.densityAltitudeFt, cf });
       const et = dialDistance === "1/8" ? s.eighthEt : s.et;
       if (et === undefined || et <= 0) continue;
       const lastSplit = Math.max(
@@ -307,8 +320,7 @@ export function FileList({
           (x): x is number => x !== undefined && x > 0
         )
       );
-      const payload = parsePreviewPayload(f.preview);
-      const lift = payload ? detectLift(payload, lastSplit) : null;
+      const lift = readLift(f.preview, lastSplit);
       if (lift && (lift.finalLift !== null || lift.pedals.length > 0)) continue;
       const here = f.eventId === eventId;
       const round = f.round ?? s.round ?? "Pass";
@@ -329,11 +341,9 @@ export function FileList({
         },
       });
     }
-    return { history, daPoints, latestAir };
+    return { history };
   }, [vehicleFiles, vehicleSlips, vehicleEvents, eventId, dialDistance]);
 
-  // The next pass, as the dial-in predicts it from the air typed up top.
-  const [predicted, setPredicted] = useState<PredictedRun | null>(null);
 
   // The pass that was best for its conditions: quickest once every clean pass
   // here is moved to the same air. Only worth a tag when it isn't simply the
@@ -400,10 +410,7 @@ export function FileList({
           (x): x is number => x !== undefined && x > 0
         )
       );
-      const payload = parsePreviewPayload(f.preview);
-      const lift = payload
-        ? detectLift(payload, splits.length ? Math.max(...splits) : null)
-        : null;
+      const lift = readLift(f.preview, splits.length ? Math.max(...splits) : null);
       return { metrics, lift };
     };
 
@@ -575,8 +582,7 @@ export function FileList({
     if (!files) return {};
     const ids = new Set<string>();
     for (const f of files) {
-      const payload = parsePreviewPayload(f.preview);
-      const lift = payload ? detectLift(payload, slipStats[f._id]?.lastSplit ?? null) : null;
+      const lift = readLift(f.preview, slipStats[f._id]?.lastSplit ?? null);
       if (lift && (lift.finalLift !== null || lift.pedals.length > 0)) continue;
       ids.add(f._id);
     }
@@ -614,7 +620,8 @@ export function FileList({
           <h2 className="text-lg font-semibold">{event?.name ?? "..."}</h2>
           {event?.date && (
             <span className="text-sm text-muted-foreground">
-              — {event.date}{event.endDate && event.endDate !== event.date && ` → ${event.endDate}`}
+              — {event.track && `${event.track} · `}
+              {event.date}{event.endDate && event.endDate !== event.date && ` → ${event.endDate}`}
             </span>
           )}
           {files && files.length > 0 && (
@@ -622,6 +629,15 @@ export function FileList({
               · {files.length} {files.length === 1 ? "pass" : "passes"}
             </span>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            onClick={() => goToPredict(vehicleId)}
+          >
+            <GaugeIcon />
+            Dial-in
+          </Button>
         </div>
         {event?.notes && (
           <p className="mt-1 text-sm text-muted-foreground">{event.notes}</p>
@@ -629,19 +645,6 @@ export function FileList({
       </div>
 
       <FileUpload vehicleId={vehicleId} eventId={eventId} />
-
-      {dialData && dialData.history.length > 0 && (
-        <DialPredictor
-          key={eventId}
-          eventId={eventId}
-          distance={dialDistance}
-          history={dialData.history}
-          latestAir={dialData.latestAir}
-          daPoints={dialData.daPoints}
-          onPrediction={setPredicted}
-          onPickPasses={() => goToPredict(vehicleId)}
-        />
-      )}
 
       {files === undefined ? (
         <p className="text-sm text-muted-foreground py-8 text-center">
@@ -712,6 +715,27 @@ export function FileList({
                 {showBar && i === files.length - 1 && dropIdx === files.length && (
                   <div className="absolute -right-[7px] top-0 bottom-0 w-0.5 rounded-full bg-primary" />
                 )}
+                {/* What changed before this pass, over its trace strip so the
+                    slip rows still line up across cards. */}
+                {(changesAt.get(file._id) ?? []).length > 0 && (
+                  <div
+                    className="absolute left-1.5 right-1.5 top-[19px] z-10 flex flex-wrap gap-1"
+                    title={(changesAt.get(file._id) ?? [])
+                      .map((c) => [`${categoryLabel(c.category)}: ${c.title}`, ...(c.items ?? []).map((l) => `  ${l}`)].join("\n"))
+                      .join("\n")}
+                  >
+                    {(changesAt.get(file._id) ?? []).map((c) => (
+                      <span
+                        key={c._id}
+                        className={`max-w-full truncate rounded border bg-background/90 px-1.5 py-px text-[9px] font-medium uppercase tracking-wider ${
+                          isBigChange(c) ? "border-amber-400/50 text-amber-300" : "border-sky-400/40 text-sky-300"
+                        }`}
+                      >
+                        {categoryLabel(c.category)} · {c.title}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <PassCard
                   file={file}
                   raceWeightLb={vehicle?.raceWeightLb}
@@ -745,14 +769,6 @@ export function FileList({
               </div>
             );
           })}
-          {predicted && dialData && dialData.history.length > 0 && (
-            <PredictedCard
-              run={predicted}
-              distance={dialDistance}
-              raceWeightLb={vehicle?.raceWeightLb}
-              eighthOnly={eighthOnly}
-            />
-          )}
         </div>
       )}
     </div>
@@ -924,8 +940,7 @@ function PassCard({
   }, [timeslips]);
 
   const lift = useMemo(() => {
-    const payload = parsePreviewPayload(file.preview);
-    return payload ? detectLift(payload, passLen) : null;
+    return readLift(file.preview, passLen);
   }, [file.preview, passLen]);
 
   // Temperatures and line readings from the log, just before the launch.
@@ -1901,54 +1916,6 @@ function SlipLines({
           valueStyle={shadeStyle(s.key, segs[s.key], ranges)}
         />
       ))}
-    </div>
-  );
-}
-
-/**
- * The dial-in's guess at the next pass, laid out like a real slip so it reads
- * across the gallery row for row. Dashed and blue so it can't pass for a run.
- */
-function PredictedCard({
-  run,
-  distance,
-  raceWeightLb,
-  eighthOnly,
-}: {
-  run: PredictedRun;
-  distance: "1/8" | "1/4";
-  raceWeightLb?: number;
-  eighthOnly: boolean;
-}) {
-  const ts = { ...run.clocks, ...run.air } as Doc<"timeslips">;
-  const et = distance === "1/8" ? run.clocks.eighthEt : run.clocks.et;
-  const mph = distance === "1/8" ? run.clocks.eighthMph : run.clocks.mph;
-  return (
-    <div className="relative flex h-full flex-col overflow-hidden rounded-lg border border-dashed border-sky-400/50 bg-card/40">
-      <div className="h-4 shrink-0 border-b border-dashed border-sky-400/30" />
-      <div className="flex h-16 shrink-0 items-center justify-center border-b border-dashed border-sky-400/30 text-[10px] uppercase tracking-wider text-sky-300/70">
-        Predicted
-      </div>
-      <div className="px-3 pt-2">
-        <div className="text-[10px] font-medium uppercase tracking-wider text-sky-300/80">Next pass</div>
-        <div className="font-mono text-xl font-semibold leading-tight tabular-nums text-sky-300">
-          {et !== undefined ? et.toFixed(3) : "—"}
-          {mph !== undefined && (
-            <span className="text-sm font-normal text-muted-foreground">{" @ "}{mph.toFixed(2)}</span>
-          )}
-          <span className="ml-1 text-[10px] font-normal text-muted-foreground/70">{distance}</span>
-        </div>
-        <div className="truncate text-[11px] text-muted-foreground">
-          {run.spread !== undefined ? `± ${run.spread.toFixed(3)} · ` : ""}
-          from {run.basisCount} {run.basisCount === 1 ? "pass" : "passes"} in this air
-        </div>
-        <div className="text-[10px] text-muted-foreground/60">
-          {run.scope === "event" ? "This event" : "Recent passes, any event"}
-        </div>
-      </div>
-      <div className="flex-1 px-3 pb-3 pt-2 font-mono text-sm text-sky-100/90">
-        <SlipLines ts={ts} bests={{}} raceWeightLb={raceWeightLb} eighthOnly={eighthOnly} />
-      </div>
     </div>
   );
 }

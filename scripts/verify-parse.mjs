@@ -3,18 +3,18 @@
 // Bundles the actual source modules with esbuild and runs them in node, so this
 // exercises the same code the browser does rather than a reimplementation.
 //
-//   node scripts/verify-parse.mjs <log.csv>
+//   node scripts/verify-parse.mjs <log.csv|log.hlgzip|log.hlg>
 
 import { build } from "esbuild";
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
-const csvPath = process.argv[2];
-if (!csvPath) {
-  console.error("usage: node scripts/verify-parse.mjs <log.csv>");
+const logPath = process.argv[2];
+if (!logPath) {
+  console.error("usage: node scripts/verify-parse.mjs <log.csv|log.hlgzip|log.hlg>");
   process.exit(1);
 }
 
@@ -28,7 +28,7 @@ globalThis.fetch = async (url) => {
 };
 
 const entry = `
-  export { parseHaltech, detectHaltech } from ${JSON.stringify(join(root, "src/lib/haltech-parser.ts"))};
+  export { parseDatalogBytes } from ${JSON.stringify(join(root, "src/lib/datalog-parser.ts"))};
   export { enrichWithDefinitions } from ${JSON.stringify(join(root, "src/lib/ecu/enrich.ts"))};
   export { convertForDisplay, getDisplayUnit, getDisplayPrecision } from ${JSON.stringify(join(root, "src/lib/units.ts"))};
   export { formatChannelValue } from ${JSON.stringify(join(root, "src/lib/cursor-utils.ts"))};
@@ -49,18 +49,13 @@ const mod = await import(
   `data:text/javascript;base64,${Buffer.from(out.outputFiles[0].text).toString("base64")}`
 );
 
-const text = readFileSync(resolve(csvPath), "utf8");
-console.log(`log: ${csvPath.split("/").pop()}  (${(text.length / 1e6).toFixed(1)} MB)\n`);
-
-if (!mod.detectHaltech(text)) {
-  console.error("not recognised as a Haltech log");
-  process.exit(1);
-}
+const file = readFileSync(resolve(logPath));
+console.log(`log: ${basename(logPath)}  (${(file.length / 1e6).toFixed(1)} MB)\n`);
 
 const t0 = Date.now();
-const parsed = mod.parseHaltech(text);
+const parsed = await mod.parseDatalogBytes(file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength), basename(logPath));
 const tParse = Date.now() - t0;
-await mod.enrichWithDefinitions(parsed, "haltech");
+if (parsed.format === "Haltech") await mod.enrichWithDefinitions(parsed, "haltech");
 const tTotal = Date.now() - t0;
 
 const session = parsed.sessions[0];

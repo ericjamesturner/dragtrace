@@ -12,6 +12,7 @@ import { useMathChannels } from "@/hooks/useMathChannels";
 import { useViewerAnalytics } from "@/hooks/useViewerAnalytics";
 import { useActivityLog } from "@/hooks/useActivityLog";
 import { buildDefaultConfig } from "@/lib/default-layout";
+import { selectLogRecording } from "@/lib/load-haltech-log";
 import {
   loadGuestWorkspace,
   saveGuestWorkspace,
@@ -32,6 +33,7 @@ import {
 import { ViewerToolbar } from "./viewer/ViewerToolbar";
 import { ViewerBreadcrumb } from "./viewer/ViewerBreadcrumb";
 import { TracePanel } from "./viewer/TracePanel";
+import { RecordingPicker } from "./viewer/RecordingPicker";
 import { Share2Icon } from "lucide-react";
 
 interface Props {
@@ -170,7 +172,7 @@ export function LogViewerReady({
   eventId,
   fileIds,
   setFileIds,
-  logs,
+  logs: sourceLogs,
   errors,
   workspace,
   publicMode = false,
@@ -191,7 +193,7 @@ export function LogViewerReady({
   const recordActivity = useActivityLog();
   useViewerAnalytics(
     publicMode ? "guest" : "account",
-    logs.map((log) => log.contentFingerprint),
+    sourceLogs.map((log) => log.contentFingerprint),
   );
 
   const activityFileKey = fileIds.join(",");
@@ -212,17 +214,19 @@ export function LogViewerReady({
   // Computed before the channel map below, which mirror sync reads to decide
   // what each log has: a math channel added afterwards would be invisible to it
   // and never appear on the overlaid log.
-  const math = useMathChannels(vehicleId, logs, !publicMode);
+  const math = useMathChannels(vehicleId, sourceLogs, !publicMode);
 
   // Build available channels map for mirror sync
   const channelsByLogRef = useRef<Map<string, Set<string>>>(new Map());
   channelsByLogRef.current = useMemo(() => {
     const map = new Map<string, Set<string>>();
-    for (const log of logs) {
+    for (const log of sourceLogs) {
       map.set(log.fileId, new Set(log.parsed.channelDefs.map((d) => d.name)));
     }
     return map;
-  }, [logs, math.version]);
+    // Math definitions update the parsed channel list in place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceLogs, math.version]);
 
   // Reducer with mirror sync
   const reducerWithMirror = useCallback(
@@ -238,24 +242,38 @@ export function LogViewerReady({
   const [config, dispatch] = useReducer(reducerWithMirror, null, () => {
     if (publicMode) {
       const linkWorkspace = publicWorkspaceStorageKey
-        ? loadGuestWorkspace(logs, undefined, publicWorkspaceStorageKey)
+        ? loadGuestWorkspace(sourceLogs, undefined, publicWorkspaceStorageKey)
         : null;
       if (linkWorkspace) return linkWorkspace;
       if (initialPublicConfig) {
-        return remapConfigToFiles(initialPublicConfig, logs);
+        return remapConfigToFiles(initialPublicConfig, sourceLogs);
       }
-      return loadGuestWorkspace(logs) ?? buildDefaultConfig(logs);
+      return loadGuestWorkspace(sourceLogs) ?? buildDefaultConfig(sourceLogs);
     }
     if (!publicMode && workspace) {
       try {
         const saved = migrateConfig(JSON.parse(workspace.config));
-        return remapConfigToFiles(saved, logs);
+        return remapConfigToFiles(saved, sourceLogs);
       } catch {
         // invalid config, fall through
       }
     }
-    return !publicMode && eventId ? loadSavedConfig(eventId) ?? buildDefaultConfig(logs) : buildDefaultConfig(logs);
+    const saved = !publicMode && eventId ? loadSavedConfig(eventId) : null;
+    return saved ? remapConfigToFiles(saved, sourceLogs) : buildDefaultConfig(sourceLogs);
   });
+
+  const logs = useMemo(
+    () => sourceLogs.map((log) => {
+      const index = config.selectedRecordings?.[log.fileId] ?? log.activeSessionIndex;
+      return Number.isSafeInteger(index) && index >= 0 && index < log.parsed.sessions.length
+        ? selectLogRecording(log, index)
+        : log;
+    }),
+    // Recompute dependent zones and ranges when math updates arrays in place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sourceLogs, config.selectedRecordings, math.version],
+  );
+  const recordingKey = logs.map((log) => `${log.fileId}:${log.activeSessionIndex}`).join(",");
 
   // Quantity preferences are the default. A channel can then choose its own
   // alternate without changing every other channel of the same quantity.
@@ -469,10 +487,18 @@ export function LogViewerReady({
   // Timeslip overlay strips: fetch per-file timeslips and build synthetic zones
   // anchored at each log's detected race-start (+ alignment offset).
   const timeslipsByFile = useTimeslips(fileIds, !publicMode);
+  // A file's slip describes its pass recording. Reusing it on another
+  // recording would draw unrelated split markers.
+  const recordingTimeslips = useMemo(
+    () => new Map([...timeslipsByFile].filter(([fileId]) =>
+      logs.some((log) => log.fileId === fileId && log.activeSessionIndex === (log.passSessionIndex ?? 0)),
+    )),
+    [logs, timeslipsByFile],
+  );
   const showTimeslip = true;
   const timeslipZones = useMemo(
-    () => buildTimeslipZones(logs, timeslipsByFile, alignment.offsets, showTimeslip),
-    [logs, timeslipsByFile, alignment.offsets, showTimeslip],
+    () => buildTimeslipZones(logs, recordingTimeslips, alignment.offsets, showTimeslip),
+    [logs, recordingTimeslips, alignment.offsets, showTimeslip],
   );
 
   const handleBack = useCallback(() => {
@@ -540,7 +566,7 @@ export function LogViewerReady({
           publicMode ? (
             <div className="flex min-w-0 items-center gap-2">
               <div
-                className="min-w-0"
+                className="min-w-0 flex-1"
                 title={logs.map((log) => log.fileName).join("\n")}
               >
                 <div className="truncate text-sm font-medium">
@@ -590,6 +616,21 @@ export function LogViewerReady({
         }
       />
 
+      <RecordingPicker
+        logs={logs}
+        firstRecordingTimeslipIds={new Set([...timeslipsByFile].filter(([, slips]) => slips.length > 0).map(([fileId]) => fileId))}
+        onSelect={(logFileId, sessionIndex) => {
+          const log = sourceLogs.find((item) => item.fileId === logFileId);
+          if (!log || sessionIndex === logs.find((item) => item.fileId === logFileId)?.activeSessionIndex) return;
+          dispatch({
+            type: "setRecording",
+            logFileId,
+            sessionIndex,
+            contentFingerprint: log.contentFingerprint,
+          });
+        }}
+      />
+
       {publicMode &&
         (publicDetails?.vehicleDetails || publicDetails?.description) && (
           <div className="max-h-32 overflow-y-auto border-b bg-muted/30 px-3 py-2.5">
@@ -624,6 +665,7 @@ export function LogViewerReady({
           The charts get the whole window. */}
       <div className="flex flex-1 min-h-0">
         <TracePanel
+          key={recordingKey}
           logs={logs}
           avgOnSelection
           showAxes={!!config.showAxes}

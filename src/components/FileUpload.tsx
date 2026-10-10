@@ -1,9 +1,11 @@
 import { useState, useRef, useCallback } from "react";
-import { useMutation } from "convex/react";
+import { useConvex, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { UploadIcon } from "lucide-react";
-import { isSupportedLogFile, SUPPORTED_LOG_ACCEPT } from "@/lib/datalog-parser";
+import { fileExtension, isSupportedLogFile, SUPPORTED_LOG_ACCEPT, SUPPORTED_LOG_DESCRIPTION } from "@/lib/datalog-parser";
+import { syncTuneChanges } from "@/lib/tune-change-sync";
+import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 
 type UploadProgress = {
   fileName: string;
@@ -55,6 +57,8 @@ export function FileUpload({
 }) {
   const generateUploadUrl = useMutation(api.files.generateUploadUrl);
   const saveFile = useMutation(api.files.saveFile);
+  const convex = useConvex();
+  const { unitSystem, resolved } = useUnitPreferences(vehicleId);
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -66,7 +70,7 @@ export function FileUpload({
       // Guard drag-and-drop too, since it ignores the input's `accept` value.
       const files = Array.from(fileList).filter((file) => isSupportedLogFile(file.name));
       if (files.length === 0) {
-        setError("Choose a supported ECU text export or Holley V6 .dl file.");
+        setError("Choose a Haltech .hlgzip/.hlg log, Holley V6 .dl file, or supported CSV/text export.");
         return;
       }
       setError(null);
@@ -93,7 +97,7 @@ export function FileUpload({
           });
           setProgress((p) => (p ? { ...p, loaded: doneBytes + file.size, saving: true } : p));
           // Step 3: Save file record
-          await saveFile({
+          const fileId = await saveFile({
             storageId,
             fileName: file.name,
             fileSize: file.size,
@@ -102,6 +106,16 @@ export function FileUpload({
             vehicleId,
           });
           doneBytes += file.size;
+          // A Haltech log carries its tune: log what changed since the car's
+          // previous one. Never holds up or fails the upload.
+          if (fileExtension(file.name) === "hlgzip") {
+            void file
+              .arrayBuffer()
+              .then((bytes) =>
+                syncTuneChanges({ convex, vehicleId, fileId, bytes, units: { system: unitSystem, overrides: resolved } })
+              )
+              .catch((e) => console.warn("Tune change check failed:", e));
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Upload failed");
@@ -110,7 +124,7 @@ export function FileUpload({
         if (inputRef.current) inputRef.current.value = "";
       }
     },
-    [progress, generateUploadUrl, saveFile, eventId, vehicleId]
+    [progress, generateUploadUrl, saveFile, eventId, vehicleId, convex, unitSystem, resolved]
   );
 
   const handleDrop = useCallback(
@@ -178,6 +192,7 @@ export function FileUpload({
           <p className="text-sm text-muted-foreground">
             Drop files here or click to browse
           </p>
+          <p className="text-xs text-muted-foreground">{SUPPORTED_LOG_DESCRIPTION}</p>
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
       )}

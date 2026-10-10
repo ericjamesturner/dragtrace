@@ -1,4 +1,5 @@
 import { query, mutation } from "./_generated/server";
+import { removeVehicleChanges } from "./changes";
 import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
 
@@ -152,6 +153,7 @@ export const remove = mutation({
       await ctx.db.delete(event._id);
     }
 
+    await removeVehicleChanges(ctx, args.id);
     await ctx.db.delete(args.id);
   },
 });

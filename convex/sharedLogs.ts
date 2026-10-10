@@ -7,7 +7,7 @@ const MAX_SHARES_PER_HOUR = 5;
 const MAX_SHARES_PER_DAY = 20;
 const MAX_SHARED_FILES = 10;
 const MAX_VIEWER_WORKSPACE_LENGTH = 200_000;
-const SUPPORTED_EXTENSION = /\.(?:csv|log|txt|dl)$/i;
+const SUPPORTED_EXTENSION = /\.(?:csv|log|txt|dl|hlg|hlgzip)$/i;
 const sharedFileInputValidator = v.object({
   storageId: v.id("_storage"),
   fileName: v.string(),

@@ -26,6 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { errText } from "@/lib/error-text";
 import { getBrowserVisitorId } from "@/lib/visitor-id";
+import { SUPPORTED_LOG_ACCEPT } from "@/lib/datalog-parser";
 
 const MAX_FILES = 3;
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
@@ -370,7 +371,7 @@ export function FeedbackDialog({
                           type="file"
                           multiple
                           className="hidden"
-                          accept=".csv,.log,.txt,.dl,.zip,.pdf,.png,.jpg,.jpeg"
+                          accept={`${SUPPORTED_LOG_ACCEPT},.zip,.pdf,.png,.jpg,.jpeg`}
                           onChange={(event) => {
                             addFiles(Array.from(event.target.files ?? []));
                             event.target.value = "";

@@ -6,6 +6,7 @@ import { EventList } from "./EventList";
 import { FileList } from "./FileList";
 import { TuneCompare } from "./TuneCompare";
 import { DialPage } from "./DialPage";
+import { ChangesPage } from "./ChangesPage";
 import { ChannelManager } from "./ChannelManager";
 import { Settings, type SettingsSection } from "./Settings";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ type NavState =
   | { view: "channel-manager" }
   | { view: "tunes" }
   | { view: "predict"; vehicleId?: Id<"vehicles"> }
+  | { view: "changes"; vehicleId: Id<"vehicles"> }
   | { view: "settings"; section: SettingsSection };
 
 interface NavContextValue {
@@ -43,6 +45,7 @@ interface NavContextValue {
   goToViewer: (vehicleId: Id<"vehicles">, eventId: Id<"events">, fileIds: Id<"files">[]) => void;
   goToChannelManager: () => void;
   goToPredict: (vehicleId?: Id<"vehicles">) => void;
+  goToChanges: (vehicleId: Id<"vehicles">) => void;
   openSettings: (section?: SettingsSection) => void;
 }
 
@@ -61,6 +64,9 @@ function parseNavFromUrl(): NavState {
   }
   if (params.has("tunes")) {
     return { view: "tunes" };
+  }
+  if (params.get("changes")) {
+    return { view: "changes", vehicleId: params.get("changes") as Id<"vehicles"> };
   }
   if (params.has("predict")) {
     const id = params.get("predict");
@@ -117,6 +123,10 @@ function navToUrl(nav: NavState): string {
   }
   if (nav.view === "predict") {
     params.set("predict", nav.vehicleId ?? "");
+    return `?${params.toString()}`;
+  }
+  if (nav.view === "changes") {
+    params.set("changes", nav.vehicleId);
     return `?${params.toString()}`;
   }
   if (nav.view === "settings") {
@@ -196,6 +206,10 @@ export function Layout() {
     (vehicleId?: Id<"vehicles">) => setNav({ view: "predict", vehicleId }),
     []
   );
+  const goToChanges = useCallback(
+    (vehicleId: Id<"vehicles">) => setNav({ view: "changes", vehicleId }),
+    []
+  );
   const openSettings = useCallback(
     (section: SettingsSection = "profile") =>
       setNav({ view: "settings", section }),
@@ -215,6 +229,7 @@ export function Layout() {
     goToViewer,
     goToChannelManager,
     goToPredict,
+    goToChanges,
     openSettings,
   };
 
@@ -394,6 +409,8 @@ function ContentArea() {
       return <TuneCompare />;
     case "predict":
       return <DialPage vehicleId={nav.vehicleId} />;
+    case "changes":
+      return <ChangesPage vehicleId={nav.vehicleId} />;
     case "channel-manager":
       return null; // Handled above as full-screen view
   }

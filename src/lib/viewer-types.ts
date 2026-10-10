@@ -1,5 +1,5 @@
 import type { Id } from "../../convex/_generated/dataModel";
-import type { ParsedLog } from "./log-types";
+import type { LogSession, ParsedLog } from "./log-types";
 import type { ChannelMarkers } from "./channel-markers";
 import {
   cycleUnit as cycleUnitFn,
@@ -60,13 +60,32 @@ export function resolveChannelStyle(
   };
 }
 
+export interface LogRecording {
+  sessionIndex: number;
+  label: string;
+  startTime: Date;
+  sourceDuration: number;
+  sourceRowCount: number;
+  channelCount: number;
+  /** Launch time on this recording's prepared viewer timeline. */
+  raceStartTime: number | null;
+  /** Original timestamp at the beginning of a clipped viewer timeline. */
+  clipStartTime: number;
+}
+
 export interface LoadedLog {
   fileId: Id<"files">;
   fileName: string;
-  /** One-way content digest used only to count distinct logs in analytics. */
+  /** One-way content digest used for analytics and restoring recording choices. */
   contentFingerprint: string;
   parsed: ParsedLog;
+  /** Original recordings, retained separately from the prepared viewer views. */
+  sourceSessions?: readonly LogSession[];
+  recordings?: LogRecording[];
   activeSessionIndex: number;
+  /** The recording with the pass in it: what opens first, and what the
+   *  file's timeslip describes. 0 when no recording has a race start. */
+  passSessionIndex?: number;
   raceStartTime: number | null;
   logColor: string;
   logIndex: number;
@@ -203,6 +222,10 @@ export interface ViewerConfig {
   pages: PageConfig[];
   activePageId: string;
   alignByRaceTime: boolean;
+  /** One active recording per source file; absent entries use recording zero. */
+  selectedRecordings?: Record<string, number>;
+  /** Rebind a guest choice only when the reopened file has the same contents. */
+  recordingFingerprints?: Record<string, string>;
   showAxes?: boolean;
   showAxisLabels?: boolean;
   hiddenLogIds?: string[];
@@ -269,6 +292,7 @@ export type ViewerAction =
   | { type: "removeChannel"; traceId: string; logFileId: Id<"files">; channelName: string }
   | { type: "setTraceHeight"; traceId: string; height: number }
   | { type: "toggleAlignment" }
+  | { type: "setRecording"; logFileId: Id<"files">; sessionIndex: number; contentFingerprint?: string }
   | { type: "setChannelColor"; traceId: string; logFileId: Id<"files">; channelName: string; color: string | undefined }
   | { type: "toggleAxes" }
   | { type: "toggleAxisLabels" }
@@ -585,6 +609,24 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
       };
     case "toggleAlignment":
       return { ...state, alignByRaceTime: !state.alignByRaceTime };
+    case "setRecording": {
+      if (!Number.isSafeInteger(action.sessionIndex) || action.sessionIndex < 0) return state;
+      const fileId = action.logFileId as string;
+      return {
+        ...state,
+        selectedRecordings: { ...state.selectedRecordings, [fileId]: action.sessionIndex },
+        ...(action.contentFingerprint ? {
+          recordingFingerprints: {
+            ...state.recordingFingerprints,
+            [fileId]: action.contentFingerprint,
+          },
+        } : {}),
+        // A range from the previous recording can fall beyond this one or
+        // describe a different event. Let the new recording choose its view.
+        selection: undefined,
+        zoom: undefined,
+      };
+    }
     case "setChannelColor":
       return {
         ...state,
@@ -833,6 +875,8 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         ...state,
         hiddenLogIds: state.hiddenLogIds?.filter((id) => id !== fid),
         mirroredLogIds: stillHasSource ? remainingMirrored : [],
+        selectedRecordings: removeRecordingKey(state.selectedRecordings, fid),
+        recordingFingerprints: removeRecordingKey(state.recordingFingerprints, fid),
         pages: state.pages.map((page) => ({
           ...page,
           // Traces emptied by removing a log are kept, not deleted: their
@@ -850,6 +894,54 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
     case "loadConfig":
       return action.config;
   }
+}
+
+function removeRecordingKey<T>(values: Record<string, T> | undefined, fileId: string): Record<string, T> | undefined {
+  if (!values) return undefined;
+  const remaining = Object.entries(values).filter(([key]) => key !== fileId);
+  return remaining.length > 0 ? Object.fromEntries(remaining) : undefined;
+}
+
+/** A recording belongs to its file contents, never to a reusable car layout. */
+function remapRecordingSelections(
+  config: ViewerConfig,
+  logs: LoadedLog[],
+): Pick<ViewerConfig, "selectedRecordings" | "recordingFingerprints"> {
+  const selections = config.selectedRecordings;
+  if (!selections || typeof selections !== "object" || Array.isArray(selections)) {
+    return { selectedRecordings: undefined, recordingFingerprints: undefined };
+  }
+  const fingerprints = config.recordingFingerprints;
+  const selected: [string, number][] = [];
+  const identities: [string, string][] = [];
+  for (const log of logs) {
+    const fileId = log.fileId as string;
+    let sessionIndex: number | undefined = selections[fileId];
+    const previousFingerprint = fingerprints?.[fileId];
+    if (previousFingerprint && previousFingerprint !== log.contentFingerprint) {
+      sessionIndex = undefined;
+    }
+    if (sessionIndex === undefined && log.contentFingerprint) {
+      // Local guest ids change after reopening a file. A matching channel
+      // name or filename is insufficient evidence to carry its choice over.
+      const match = Object.entries(selections).find(([oldId]) =>
+        fingerprints?.[oldId] === log.contentFingerprint,
+      );
+      if (match) sessionIndex = match[1];
+    }
+    if (
+      sessionIndex === undefined ||
+      !Number.isSafeInteger(sessionIndex) ||
+      sessionIndex < 0 ||
+      sessionIndex >= log.parsed.sessions.length
+    ) continue;
+    selected.push([fileId, sessionIndex]);
+    if (log.contentFingerprint) identities.push([fileId, log.contentFingerprint]);
+  }
+  return {
+    selectedRecordings: selected.length > 0 ? Object.fromEntries(selected) : undefined,
+    recordingFingerprints: identities.length > 0 ? Object.fromEntries(identities) : undefined,
+  };
 }
 
 /**
@@ -1271,6 +1363,7 @@ export function remapConfigToFiles(
   return {
     ...config,
     ...(needsRemap ? { hiddenLogIds: undefined, mirroredLogIds: undefined } : {}),
+    ...remapRecordingSelections(config, logs),
     pages: dedupPages,
   };
 }

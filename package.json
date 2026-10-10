@@ -8,6 +8,7 @@
     "dev:convex": "npx convex dev",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test:hlgzip": "node scripts/test-hlgzip.mjs",
     "gen:quantities": "node scripts/gen-quantities.mjs",
     "gen:channels": "node scripts/gen-channel-defs.mjs",
     "gen:tunes": "node scripts/gen-tune-defs.mjs",

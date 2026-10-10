@@ -1,4 +1,5 @@
 import { query, mutation } from "./_generated/server";
+import { detachChangesFromFile } from "./changes";
 import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
 
@@ -92,6 +93,7 @@ export const create = mutation({
     date: v.string(),
     endDate: v.optional(v.string()),
     notes: v.optional(v.string()),
+    track: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const userId = await getEffectiveUserId(ctx);
@@ -106,6 +108,7 @@ export const create = mutation({
       date: args.date,
       endDate: args.endDate,
       notes: args.notes,
+      track: args.track || undefined,
       createdAt: Date.now(),
     });
   },
@@ -118,6 +121,8 @@ export const update = mutation({
     date: v.string(),
     endDate: v.optional(v.string()),
     notes: v.optional(v.string()),
+    /** Omitted leaves the track as it is (older clients don't send it); "" clears it. */
+    track: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const userId = await getEffectiveUserId(ctx);
@@ -129,6 +134,7 @@ export const update = mutation({
       date: args.date,
       endDate: args.endDate,
       notes: args.notes,
+      ...(args.track !== undefined ? { track: args.track || undefined } : {}),
     });
   },
 });
@@ -154,6 +160,7 @@ export const remove = mutation({
       for (const ts of timeslips) {
         await ctx.db.delete(ts._id);
       }
+      await detachChangesFromFile(ctx, file._id);
       await ctx.storage.delete(file.storageId);
       await ctx.db.delete(file._id);
     }

@@ -32,7 +32,7 @@ const DISCRETE_QUANTITIES = new Set([
   'time-s', 'time-ms', 'time-us', 'time-hh-mm',
 ]);
 
-function isContinuousQuantity(slug: string | undefined): boolean {
+export function isContinuousQuantity(slug: string | undefined): boolean {
   return !!slug && !DISCRETE_QUANTITIES.has(slug);
 }
 
@@ -41,7 +41,7 @@ function isContinuousQuantity(slug: string | undefined): boolean {
  * interpolated (by time) or held at the previous value; trailing NaNs hold
  * the last value; leading NaNs are left as-is.
  */
-function fillChannelGaps(arr: Float64Array, timestamps: Float64Array, linear: boolean): void {
+export function fillChannelGaps(arr: Float64Array, timestamps: Float64Array, linear: boolean): void {
   const n = arr.length;
   let last = -1;
   for (let i = 0; i < n; i++) {
@@ -89,7 +89,7 @@ const channelEnums: Record<string, Record<number, string>> = {
   },
 };
 
-function getChannelEnumValues(channelName: string): Record<number, string> | undefined {
+export function getChannelEnumValues(channelName: string): Record<number, string> | undefined {
   return channelEnums[channelName];
 }
 

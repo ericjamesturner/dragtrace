@@ -20,6 +20,7 @@ import {
 } from "@/lib/tune-diff";
 import { inGroupLabel } from "@/lib/legend-labels";
 import { loadLastTune, saveLastTune } from "@/lib/tune-store";
+import { runLabel, timeFromName } from "@/lib/tune-changes";
 import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 
@@ -85,22 +86,6 @@ function guessCar(profileName: string, vehicles: Doc<"vehicles">[]): Doc<"vehicl
     if (score > 0 && (!best || score > best.score)) best = { v, score };
   }
   return best?.v;
-}
-
-/** "2025-10-09_1042am" in a Haltech file name -> a timestamp. */
-function timeFromName(name: string): number | null {
-  const m = /(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})([ap])m/i.exec(name);
-  if (!m) return null;
-  const hour = (Number(m[4]) % 12) + (m[6].toLowerCase() === "p" ? 12 : 0);
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), hour, Number(m[5])).getTime();
-}
-
-/** What a racer calls the run: the name before NSP's date and log stamps. */
-function runLabel(fileName: string): string {
-  const base = fileName.replace(/\.[^.]+$/, "");
-  const cut = base.search(/\s*-?\s*\d{4}-\d{2}-\d{2}_\d{4}[ap]m/i);
-  const short = (cut > 0 ? base.slice(0, cut) : base).replace(/[\s_-]+$/, "").trim();
-  return short || base;
 }
 
 const shortDate = (t: number) =>

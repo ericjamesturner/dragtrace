@@ -7,6 +7,7 @@ import { parseDatalogBytes } from "@/lib/datalog-parser";
 import { lttbDownsample } from "@/lib/downsample";
 import { readLaunch, type LaunchReading } from "@/lib/launch-readings";
 import { parsePreview } from "@/lib/preview";
+import { passSessionIndex } from "@/lib/load-haltech-log";
 import type { PassLift } from "@/lib/lift-estimate";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
@@ -112,19 +113,35 @@ export function detectLift(
 const RELEASE_TO_CLOCK = 0.18;
 
 /**
- * Whether the driver lifted or pedaled before `passLen` seconds on the slip's
- * clock — the finish of the distance that matters. Reads the throttle trace
- * of any stored preview version: the trace and the launch time mean the same
- * in all of them, so a pass needn't be reopened to be judged. Null when the
- * pass was flat to that finish, or the preview has no throttle trace.
+ * How the driver worked the throttle up to `passLen` seconds on the slip's
+ * clock (null: the race-timer region), with every time on that clock so it
+ * compares with the 60', 330' and ET. Reads the throttle trace of any stored
+ * preview version: the trace and the launch time mean the same in all of
+ * them, so a pass needn't be reopened to be judged. Null when the preview has
+ * no throttle trace.
+ */
+export function readLift(preview: string | undefined, passLen: number | null): LiftAnalysis | null {
+  const p = parsePreview(preview);
+  if (!p) return null;
+  const lift = detectLift({ ...p, launch: p.launch ?? null }, passLen !== null ? passLen + RELEASE_TO_CLOCK : null);
+  if (!lift) return null;
+  const onClock = (t: number) => Math.max(0, t - RELEASE_TO_CLOCK);
+  return {
+    finalLift: lift.finalLift !== null ? onClock(lift.finalLift) : null,
+    pedals: lift.pedals.map(onClock),
+  };
+}
+
+/**
+ * Whether the driver lifted or pedaled before `passLen` — the finish of the
+ * distance that matters. Null when the pass was flat to that finish, or the
+ * preview can't tell.
  */
 export function slipLift(preview: string | undefined, passLen: number | undefined): PassLift | null {
-  const p = parsePreview(preview);
-  if (!p || passLen === undefined || passLen <= 0) return null;
-  const lift = detectLift({ ...p, launch: p.launch ?? null }, passLen + RELEASE_TO_CLOCK);
-  // Reported on the slip's clock, so it compares with the 60', 330' and ET.
-  if (lift?.finalLift != null) return { kind: "lifted", at: lift.finalLift - RELEASE_TO_CLOCK };
-  return lift && lift.pedals.length > 0 ? { kind: "pedaled", at: lift.pedals[0] - RELEASE_TO_CLOCK } : null;
+  if (passLen === undefined || passLen <= 0) return null;
+  const lift = readLift(preview, passLen);
+  if (lift?.finalLift != null) return { kind: "lifted", at: lift.finalLift };
+  return lift && lift.pedals.length > 0 ? { kind: "pedaled", at: lift.pedals[0] } : null;
 }
 
 type Status =
@@ -144,7 +161,8 @@ async function computePreview(bytes: ArrayBuffer, fileName: string): Promise<Pre
   const parsed = await parseDatalogBytes(bytes, fileName);
   if (parsed.sessions.length === 0) return "No sessions";
 
-  const session = parsed.sessions[0];
+  // The pass, not a burnout or warm-up recorded before it in the same file.
+  const session = parsed.sessions[passSessionIndex(parsed)];
   const rpm = session.channels.get("RPM");
   if (!rpm) return "No RPM data";
 

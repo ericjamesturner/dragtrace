@@ -165,12 +165,23 @@ export function captureSharedViewerWorkspace(
   const activePageId = pages.some((page) => page.id === config.activePageId)
     ? config.activePageId
     : pages[0].id;
+  const selectedRecordings = Object.fromEntries(logs.map((log, index) => {
+    const selected = config.selectedRecordings?.[log.fileId as string];
+    const sessionIndex = validRecordingIndex(selected, log)
+      ? selected
+      : validRecordingIndex(log.activeSessionIndex, log) ? log.activeSessionIndex : 0;
+    return [sharedFileId(index), sessionIndex];
+  }));
   const snapshot: ViewerConfig = {
     ...config,
     pages,
     activePageId,
     hiddenLogIds: mapTopLevelIds(config.hiddenLogIds),
     mirroredLogIds: mapTopLevelIds(config.mirroredLogIds),
+    selectedRecordings,
+    // Slot positions carry the selection; content digests and original file
+    // ids belong to the sender's private browser/account workspace.
+    recordingFingerprints: undefined,
     expandedTimeslipIds: undefined,
     scatterSuggestions: config.scatterSuggestions?.filter(
       (suggestion) =>
@@ -246,18 +257,40 @@ export function configFromSharedViewerWorkspace(
         const mapped = mapId(id);
         return mapped ? [mapped as string] : [];
       });
+    const selectedRecordings = Object.fromEntries(
+      recordingEntries(migrated.selectedRecordings).flatMap(([slot, sessionIndex]) => {
+        const logFileId = mapId(slot);
+        const log = logs.find((item) => item.fileId === logFileId);
+        return log && validRecordingIndex(sessionIndex, log)
+          ? [[log.fileId as string, sessionIndex]]
+          : [];
+      }),
+    );
     return remapConfigToFiles(
       {
         ...migrated,
         pages,
         hiddenLogIds: mapTopLevelIds(migrated.hiddenLogIds),
         mirroredLogIds: mapTopLevelIds(migrated.mirroredLogIds),
+        selectedRecordings,
+        recordingFingerprints: undefined,
       },
       logs,
     );
   } catch {
     return null;
   }
+}
+
+function validRecordingIndex(index: unknown, log: LoadedLog): index is number {
+  return typeof index === "number" && Number.isSafeInteger(index) &&
+    index >= 0 && index < log.parsed.sessions.length;
+}
+
+function recordingEntries(value: unknown): [string, unknown][] {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? Object.entries(value)
+    : [];
 }
 
 export function sharedViewerWorkspaceKey(shareId: string): string {

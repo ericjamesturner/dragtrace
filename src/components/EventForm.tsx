@@ -48,6 +48,7 @@ export function EventForm({
   const [date, setDate] = useState("");
   const [days, setDays] = useState("1");
   const [notes, setNotes] = useState("");
+  const [track, setTrack] = useState("");
 
   const isEdit = !!event;
 
@@ -57,6 +58,7 @@ export function EventForm({
       setDate(event?.date ?? new Date().toISOString().slice(0, 10));
       setDays(event ? daysFromDates(event.date, event.endDate) : "1");
       setNotes(event?.notes ?? "");
+      setTrack(event?.track ?? "");
     }
   }, [open, event]);
 
@@ -73,6 +75,8 @@ export function EventForm({
         date,
         endDate,
         notes: notes.trim() || undefined,
+        // Sent even when empty, so clearing the box clears the track.
+        track: track.trim(),
       });
     } else {
       await createEvent({
@@ -81,6 +85,7 @@ export function EventForm({
         date,
         endDate,
         notes: notes.trim() || undefined,
+        track: track.trim() || undefined,
       });
     }
     onDone();
@@ -129,6 +134,15 @@ export function EventForm({
               {date} → {endDate}
             </p>
           )}
+          <div className="grid gap-2">
+            <Label htmlFor="event-track">Track (optional)</Label>
+            <Input
+              id="event-track"
+              value={track}
+              onChange={(e) => setTrack(e.target.value)}
+              placeholder="e.g. Firebird Raceway, Eagle ID"
+            />
+          </div>
           <div className="grid gap-2">
             <Label htmlFor="event-notes">Notes (optional)</Label>
             <Textarea

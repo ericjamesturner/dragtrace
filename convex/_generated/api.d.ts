@@ -13,6 +13,7 @@ import type * as admin from "../admin.js";
 import type * as analytics from "../analytics.js";
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
+import type * as changes from "../changes.js";
 import type * as channelCategories from "../channelCategories.js";
 import type * as channelMappings from "../channelMappings.js";
 import type * as events from "../events.js";
@@ -45,6 +46,7 @@ declare const fullApi: ApiFromModules<{
   analytics: typeof analytics;
   auth: typeof auth;
   authz: typeof authz;
+  changes: typeof changes;
   channelCategories: typeof channelCategories;
   channelMappings: typeof channelMappings;
   events: typeof events;

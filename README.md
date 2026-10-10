@@ -26,10 +26,18 @@ Simple enough for a racer between rounds. Deep enough for whoever tunes the car.
 
 ## ECU support
 
-DragTrace opens Haltech logs, Holley EFI V6 `.dl` files, and text/CSV exports from
+DragTrace opens Haltech `.hlgzip` archives, `.hlg` logs and text exports, Holley
+EFI V6 `.dl` files, and text/CSV exports from
 ECUMaster, RomRaider, MegaSquirt/TunerStudio, Honda Tuning Studio, BlueDriver,
 OBDLink, MHD, Motorsport Electronics, DynamicEFI, Woolich, RaceChrono, and the
 UltraLog locomotive logger.
+
+Open `.hlgzip` files directly without extracting or exporting them first. An
+archive with multiple logs exposes each recording as a separate session. Consecutive
+ECU storage blocks from the same recording are joined, preserving all sampling groups.
+Files with multiple recordings show a recording picker above the charts. Each file
+can open any of its recordings with its own launch alignment, and the selected
+recording is remembered for that file and included in shared links.
 
 Holley V3/V4/V5 and `.dlz`, plus other manufacturers' binary formats, are not
 currently supported. Open a Holley V5 file in Holley EFI software to convert it
@@ -41,6 +49,7 @@ to V6 before uploading it.
 npm install
 npm run dev          # Vite dev server
 npm run dev:convex   # Convex functions (see the warning in .env.local first)
+npm run test:hlgzip  # Native Haltech import and malformed-file checks
 ```
 
 Stack: React 19, Vite, Convex, uPlot, Tailwind 4, shadcn/base-ui.

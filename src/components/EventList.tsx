@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -18,7 +18,9 @@ import {
   TrashIcon,
   CalendarIcon,
   ChevronRightIcon,
+  WrenchIcon,
 } from "lucide-react";
+import { categoryLabel, isBigChange } from "@/lib/changes";
 
 /**
  * One labelled number in an event's stat strip. The width is fixed so the
@@ -60,7 +62,8 @@ export function EventList({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
   const vehicle = useQuery(api.vehicles.get, { id: vehicleId });
   const events = useQuery(api.events.listByVehicle, { vehicleId });
   const removeEvent = useMutation(api.events.remove);
-  const { goToFiles } = useNav();
+  const { goToFiles, goToChanges } = useNav();
+  const changes = useQuery(api.changes.listByVehicle, { vehicleId });
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<Id<"events"> | null>(null);
 
@@ -135,7 +138,11 @@ export function EventList({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
             </span>
           </span>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => goToChanges(vehicleId)}>
+            <WrenchIcon />
+            Changes
+          </Button>
           <Button
             size="sm"
             onClick={() => {
@@ -178,7 +185,31 @@ export function EventList({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
         </div>
       ) : (
         <div className="space-y-2">
-          {events.map((event) => (
+          {events.map((event, i) => (
+            <Fragment key={event._id}>
+            {/* Big changes made after the previous event in the list's
+                timeline (the one above) and on or before this one. */}
+            {(changes ?? [])
+              .filter(
+                (c) =>
+                  isBigChange(c) &&
+                  c.date >= event.date &&
+                  (i === 0 || c.date < events[i - 1].date)
+              )
+              .map((c) => (
+                <div
+                  key={c._id}
+                  onClick={() => goToChanges(vehicleId)}
+                  className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed px-4 py-2 text-xs transition-colors hover:bg-muted/50"
+                >
+                  <WrenchIcon className="size-4 shrink-0 text-amber-400" />
+                  <span className="font-mono tabular-nums text-muted-foreground">{c.date}</span>
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-amber-400">
+                    {categoryLabel(c.category)}
+                  </span>
+                  <span className="truncate">{c.title}</span>
+                </div>
+              ))}
             <div
               key={event._id}
               className="group flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors"
@@ -188,6 +219,7 @@ export function EventList({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-sm truncate">{event.name}</div>
                 <div className="text-xs text-muted-foreground truncate">
+                  {event.track && `${event.track} · `}
                   {event.date}{event.endDate && event.endDate !== event.date && ` → ${event.endDate}`}
                   {event.notes && ` — ${event.notes}`}
                 </div>
@@ -289,7 +321,25 @@ export function EventList({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
               </DropdownMenu>
               <ChevronRightIcon className="size-4 text-muted-foreground" />
             </div>
+            </Fragment>
           ))}
+          {/* Big changes older than every event. */}
+          {(changes ?? [])
+            .filter((c) => isBigChange(c) && events.length > 0 && c.date < events[events.length - 1].date)
+            .map((c) => (
+              <div
+                key={c._id}
+                onClick={() => goToChanges(vehicleId)}
+                className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed px-4 py-2 text-xs transition-colors hover:bg-muted/50"
+              >
+                <WrenchIcon className="size-4 shrink-0 text-amber-400" />
+                <span className="font-mono tabular-nums text-muted-foreground">{c.date}</span>
+                <span className="text-[10px] font-medium uppercase tracking-wider text-amber-400">
+                  {categoryLabel(c.category)}
+                </span>
+                <span className="truncate">{c.title}</span>
+              </div>
+            ))}
         </div>
       )}
 

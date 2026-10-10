@@ -19,6 +19,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { errText } from "@/lib/error-text";
 import { createSharedLogImage } from "@/lib/share-image";
+import { selectLogRecording } from "@/lib/load-haltech-log";
 import { markSharedLogOwned } from "@/lib/shared-log-owner";
 import { captureSharedViewerWorkspace } from "@/lib/shared-viewer-layout";
 import { getBrowserVisitorId } from "@/lib/visitor-id";
@@ -71,6 +72,14 @@ export function ShareLogDialog({
   );
   const primaryLog = selectedLogs[0];
   const primaryFile = primaryLog ? getSourceFile(primaryLog.fileId) : undefined;
+  const viewerConfig = getViewerConfig();
+  const recordingIndexFor = (log: LoadedLog) => {
+    const index = viewerConfig?.selectedRecordings?.[log.fileId] ?? log.activeSessionIndex;
+    return Number.isSafeInteger(index) && index >= 0 && index < log.parsed.sessions.length
+      ? index
+      : log.activeSessionIndex;
+  };
+  const selectedRecordingIndex = primaryLog ? recordingIndexFor(primaryLog) : 0;
 
   useEffect(() => {
     if (open) {
@@ -129,8 +138,13 @@ export function ShareLogDialog({
     setBusy(true);
     setError(null);
     try {
+      const currentConfig = getViewerConfig();
+      const recordingIndex = currentConfig?.selectedRecordings?.[primaryLog.fileId] ?? primaryLog.activeSessionIndex;
+      const previewLog = Number.isSafeInteger(recordingIndex) && recordingIndex >= 0 && recordingIndex < primaryLog.parsed.sessions.length
+        ? selectLogRecording(primaryLog, recordingIndex)
+        : primaryLog;
       setStage("Drawing the social preview…");
-      const preview = await createSharedLogImage(primaryLog);
+      const preview = await createSharedLogImage(previewLog);
       setStage(
         selected.length === 1
           ? "Uploading the log…"
@@ -166,7 +180,7 @@ export function ShareLogDialog({
         fingerprint: primary.fingerprint,
         files,
         viewerWorkspace: captureSharedViewerWorkspace(
-          getViewerConfig(),
+          currentConfig,
           selectedLogs,
         ),
       });
@@ -214,8 +228,8 @@ export function ShareLogDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-0 sm:max-w-lg">
-        <div className="border-b bg-gradient-to-br from-red-500/12 via-background to-background px-6 py-5">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] grid-cols-1 overflow-y-auto p-0 sm:max-w-lg">
+        <div className="min-w-0 border-b bg-gradient-to-br from-red-500/12 via-background to-background px-6 py-5">
           <div className="flex size-10 items-center justify-center rounded-xl bg-red-500/15 text-red-500 ring-1 ring-red-500/20">
             <Share2Icon className="size-5" />
           </div>
@@ -227,7 +241,7 @@ export function ShareLogDialog({
         </div>
 
         {shareUrl ? (
-          <div className="space-y-5 px-6 py-5">
+          <div className="min-w-0 space-y-5 px-6 py-5">
             <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/8 p-4">
               <div className="flex items-center gap-2 font-medium text-emerald-600 dark:text-emerald-400">
                 <CheckIcon className="size-4" />
@@ -282,7 +296,7 @@ export function ShareLogDialog({
             </p>
           </div>
         ) : (
-          <div className="space-y-5 px-6 py-5">
+          <div className="min-w-0 space-y-5 px-6 py-5">
             {logs.length > 1 ? (
               <div className="overflow-hidden rounded-xl border">
                 <div className="flex items-center justify-between border-b bg-muted/25 px-4 py-3">
@@ -346,6 +360,9 @@ export function ShareLogDialog({
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {log.parsed.format}
                             {file ? ` · ${formatBytes(file.size)}` : " · unavailable"}
+                            {log.parsed.sessions.length > 1 && (
+                              <> · Recording {recordingIndexFor(log) + 1} of {log.parsed.sessions.length}</>
+                            )}
                           </p>
                         </div>
                       </div>
@@ -354,17 +371,20 @@ export function ShareLogDialog({
                 </div>
               </div>
             ) : primaryLog && primaryFile ? (
-              <div className="rounded-xl border bg-muted/35 p-4">
+              <div className="min-w-0 rounded-xl border bg-muted/35 p-4">
                 <p className="truncate font-medium" title={primaryLog.fileName}>
                   {primaryLog.fileName}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {primaryLog.parsed.format} · {formatBytes(primaryFile.size)}
+                  {primaryLog.parsed.sessions.length > 1 && (
+                    <> · Opens recording {selectedRecordingIndex + 1} of {primaryLog.parsed.sessions.length}</>
+                  )}
                 </p>
               </div>
             ) : null}
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <label className="block space-y-2">
                 <span className="text-sm font-medium">Your name</span>
                 <input

@@ -254,7 +254,7 @@ export function Landing({
               },
               {
                 q: "Will it work with my ECU?",
-                a: "DragTrace opens Haltech, Holley EFI V6 .dl, ECUMaster, RomRaider, MegaSquirt/TunerStudio, Honda Tuning Studio, MHD, Motorsport Electronics, DynamicEFI, Woolich, RaceChrono, BlueDriver, and OBDLink logs. Other binary formats are still on the way.",
+                a: "DragTrace opens Haltech .hlgzip archives, .hlg logs and text exports; Holley EFI V6 .dl files; and text/CSV exports from ECUMaster, RomRaider, MegaSquirt/TunerStudio, Honda Tuning Studio, MHD, Motorsport Electronics, DynamicEFI, Woolich, RaceChrono, BlueDriver, and OBDLink. Other binary formats are still on the way.",
               },
             ].map((f) => (
               <div key={f.q}>

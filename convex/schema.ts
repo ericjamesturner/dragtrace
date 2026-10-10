@@ -50,6 +50,8 @@ export default defineSchema({
     date: v.string(),
     endDate: v.optional(v.string()),
     notes: v.optional(v.string()),
+    /** Where it ran, as the racer writes it: "Firebird Raceway, Eagle ID". */
+    track: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_vehicle", ["vehicleId"])
@@ -72,10 +74,39 @@ export default defineSchema({
     // Precomputed dashboard preview (JSON blob) — logs never change, so
     // this is computed once client-side and reused.
     preview: v.optional(v.string()),
+    /** Fingerprint of the ECU tune inside an .hlgzip upload. Two passes with
+     *  different fingerprints ran different tunes. */
+    tuneHash: v.optional(v.string()),
   })
     .index("by_event", ["eventId"])
     .index("by_vehicle", ["vehicleId"])
     .index("by_user", ["userId"]),
+
+  // What changed on the car, so passes can be read against the setup they
+  // ran on: hardware the racer logs by hand, and tune changes read from
+  // consecutive .hlgzip uploads.
+  changes: defineTable({
+    userId: v.id("users"),
+    vehicleId: v.id("vehicles"),
+    /** YYYY-MM-DD. */
+    date: v.string(),
+    /** converter, engine, trans, tune, tires, suspension, gear, other. */
+    category: v.string(),
+    title: v.string(),
+    notes: v.optional(v.string()),
+    /** The pass it came after, for a change made between rounds. */
+    afterFileId: v.optional(v.id("files")),
+    /** A tune change: the first pass that ran it. */
+    toFileId: v.optional(v.id("files")),
+    /** "manual", or "tune" when read from the logs. */
+    source: v.union(v.literal("manual"), v.literal("tune")),
+    /** A tune change: one line per setting that moved. */
+    items: v.optional(v.array(v.string())),
+    createdAt: v.number(),
+  })
+    .index("by_vehicle", ["vehicleId"])
+    .index("by_after_file", ["afterFileId"])
+    .index("by_to_file", ["toFileId"]),
 
   workspaces: defineTable({
     userId: v.id("users"),

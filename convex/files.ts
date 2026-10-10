@@ -1,4 +1,5 @@
 import { query, mutation } from "./_generated/server";
+import { detachChangesFromFile } from "./changes";
 import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
 
@@ -123,6 +124,7 @@ export const remove = mutation({
     for (const ts of timeslips) {
       await ctx.db.delete(ts._id);
     }
+    await detachChangesFromFile(ctx, args.id);
     await ctx.storage.delete(file.storageId);
     await ctx.db.delete(args.id);
   },
@@ -139,6 +141,18 @@ export const savePreview = mutation({
     const file = await ctx.db.get(args.id);
     if (!file || file.userId !== userId) throw new Error("Not found");
     await ctx.db.patch(args.id, { preview: args.preview });
+  },
+});
+
+/** The tune fingerprint of an .hlgzip upload, read in the browser. */
+export const setTuneHash = mutation({
+  args: { id: v.id("files"), tuneHash: v.string() },
+  handler: async (ctx, args) => {
+    const userId = await getEffectiveUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
+    const file = await ctx.db.get(args.id);
+    if (!file || file.userId !== userId) throw new Error("Not found");
+    await ctx.db.patch(args.id, { tuneHash: args.tuneHash });
   },
 });
 
