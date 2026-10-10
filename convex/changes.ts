@@ -61,7 +61,9 @@ export const create = mutation({
       if (old) {
         await ctx.db.patch(old._id, {
           date: args.date,
+          category: args.category,
           title: args.title,
+          notes: args.notes,
           items: args.items,
           afterFileId: args.afterFileId,
         });

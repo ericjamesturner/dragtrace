@@ -8,8 +8,8 @@ import type { ConvexReactClient } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { readTune, type Tune } from "./haltech-tune";
-import { diffTunes, loadTuneDefs, type UnitChoice } from "./tune-diff";
-import { timeFromName, tuneChangeEntry, tuneFingerprint } from "./tune-changes";
+import { loadTuneDefs, type UnitChoice } from "./tune-diff";
+import { compareTunes, timeFromName, tuneFingerprint } from "./tune-changes";
 
 /** When a pass ran: NSP's stamp in the name, else its event's date and place in the event. */
 function passTime(file: Doc<"files">, eventDate: Map<string, string>): number {
@@ -20,12 +20,17 @@ function passTime(file: Doc<"files">, eventDate: Map<string, string>): number {
   return day - (file.order ?? 0) * 60_000;
 }
 
+/** A stored upload's tune; null when it can't be read, so that pair is skipped, never guessed. */
 async function tuneOf(convex: ConvexReactClient, fileId: Id<"files">): Promise<Tune | null> {
-  const url = await convex.query(api.files.getUrl, { fileId });
-  if (!url) return null;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  return readTune(await res.arrayBuffer());
+  try {
+    const url = await convex.query(api.files.getUrl, { fileId });
+    if (!url) return null;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await readTune(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
 }
 
 export async function syncTuneChanges({
@@ -77,21 +82,24 @@ export async function syncTuneChanges({
       if (logged) await convex.mutation(api.changes.remove, { id: logged._id });
       continue;
     }
-    if (!defs) continue;
     const [a, b] = await Promise.all([
       before._id === fileId ? tune : tuneOf(convex, before._id),
       after._id === fileId ? tune : tuneOf(convex, after._id),
     ]);
     if (!a || !b) continue;
-    const diff = diffTunes(a, b, defs, units);
-    if (diff.length === 0) continue;
-    const { title, items } = tuneChangeEntry(diff);
+    const entry = compareTunes(a, b, defs, units);
+    if (!entry) {
+      // Only a real comparison may clear an entry; a missing settings list just skips.
+      if (logged && defs) await convex.mutation(api.changes.remove, { id: logged._id });
+      continue;
+    }
     await convex.mutation(api.changes.create, {
       vehicleId,
       date: eventDate.get(after.eventId) ?? new Date().toISOString().slice(0, 10),
-      category: "tune",
-      title,
-      items,
+      category: entry.category,
+      title: entry.title,
+      items: entry.items,
+      notes: entry.notes,
       source: "tune",
       afterFileId: before._id,
       toFileId: after._id,

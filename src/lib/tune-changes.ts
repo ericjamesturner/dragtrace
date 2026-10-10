@@ -5,7 +5,7 @@
  * change log.
  */
 import type { Tune } from "./haltech-tune";
-import { changeArea, deltaSpan, type TuneChange } from "./tune-diff";
+import { changeArea, deltaSpan, diffTunes, type TuneChange, type TuneDefs, type UnitChoice } from "./tune-diff";
 import { inGroupLabel } from "./legend-labels";
 
 /** When NSP wrote the log, from its file name stamp: "2026-10-08_1248pm". */
@@ -30,6 +30,49 @@ export async function tuneFingerprint(tune: Tune): Promise<string> {
   const text = `${tune.meta.product}/${tune.meta.variant}|${ids.map((id) => `${id}:${tune.values.get(id)}`).join(",")}`;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** "01.31.03.000" -> "1.31.3". */
+const shortFirmware = (v: string) =>
+  v.split(".").slice(0, 3).map((p) => String(Number(p) || 0)).join(".");
+
+export interface TuneLogEntry {
+  category: "tune" | "firmware";
+  title: string;
+  items?: string[];
+  notes?: string;
+}
+
+/**
+ * What changed from tune `a` to tune `b`, as a change-log entry — or null
+ * when nothing a racer set is different. Only settings stored in both tunes
+ * count: one that exists on one side only is a difference between firmware
+ * versions, not a change anyone made. Across a firmware update the settings
+ * can't be lined up at all (ids can move between releases), so that is
+ * logged as the update alone.
+ */
+export function compareTunes(a: Tune, b: Tune, defs: TuneDefs | null, units: UnitChoice): TuneLogEntry | null {
+  const sameEcu = a.meta.product === b.meta.product && a.meta.variant === b.meta.variant;
+  if (!sameEcu || a.meta.firmware !== b.meta.firmware || a.meta.hdefMd5 !== b.meta.hdefMd5) {
+    return {
+      category: "firmware",
+      title: `Firmware ${shortFirmware(a.meta.firmware)} → ${shortFirmware(b.meta.firmware)}`,
+      notes: "Tune settings can't be compared across firmware versions, so any edits made with this update aren't listed.",
+    };
+  }
+  // Without a settings list for this ECU there are no names to show.
+  if (!defs) return null;
+  const made = diffTunes(a, b, defs, units).filter(
+    (c) => c.kind === "table" || (c.before !== undefined && c.after !== undefined && c.before !== "—" && c.after !== "—")
+  );
+  if (made.length === 0) return null;
+  return {
+    category: "tune",
+    ...tuneChangeEntry(made),
+    notes: defs.exact
+      ? undefined
+      : `Setting names are from the ${defs.version} settings list; this ECU runs ${shortFirmware(b.meta.firmware)}.`,
+  };
 }
 
 /**

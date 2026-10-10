@@ -1,5 +1,6 @@
-/** What a change to the car can be. Every one but a tune change is "big":
- *  passes either side of it don't belong in the same comparison. */
+/** What a change to the car can be. Hardware changes are "big": passes either
+ *  side of one don't belong in the same comparison. Tune and firmware changes
+ *  are read from the logs and come often, so they aren't. */
 export const CHANGE_CATEGORIES = [
   { key: "converter", label: "Converter" },
   { key: "engine", label: "Engine" },
@@ -8,6 +9,7 @@ export const CHANGE_CATEGORIES = [
   { key: "tires", label: "Tires" },
   { key: "suspension", label: "Suspension" },
   { key: "tune", label: "Tune" },
+  { key: "firmware", label: "Firmware" },
   { key: "other", label: "Other" },
 ] as const;
 
@@ -16,5 +18,5 @@ export function categoryLabel(key: string): string {
 }
 
 export function isBigChange(change: { category: string }): boolean {
-  return change.category !== "tune";
+  return change.category !== "tune" && change.category !== "firmware";
 }
