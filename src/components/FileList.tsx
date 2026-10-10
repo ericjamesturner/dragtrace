@@ -14,6 +14,7 @@ import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel, isBigChange } from "@/lib/changes";
 import { runLabel } from "@/lib/tune-changes";
+import { TuneChangeList } from "./TuneChangeList";
 import { bestForAir, type DialPass } from "@/lib/dial-predictor";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -1977,11 +1978,7 @@ function roundOf(fileName: string): string {
   return fileName.split(/\s+/).find((w) => /^[A-Z]{1,2}\d{1,2}$/i.test(w))?.toUpperCase() ?? runLabel(fileName);
 }
 
-/**
- * What this pass ran differently from the one before: one setting per row,
- * the change in bold, where on the table under it. More in amber, less in
- * sky, so the direction reads at a glance.
- */
+/** What this pass ran differently from the one before. */
 function TuneTab({ changes }: { changes: TuneTabChange[] }) {
   return (
     <div className="flex-1 space-y-3 px-3 pb-1 pt-2">
@@ -1991,23 +1988,8 @@ function TuneTab({ changes }: { changes: TuneTabChange[] }) {
             {change.category === "firmware" ? "ECU firmware" : `Changed since ${fromLabel ?? "the pass before"}`}
           </div>
           {change.category === "firmware" && <div className="mt-1 text-sm font-medium">{change.title}</div>}
-          <div className="mt-1 divide-y divide-border/50">
-            {(change.items ?? []).map((line, i) => {
-              const split = line.indexOf(": ");
-              const label = split > 0 ? line.slice(0, split) : line;
-              const [value, ...where] = (split > 0 ? line.slice(split + 2) : "").split(" · ");
-              const step = /\(([+−-])/.exec(value)?.[1] ?? value.trim().charAt(0);
-              const tone = step === "+" ? "text-amber-300" : step === "−" || step === "-" ? "text-sky-300" : "text-foreground";
-              return (
-                <div key={i} className="py-1.5">
-                  <div className="text-xs text-muted-foreground">{label}</div>
-                  <div className={`font-mono text-sm font-semibold tabular-nums ${tone}`}>{value}</div>
-                  {where.length > 0 && (
-                    <div className="font-mono text-[10px] text-muted-foreground/80">{where.join(" · ")}</div>
-                  )}
-                </div>
-              );
-            })}
+          <div className="mt-1">
+            <TuneChangeList change={change} compact />
           </div>
           {change.notes && <p className="mt-1 text-[10px] leading-snug text-muted-foreground/60">{change.notes}</p>}
         </div>

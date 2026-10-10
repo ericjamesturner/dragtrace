@@ -2,6 +2,20 @@ import { defineSchema, defineTable } from "convex/server";
 import { authTables } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
+/** One setting in a tune change. */
+export const changeDetail = v.object({
+  name: v.string(),
+  /** The step, "+2.3 to +5.5 psi", or "on → off" for a setting. */
+  change: v.string(),
+  /** "up" when it went up, "down" when down; absent for text or mixed. */
+  direction: v.optional(v.union(v.literal("up"), v.literal("down"))),
+  unit: v.optional(v.string()),
+  /** Where on the table, for the axes that didn't vary: "knob 12". */
+  where: v.optional(v.string()),
+  /** A handful of changed cells, each with where it is and its values. */
+  cells: v.optional(v.array(v.object({ at: v.string(), from: v.string(), to: v.string(), step: v.string() }))),
+});
+
 export default defineSchema({
   ...authTables,
 
@@ -102,6 +116,9 @@ export default defineSchema({
     source: v.union(v.literal("manual"), v.literal("tune")),
     /** A tune change: one line per setting that moved. */
     items: v.optional(v.array(v.string())),
+    /** The same settings, structured for display: a few changed cells are
+     *  listed with their old and new value. */
+    details: v.optional(v.array(changeDetail)),
     createdAt: v.number(),
   })
     .index("by_vehicle", ["vehicleId"])

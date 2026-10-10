@@ -14,6 +14,7 @@ import {
 import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MoreVerticalIcon, PencilIcon, PlusIcon, TrashIcon, WrenchIcon, CpuIcon } from "lucide-react";
 import { categoryLabel, isBigChange } from "@/lib/changes";
 import { runLabel } from "@/lib/tune-changes";
+import { TuneChangeList } from "./TuneChangeList";
 
 /** Every change on the car, newest first: hardware logged by hand, tune changes read from the logs. */
 export function ChangesPage({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
@@ -117,11 +118,9 @@ export function ChangesPage({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
                       </button>
                     )}
                     {expanded && (
-                      <ul className="mt-1 space-y-0.5 border-l pl-3 font-mono text-xs text-muted-foreground">
-                        {items.map((line, i) => (
-                          <li key={i}>{line}</li>
-                        ))}
-                      </ul>
+                      <div className="mt-1 max-w-md border-l pl-3">
+                        <TuneChangeList change={c} />
+                      </div>
                     )}
                   </div>
                   <DropdownMenu>

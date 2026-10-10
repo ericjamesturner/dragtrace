@@ -3,6 +3,7 @@ import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
+import { changeDetail } from "./schema";
 
 const changeFields = {
   date: v.string(),
@@ -40,6 +41,7 @@ export const create = mutation({
     ...changeFields,
     source: v.optional(v.union(v.literal("manual"), v.literal("tune"))),
     items: v.optional(v.array(v.string())),
+    details: v.optional(v.array(changeDetail)),
     toFileId: v.optional(v.id("files")),
   },
   handler: async (ctx, args) => {
@@ -65,6 +67,7 @@ export const create = mutation({
           title: args.title,
           notes: args.notes,
           items: args.items,
+          details: args.details,
           afterFileId: args.afterFileId,
         });
         return old._id;
@@ -81,6 +84,7 @@ export const create = mutation({
       toFileId: args.toFileId,
       source,
       items: args.items,
+      details: args.details,
       createdAt: Date.now(),
     });
   },

@@ -99,6 +99,7 @@ export async function syncTuneChanges({
       category: entry.category,
       title: entry.title,
       items: entry.items,
+      details: entry.details,
       notes: entry.notes,
       source: "tune",
       afterFileId: before._id,

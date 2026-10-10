@@ -40,6 +40,7 @@ export interface TuneLogEntry {
   category: "tune" | "firmware";
   title: string;
   items?: string[];
+  details?: TuneDetail[];
   notes?: string;
 }
 
@@ -114,53 +115,109 @@ function friendlyName(c: TuneChange): string {
   return GENERIC.test(own) && leaf ? sentence(`${leaf} ${own}`) : own;
 }
 
+/** A position on one table axis, as a racer says it: "1.25 s", "knob 12", "6,500 RPM". */
+function axisPoint(name: string, unit: string, value: string): string {
+  if (/^trim knob \d+$/i.test(name)) return `knob ${value}`;
+  if (/torque management knob/i.test(name)) return `TM knob ${value}`;
+  if (/^time$/i.test(name)) return `${value} s`;
+  if (/rpm$/i.test(name) && unit === "RPM") return `${value} RPM`;
+  return `${name} ${value}${unit ? ` ${unit}` : ""}`;
+}
+
+/** An axis whose unit already names it: "6,250–7,750 RPM", not "RPM 6,250–7,750 RPM". */
+const selfNamed = (r: AxisRange) => /^rpm$/i.test(r.name) && r.unit === "RPM";
+
 /** "trim knob 1 12" -> "knob 12"; a single throttle value says nothing. */
 function friendlyRange(r: AxisRange): string | null {
-  const span = r.from !== r.to ? `${r.from}–${r.to}` : r.from;
-  if (/^trim knob \d+$/i.test(r.name)) return `knob ${span}`;
-  if (/torque management knob/i.test(r.name)) return `TM knob ${span}`;
   if (/^throttle$/i.test(r.name) && r.from === r.to) return null;
-  if (/^time$/i.test(r.name)) return `${span} s`;
-  return `${r.name} ${span}${r.unit ? ` ${r.unit}` : ""}`;
+  if (r.from === r.to) return axisPoint(r.name, r.unit, r.from);
+  if (/^trim knob \d+$/i.test(r.name)) return `knob ${r.from}–${r.to}`;
+  if (/torque management knob/i.test(r.name)) return `TM knob ${r.from}–${r.to}`;
+  if (/^time$/i.test(r.name)) return `${r.from}–${r.to} s`;
+  if (selfNamed(r)) return `${r.from}–${r.to} RPM`;
+  return `${r.name} ${r.from}–${r.to}${r.unit ? ` ${r.unit}` : ""}`;
 }
 
 const onOff = (v: string | undefined) => (v === "Enable" ? "on" : v === "Disable" ? "off" : v);
 
+/** One setting in a tune change, laid out for reading. */
+export interface TuneDetail {
+  name: string;
+  /** The step: "+2.3 to +5.5 psi", "+100 RPM", or "on → off". */
+  change: string;
+  direction?: "up" | "down";
+  /** The setting's unit, "psi", "RPM", "°". */
+  unit?: string;
+  /** Where on the table, for the axes the change didn't move along: "knob 12". */
+  where?: string;
+  /** Up to MAX_CELLS changed cells, each with its old and new value. */
+  cells?: { at: string; from: string; to: string; step: string }[];
+}
+
+/** More changed cells than this read better as a range than a list. */
+const MAX_CELLS = 4;
+
+function detailOf(c: TuneChange): TuneDetail {
+  const name = friendlyName(c);
+  if (c.kind !== "table" || !c.table) {
+    return { name, change: `${onOff(c.before)} → ${onOff(c.after)}`, direction: c.direction };
+  }
+  const t = c.table;
+  const unit = t.unit ? ` ${t.unit}` : "";
+  if (!t.cellsChanged) return { name, change: "breakpoints moved" };
+  const fmt = (v: number, signed = false) =>
+    `${signed && v > 0 ? "+" : ""}${v.toLocaleString("en-US", { minimumFractionDigits: t.dp, maximumFractionDigits: t.dp })}`.replace("-", "−");
+  const shown = (v: number) => fmt(v);
+  // The changed cells of the first changed layer, by row and column.
+  const moved: { r: number; col: number }[] = [];
+  t.after.forEach((row, r) => row.forEach((v, col) => {
+    if (shown(v) !== shown(t.before[r][col])) moved.push({ r, col });
+  }));
+  const deltas = moved.map(({ r, col }) => t.after[r][col] - t.before[r][col]);
+  const direction = deltas.every((d) => d > 0) ? "up" : deltas.every((d) => d < 0) ? "down" : undefined;
+  const change = `${deltaSpan(t)}${unit}`;
+  // An axis with one breakpoint says nothing; an axis the cells don't move
+  // along is said once, as "where".
+  const rowAxis = t.rows > 1 ? t.rowRange : undefined;
+  const colAxis = t.cols > 1 ? t.colRange : undefined;
+  const rowsVary = new Set(moved.map((m) => m.r)).size > 1;
+  const colsVary = new Set(moved.map((m) => m.col)).size > 1;
+  if (t.cellsChanged > MAX_CELLS || moved.length === 0) {
+    const where = [rowAxis, colAxis].filter((r): r is AxisRange => !!r).map(friendlyRange).filter((r): r is string => !!r);
+    return { name, change, direction, unit: t.unit || undefined, where: where.join(" · ") || undefined };
+  }
+  const where = [
+    !rowsVary && rowAxis ? friendlyRange(rowAxis) : null,
+    !colsVary && colAxis ? friendlyRange(colAxis) : null,
+  ].filter((r): r is string => !!r);
+  const cells = moved.map(({ r, col }) => ({
+    at: [
+      rowsVary && rowAxis ? axisPoint(rowAxis.name, rowAxis.unit, t.rowLabels[r]) : null,
+      colsVary && colAxis ? axisPoint(colAxis.name, colAxis.unit, t.colLabels[col]) : null,
+    ].filter(Boolean).join(" · "),
+    from: shown(t.before[r][col]),
+    to: shown(t.after[r][col]),
+    step: fmt(t.after[r][col] - t.before[r][col], true),
+  }));
+  return { name, change, direction, unit: t.unit || undefined, where: where.join(" · ") || undefined, cells };
+}
+
 /**
  * A change-log entry for one tune change: a title naming the areas that
- * moved ("Boost, Ignition"), and one line per setting, "Name: change", the
- * change first and where on the table after it.
+ * moved ("Boost, Ignition"), the settings structured for display, and the
+ * same as one plain line each ("Shift point: 7,200 → 7,300 RPM (+100)").
  */
-export function tuneChangeEntry(changes: TuneChange[]): { title: string; items: string[] } {
+export function tuneChangeEntry(changes: TuneChange[]): { title: string; items: string[]; details: TuneDetail[] } {
   const ranked = changes
     .map((c) => ({ c, ...changeArea(c) }))
     .sort((a, b) => a.rank - b.rank || a.c.name.localeCompare(b.c.name));
   const areas = [...new Set(ranked.map((r) => r.area))];
-  const items = ranked.map(({ c }) => {
-    const name = friendlyName(c);
-    if (c.kind !== "table" || !c.table) return `${name}: ${onOff(c.before)} → ${onOff(c.after)}`;
-    const t = c.table;
-    if (!t.cellsChanged) return `${name}: breakpoints moved`;
-    const unit = t.unit ? ` ${t.unit}` : "";
-    // An axis with one breakpoint says nothing about where.
-    const where = [t.rows > 1 ? t.rowRange : undefined, t.cols > 1 ? t.colRange : undefined]
-      .filter((r): r is AxisRange => !!r)
-      .map(friendlyRange)
-      .filter((r): r is string => !!r);
-    // One cell: its old and new value say more than the step alone.
-    let change = `${deltaSpan(t)}${unit}`;
-    if (t.cellsChanged === 1) {
-      const fmt = (v: number) =>
-        v.toLocaleString("en-US", { minimumFractionDigits: t.dp, maximumFractionDigits: t.dp }).replace("-", "−");
-      for (let r = 0; r < t.after.length; r++) {
-        const col = t.after[r].findIndex((v, j) => fmt(v) !== fmt(t.before[r][j]));
-        if (col >= 0) {
-          change = `${fmt(t.before[r][col])} → ${fmt(t.after[r][col])}${unit} (${deltaSpan(t)})`;
-          break;
-        }
-      }
-    }
-    return `${name}: ${[change, ...where].join(" · ")}`;
+  const details = ranked.map(({ c }) => detailOf(c));
+  const items = details.map((d) => {
+    const single = d.cells?.length === 1 && !d.cells[0].at ? d.cells[0] : null;
+    const change = single ? `${single.from} → ${single.to}${d.change.replace(/^[^\s]+/, "")} (${single.step})` : d.change;
+    const cells = d.cells && !single ? d.cells.map((x) => `${x.at} ${x.from} → ${x.to}`).join(", ") : null;
+    return `${d.name}: ${[change, d.where, cells].filter(Boolean).join(" · ")}`;
   });
-  return { title: `${areas.slice(0, 3).join(", ")}${areas.length > 3 ? " and more" : ""}`, items };
+  return { title: `${areas.slice(0, 3).join(", ")}${areas.length > 3 ? " and more" : ""}`, items, details };
 }
