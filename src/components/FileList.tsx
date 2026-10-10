@@ -13,6 +13,7 @@ import type { UnitOverrides, UnitSystem } from "@/lib/units";
 import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel, isBigChange } from "@/lib/changes";
+import { parsePreview } from "@/lib/preview";
 import { runLabel } from "@/lib/tune-changes";
 import { TuneChangeList } from "./TuneChangeList";
 import { bestForAir, type DialPass } from "@/lib/dial-predictor";
@@ -38,7 +39,6 @@ import {
 } from "lucide-react";
 import {
   RpmPreview,
-  parsePreviewPayload,
   readLift,
   type RaceTimingInfo,
 } from "./RpmPreview";
@@ -176,7 +176,8 @@ export function FileList({
     });
     let prev: { file: Doc<"files">; knobs: KnobReading[] } | null = null;
     for (const f of timeline) {
-      const knobs = parsePreviewPayload(f.preview)?.knobs;
+      // Any stored version: an older one simply has no knobs yet.
+      const knobs = parsePreview(f.preview)?.knobs;
       if (!knobs?.length) continue;
       if (prev) {
         const moves = knobs.flatMap((k) => {
@@ -994,7 +995,9 @@ function PassCard({
 
   // Temperatures and line readings from the log, just before the launch.
   const launchLines = useMemo(() => {
-    const launch = parsePreviewPayload(file.preview)?.launch;
+    // Any stored version that has them, so they don't blink while the
+    // preview is rebuilt to the current one.
+    const launch = parsePreview(file.preview)?.launch;
     return launch ? formatLaunch(launch, unitSystem, unitOverrides) : [];
   }, [file.preview, unitSystem, unitOverrides]);
 

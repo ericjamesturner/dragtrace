@@ -1,4 +1,4 @@
-import type { LaunchReading } from "./launch-readings";
+import type { KnobReading, LaunchReading } from "./launch-readings";
 
 /**
  * The precomputed shape of a pass, stored on the file when its dashboard
@@ -16,6 +16,8 @@ export interface PreviewPayload {
   logDuration: number;
   /** Readings just before the launch (stored from preview version 3). */
   launch?: LaunchReading[] | null;
+  /** Dash knob positions at the launch (stored from preview version 4). */
+  knobs?: KnobReading[] | null;
 }
 
 export function parsePreview(raw: string | undefined | null): PreviewPayload | null {

@@ -130,6 +130,17 @@ export const remove = mutation({
   },
 });
 
+/** The format version a stored preview was written in; 0 when unreadable. */
+function previewVersion(preview: string | undefined): number {
+  if (!preview) return 0;
+  try {
+    const version = (JSON.parse(preview) as { version?: unknown }).version;
+    return typeof version === "number" ? version : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export const savePreview = mutation({
   args: {
     id: v.id("files"),
@@ -140,6 +151,10 @@ export const savePreview = mutation({
     if (!userId) throw new Error("Not authenticated");
     const file = await ctx.db.get(args.id);
     if (!file || file.userId !== userId) throw new Error("Not found");
+    // A browser still running an older release writes its older preview
+    // format; letting it would ping-pong with newer browsers, each
+    // replacing the other's preview on every view. Newest format wins.
+    if (previewVersion(args.preview) < previewVersion(file.preview)) return;
     await ctx.db.patch(args.id, { preview: args.preview });
   },
 });
