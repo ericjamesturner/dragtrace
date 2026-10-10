@@ -148,6 +148,8 @@ export default defineSchema({
     round: v.optional(v.string()),
     /** The lane used for this pass. Unset when it was not recorded. */
     lane: v.optional(v.union(v.literal("left"), v.literal("right"))),
+    /** Time of day the pass ran, track-local 24-hour "HH:MM". */
+    runTime: v.optional(v.string()),
     /** Trackside weather readings, stored in conventional US drag-racing units. */
     airTemperatureF: v.optional(v.number()),
     trackTemperatureF: v.optional(v.number()),

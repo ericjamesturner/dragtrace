@@ -142,6 +142,7 @@ export function TimeslipForm({
       initial.round = round ?? timeslip?.round ?? "";
       initial.lane = timeslip?.lane ?? "";
       initial.windDirection = timeslip?.windDirection ?? "";
+      initial.runTime = timeslip?.runTime ?? "";
       setValues(initial);
     }
   }, [open, timeslip, round]);
@@ -161,6 +162,7 @@ export function TimeslipForm({
           ? values.lane
           : undefined,
       windDirection: values.windDirection?.trim() || undefined,
+      runTime: values.runTime?.trim() || undefined,
     } as const;
     // The round belongs to the pass, not the slip.
     await updateRound({
@@ -336,6 +338,7 @@ export function TimeslipForm({
               </div>
 
               <div className="grid gap-3">
+                <div className="grid grid-cols-2 gap-3">
                 <div className="grid gap-1.5">
                   <Label htmlFor="ts-lane">Lane</Label>
                   <Select
@@ -354,6 +357,18 @@ export function TimeslipForm({
                       <SelectItem value="right">Right</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ts-run-time">Time of run</Label>
+                  <Input
+                    id="ts-run-time"
+                    type="time"
+                    value={values.runTime ?? ""}
+                    onChange={(e) =>
+                      setValues((p) => ({ ...p, runTime: e.target.value }))
+                    }
+                  />
+                </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">

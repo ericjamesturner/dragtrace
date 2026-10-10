@@ -13,6 +13,7 @@ import { v } from "convex/values";
 const timeslipFields = {
   round: v.optional(v.string()),
   lane: v.optional(v.union(v.literal("left"), v.literal("right"))),
+  runTime: v.optional(v.string()),
   airTemperatureF: v.optional(v.number()),
   trackTemperatureF: v.optional(v.number()),
   humidityPct: v.optional(v.number()),
@@ -86,6 +87,7 @@ export const create = mutation({
       fileId: args.fileId,
       round: args.round,
       lane: args.lane,
+      runTime: args.runTime,
       airTemperatureF: args.airTemperatureF,
       trackTemperatureF: args.trackTemperatureF,
       humidityPct: args.humidityPct,
@@ -121,6 +123,7 @@ export const update = mutation({
     await ctx.db.patch(args.id, {
       round: args.round,
       lane: args.lane,
+      runTime: args.runTime,
       airTemperatureF: args.airTemperatureF,
       trackTemperatureF: args.trackTemperatureF,
       humidityPct: args.humidityPct,

@@ -11,6 +11,9 @@ import { estimatePowerFromTimeslip } from "@/lib/drag-performance";
 import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
 import type { UnitOverrides, UnitSystem } from "@/lib/units";
 import { useUnitPreferences } from "@/hooks/useUnitPreferences";
+import { correctionFactor } from "@/lib/weather-correction";
+import { bestForAir, type DialPass } from "@/lib/dial-predictor";
+import { DialPredictor, type PredictedRun } from "./DialPredictor";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
@@ -55,6 +58,40 @@ const LOW_METRICS = ["rt", "sixtyFt", "threeThirty", "eighthEt", "thousandFt", "
 const HIGH_METRICS = ["eighthMph", "mph"] as const;
 type MetricKey = (typeof LOW_METRICS)[number] | (typeof HIGH_METRICS)[number];
 type MetricBests = Partial<Record<MetricKey | SegmentKey, number>>;
+/** The event's spread of one metric across its passes. */
+interface MetricRange {
+  best: number;
+  worst: number;
+  count: number;
+}
+type MetricRanges = Partial<Record<MetricKey | SegmentKey, MetricRange>>;
+
+/** Tailwind green-400 — the event-best colour — as a literal for color-mix. */
+const BEST_GREEN = "oklch(79.2% 0.209 151.711)";
+
+/**
+ * Shades a result toward the event's best: the best keeps its solid green,
+ * near-ties stay almost as bright, and the slowest fade to grey. Gaps are
+ * measured against the real spread, but a spread of a few thousandths never
+ * stretches across the whole scale — 1.017 vs 1.028 is not a wide range.
+ * Needs three passes; with two, best vs not-best already says it all.
+ */
+function shadeStyle(
+  k: MetricKey | SegmentKey,
+  v: number | undefined,
+  ranges: MetricRanges,
+): React.CSSProperties | undefined {
+  const r = ranges[k];
+  if (!r || v === undefined || r.count < 3 || v === r.best) return undefined;
+  if (k === "rt" && v < 0) return undefined;
+  const tie = k === "eighthMph" || k === "mph" ? 0.3 : 0.005;
+  const gap = Math.abs(v - r.best);
+  const span = Math.max(Math.abs(r.worst - r.best) - tie, 3 * tie);
+  const t = Math.min(1, Math.max(0, gap - tie) / span);
+  // Only the best is solid green; everything else tops out a step below it.
+  const green = Math.round(55 * (1 - t));
+  return { color: `color-mix(in oklab, ${BEST_GREEN} ${green}%, var(--muted-foreground))` };
+}
 
 /** One flat pass's contribution to a ratio: its finish clock, the earlier
  *  split it is divided by, and the ratio those two make. */
@@ -233,6 +270,78 @@ export function FileList({
       slips.every((s) => s.et === undefined && s.mph === undefined && s.thousandFt === undefined)
     );
   }, [files, vehicleSlips]);
+
+  // The dial-in predictor's inputs: the car's clean passes with weather,
+  // newest first (events by date, then the event's own pass order), at the
+  // distance this event runs.
+  const dialDistance: "1/8" | "1/4" = eighthOnly ? "1/8" : "1/4";
+  const dialData = useMemo(() => {
+    if (!vehicleFiles || !vehicleSlips || !vehicleEvents) return null;
+    const eventDate = new Map(vehicleEvents.map((e) => [e._id as string, e.date]));
+    const eventName = new Map(vehicleEvents.map((e) => [e._id as string, e.name]));
+    const slipFor = new Map<string, Doc<"timeslips">>();
+    for (const s of vehicleSlips) if (!slipFor.has(s.fileId)) slipFor.set(s.fileId, s);
+    const ordered = [...vehicleFiles].sort((a, b) => {
+      const da = eventDate.get(a.eventId) ?? "";
+      const db = eventDate.get(b.eventId) ?? "";
+      if (da !== db) return da < db ? 1 : -1;
+      return (a.order ?? 0) - (b.order ?? 0);
+    });
+    // This event's own files first, in their pass order, so "latest" means
+    // the latest pass here even if another event shares the date.
+    ordered.sort((a, b) => Number(b.eventId === eventId) - Number(a.eventId === eventId));
+    const history: DialPass[] = [];
+    const daPoints: { da: number; cf: number }[] = [];
+    let latestAir: Doc<"timeslips"> | null = null;
+    for (const f of ordered) {
+      const s = slipFor.get(f._id);
+      if (!s) continue;
+      const cf = correctionFactor(s);
+      if (cf === null) continue;
+      if (!latestAir) latestAir = s;
+      if (s.densityAltitudeFt !== undefined) daPoints.push({ da: s.densityAltitudeFt, cf });
+      const et = dialDistance === "1/8" ? s.eighthEt : s.et;
+      if (et === undefined || et <= 0) continue;
+      const lastSplit = Math.max(
+        ...[s.sixtyFt, s.threeThirty, s.eighthEt, s.thousandFt, s.et].filter(
+          (x): x is number => x !== undefined && x > 0
+        )
+      );
+      const payload = parsePreviewPayload(f.preview);
+      const lift = payload ? detectLift(payload, lastSplit) : null;
+      if (lift && (lift.finalLift !== null || lift.pedals.length > 0)) continue;
+      const here = f.eventId === eventId;
+      const round = f.round ?? s.round ?? "Pass";
+      history.push({
+        id: f._id,
+        label: here ? round : `${round} · ${eventName.get(f.eventId) ?? ""}`,
+        et,
+        cf,
+        thisEvent: here,
+        clocks: {
+          sixtyFt: s.sixtyFt,
+          threeThirty: s.threeThirty,
+          eighthEt: s.eighthEt,
+          eighthMph: s.eighthMph,
+          thousandFt: s.thousandFt,
+          et: s.et,
+          mph: s.mph,
+        },
+      });
+    }
+    return { history, daPoints, latestAir };
+  }, [vehicleFiles, vehicleSlips, vehicleEvents, eventId, dialDistance]);
+
+  // The next pass, as the dial-in predicts it from the air typed up top.
+  const [predicted, setPredicted] = useState<PredictedRun | null>(null);
+
+  // The pass that was best for its conditions: quickest once every clean pass
+  // here is moved to the same air. Only worth a tag when it isn't simply the
+  // quickest pass.
+  const airBest = useMemo(
+    () => (dialData ? bestForAir(dialData.history) : null),
+    [dialData]
+  );
 
   const bestFileId = useMemo(() => {
     if (!files) return null;
@@ -459,6 +568,38 @@ export function FileList({
     return out;
   }, [slipStats, files]);
 
+  // Best-to-worst spread per metric, for shading every result on the cards.
+  // A pass the driver pedaled or lifted on says nothing about the car, so it
+  // doesn't set the scale — its slow numbers just land at the grey end.
+  const eventRanges = useMemo<MetricRanges>(() => {
+    if (!files) return {};
+    const ids = new Set<string>();
+    for (const f of files) {
+      const payload = parsePreviewPayload(f.preview);
+      const lift = payload ? detectLift(payload, slipStats[f._id]?.lastSplit ?? null) : null;
+      if (lift && (lift.finalLift !== null || lift.pedals.length > 0)) continue;
+      ids.add(f._id);
+    }
+    const out: MetricRanges = {};
+    const add = (k: MetricKey | SegmentKey, val: number | undefined, lowIsBest: boolean) => {
+      if (val === undefined || (k === "rt" && val < 0)) return;
+      const r = out[k];
+      if (!r) {
+        out[k] = { best: val, worst: val, count: 1 };
+        return;
+      }
+      r.count++;
+      if (lowIsBest ? val < r.best : val > r.best) r.best = val;
+      if (lowIsBest ? val > r.worst : val < r.worst) r.worst = val;
+    };
+    for (const [id, v] of Object.entries(slipStats)) {
+      if (!ids.has(id)) continue;
+      for (const k of [...LOW_METRICS, ...SEGMENTS.map((s) => s.key)]) add(k, v.metrics[k], true);
+      for (const k of HIGH_METRICS) add(k, v.metrics[k], false);
+    }
+    return out;
+  }, [slipStats, files]);
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -488,6 +629,18 @@ export function FileList({
       </div>
 
       <FileUpload vehicleId={vehicleId} eventId={eventId} />
+
+      {dialData && dialData.history.length > 0 && (
+        <DialPredictor
+          key={eventId}
+          eventId={eventId}
+          distance={dialDistance}
+          history={dialData.history}
+          latestAir={dialData.latestAir}
+          daPoints={dialData.daPoints}
+          onPrediction={setPredicted}
+        />
+      )}
 
       {files === undefined ? (
         <p className="text-sm text-muted-foreground py-8 text-center">
@@ -567,7 +720,13 @@ export function FileList({
                   passNumber={i + 1}
                   onArmDrag={() => armDrag(i)}
                   isBest={file._id === bestFileId}
+                  bestForAirMargin={
+                    airBest && airBest.id === file._id && airBest.id !== bestFileId
+                      ? airBest.margin
+                      : undefined
+                  }
                   eventBests={eventBests}
+                  eventRanges={eventRanges}
                   estimate={estimates[file._id]}
                   onEstScopeChange={setEstScope}
                   onDelete={() => {
@@ -585,6 +744,14 @@ export function FileList({
               </div>
             );
           })}
+          {predicted && dialData && dialData.history.length > 0 && (
+            <PredictedCard
+              run={predicted}
+              distance={dialDistance}
+              raceWeightLb={vehicle?.raceWeightLb}
+              eighthOnly={eighthOnly}
+            />
+          )}
         </div>
       )}
     </div>
@@ -599,7 +766,9 @@ function PassCard({
   eighthOnly,
   passNumber,
   isBest,
+  bestForAirMargin,
   eventBests,
+  eventRanges,
   estimate,
   onEstScopeChange,
   onArmDrag,
@@ -618,7 +787,10 @@ function PassCard({
   eighthOnly: boolean;
   passNumber: number;
   isBest: boolean;
+  /** Set when this pass was the best for its air; how far ahead on equal air. */
+  bestForAirMargin?: number;
   eventBests: MetricBests;
+  eventRanges: MetricRanges;
   estimate?: PassEstimate;
   onEstScopeChange: (scope: "event" | "all") => void;
   onArmDrag: () => void;
@@ -854,6 +1026,14 @@ function PassCard({
                 Best
               </span>
             )}
+            {bestForAirMargin !== undefined && (
+              <span
+                className="rounded-sm border border-sky-400/70 px-1 text-[9px] font-bold uppercase tracking-wider text-sky-300"
+                title={`Quickest pass once the air is evened out — ${bestForAirMargin.toFixed(3)}s ahead of the next on equal air. Track conditions aren't counted.`}
+              >
+                Best for air
+              </span>
+            )}
           </div>
           {heroKind === null ? (
             // Keeps the header the same height as a card with numbers.
@@ -1087,9 +1267,11 @@ function PassCard({
           timeslips.map((ts, idx) => (
             <div key={ts._id}>
               {idx > 0 && <Separator className="my-2" />}
+
               <SlipLines
                 ts={ts}
                 bests={eventBests}
+                ranges={eventRanges}
                 raceWeightLb={raceWeightLb}
                 launchLines={idx === 0 ? launchLines : undefined}
                 eighthOnly={eighthOnly}
@@ -1473,12 +1655,14 @@ const EMPTY_SLIP = {} as Doc<"timeslips">;
 function SlipLines({
   ts,
   bests,
+  ranges = {},
   raceWeightLb,
   launchLines,
   eighthOnly = false,
 }: {
   ts: Doc<"timeslips">;
   bests: MetricBests;
+  ranges?: MetricRanges;
   raceWeightLb?: number;
   /** Read from this pass's log; only the card's first slip carries them. */
   launchLines?: LaunchLine[];
@@ -1516,7 +1700,10 @@ function SlipLines({
     : null;
   const powerEtObserved = power?.distance === "1/4" ? ts.et : ts.eighthEt;
   const powerMphObserved = power?.distance === "1/4" ? ts.mph : ts.eighthMph;
+  // The weather station's correction factor, worked out from the slip's air.
+  const corrFactor = correctionFactor(ts) ?? undefined;
   const hasRunConditions =
+    ts.runTime !== undefined ||
     ts.lane !== undefined ||
     ts.airTemperatureF !== undefined ||
     ts.trackTemperatureF !== undefined ||
@@ -1536,12 +1723,13 @@ function SlipLines({
         label="R.T."
         value={ts.rt}
         valueClassName={redLight ? "text-red-400" : bestClass("rt")}
+        valueStyle={redLight ? undefined : shadeStyle("rt", ts.rt, ranges)}
       />
 
       <Separator className="my-1.5" />
 
-      <TimeslipLine label="60'" value={ts.sixtyFt} valueClassName={bestClass("sixtyFt")} />
-      <TimeslipLine label="330'" value={ts.threeThirty} valueClassName={bestClass("threeThirty")} />
+      <TimeslipLine label="60'" value={ts.sixtyFt} valueClassName={bestClass("sixtyFt")} valueStyle={shadeStyle("sixtyFt", ts.sixtyFt, ranges)} />
+      <TimeslipLine label="330'" value={ts.threeThirty} valueClassName={bestClass("threeThirty")} valueStyle={shadeStyle("threeThirty", ts.threeThirty, ranges)} />
 
       <Separator className="my-1.5" />
 
@@ -1549,14 +1737,15 @@ function SlipLines({
         label="1/8"
         value={ts.eighthEt}
         valueClassName={eighthBreakout ? "text-red-400" : bestClass("eighthEt")}
+        valueStyle={eighthBreakout ? undefined : shadeStyle("eighthEt", ts.eighthEt, ranges)}
       />
-      <TimeslipLine label="MPH" value={ts.eighthMph} valueClassName={bestClass("eighthMph")} />
+      <TimeslipLine label="MPH" value={ts.eighthMph} valueClassName={bestClass("eighthMph")} valueStyle={shadeStyle("eighthMph", ts.eighthMph, ranges)} />
 
       {!eighthOnly && (
         <>
           <Separator className="my-1.5" />
 
-          <TimeslipLine label="1000'" value={ts.thousandFt} valueClassName={bestClass("thousandFt")} />
+          <TimeslipLine label="1000'" value={ts.thousandFt} valueClassName={bestClass("thousandFt")} valueStyle={shadeStyle("thousandFt", ts.thousandFt, ranges)} />
 
           <Separator className="my-1.5" />
 
@@ -1565,8 +1754,9 @@ function SlipLines({
             value={ts.et}
             bold
             valueClassName={breakout ? "text-red-400" : bestClass("et")}
+            valueStyle={breakout ? undefined : shadeStyle("et", ts.et, ranges)}
           />
-          <TimeslipLine label="MPH" value={ts.mph} bold valueClassName={bestClass("mph")} />
+          <TimeslipLine label="MPH" value={ts.mph} bold valueClassName={bestClass("mph")} valueStyle={shadeStyle("mph", ts.mph, ranges)} />
         </>
       )}
 
@@ -1576,6 +1766,9 @@ function SlipLines({
           <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
             Run conditions
           </div>
+          {ts.runTime !== undefined && (
+            <TimeslipLine label="TIME" value={formatRunTime(ts.runTime)} />
+          )}
           {ts.lane !== undefined && (
             <TimeslipLine
               label="LANE"
@@ -1602,6 +1795,9 @@ function SlipLines({
               label="D.A."
               value={`${ts.densityAltitudeFt.toLocaleString()} ft`}
             />
+          )}
+          {corrFactor !== undefined && (
+            <TimeslipLine label="CORR. FACTOR" value={corrFactor.toFixed(4)} />
           )}
           {(ts.windSpeedMph !== undefined || ts.windDirection) && (
             <TimeslipLine
@@ -1701,10 +1897,67 @@ function SlipLines({
           // Always 3dp so the splits line up down the column.
           value={segs[s.key]?.toFixed(3)}
           valueClassName={segBestClass(s.key)}
+          valueStyle={shadeStyle(s.key, segs[s.key], ranges)}
         />
       ))}
     </div>
   );
+}
+
+/**
+ * The dial-in's guess at the next pass, laid out like a real slip so it reads
+ * across the gallery row for row. Dashed and blue so it can't pass for a run.
+ */
+function PredictedCard({
+  run,
+  distance,
+  raceWeightLb,
+  eighthOnly,
+}: {
+  run: PredictedRun;
+  distance: "1/8" | "1/4";
+  raceWeightLb?: number;
+  eighthOnly: boolean;
+}) {
+  const ts = { ...run.clocks, ...run.air } as Doc<"timeslips">;
+  const et = distance === "1/8" ? run.clocks.eighthEt : run.clocks.et;
+  const mph = distance === "1/8" ? run.clocks.eighthMph : run.clocks.mph;
+  return (
+    <div className="relative flex h-full flex-col overflow-hidden rounded-lg border border-dashed border-sky-400/50 bg-card/40">
+      <div className="h-4 shrink-0 border-b border-dashed border-sky-400/30" />
+      <div className="flex h-16 shrink-0 items-center justify-center border-b border-dashed border-sky-400/30 text-[10px] uppercase tracking-wider text-sky-300/70">
+        Predicted
+      </div>
+      <div className="px-3 pt-2">
+        <div className="text-[10px] font-medium uppercase tracking-wider text-sky-300/80">Next pass</div>
+        <div className="font-mono text-xl font-semibold leading-tight tabular-nums text-sky-300">
+          {et !== undefined ? et.toFixed(3) : "—"}
+          {mph !== undefined && (
+            <span className="text-sm font-normal text-muted-foreground">{" @ "}{mph.toFixed(2)}</span>
+          )}
+          <span className="ml-1 text-[10px] font-normal text-muted-foreground/70">{distance}</span>
+        </div>
+        <div className="truncate text-[11px] text-muted-foreground">
+          {run.spread !== undefined ? `± ${run.spread.toFixed(3)} · ` : ""}
+          from {run.basisCount} {run.basisCount === 1 ? "pass" : "passes"} in this air
+        </div>
+        <div className="text-[10px] text-muted-foreground/60">
+          {run.scope === "event" ? "This event" : "Recent passes, any event"}
+        </div>
+      </div>
+      <div className="flex-1 px-3 pb-3 pt-2 font-mono text-sm text-sky-100/90">
+        <SlipLines ts={ts} bests={{}} raceWeightLb={raceWeightLb} eighthOnly={eighthOnly} />
+      </div>
+    </div>
+  );
+}
+
+/** "16:25" -> "4:25 pm". Anything that isn't HH:MM shows as typed. */
+function formatRunTime(hhmm: string): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
+  if (!m) return hhmm;
+  const h = Number(m[1]);
+  return `${h % 12 === 0 ? 12 : h % 12}:${m[2]} ${h < 12 ? "am" : "pm"}`;
 }
 
 function TimeslipLine({
@@ -1712,12 +1965,15 @@ function TimeslipLine({
   value,
   bold,
   valueClassName,
+  valueStyle,
   rowClassName,
 }: {
   label: string;
   value: number | string | undefined;
   bold?: boolean;
   valueClassName?: string;
+  /** Inline colour, for shades a class can't express. */
+  valueStyle?: React.CSSProperties;
   rowClassName?: string;
 }) {
   const display = value !== undefined ? String(value) : "—";
@@ -1727,7 +1983,7 @@ function TimeslipLine({
       <span className="flex-1 overflow-hidden text-muted-foreground/40 mx-1 select-none" aria-hidden>
         {"...................................................................................."}
       </span>
-      <span className={`shrink-0 ${bold ? "font-bold" : ""} ${valueClassName ?? ""}`}>
+      <span className={`shrink-0 ${bold ? "font-bold" : ""} ${valueClassName ?? ""}`} style={valueStyle}>
         {display}
       </span>
     </div>
