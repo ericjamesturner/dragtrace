@@ -76,49 +76,39 @@ export function compareTunes(a: Tune, b: Tune, defs: TuneDefs | null, units: Uni
   };
 }
 
-/** What a racer calls a setting, given the tree it sits in. */
-const FRIENDLY: { group?: RegExp; name: RegExp; label: string | ((m: RegExpExecArray) => string) }[] = [
-  { group: /boost control/i, name: /^target pressure/i, label: "Boost target" },
-  { name: /shift point/i, label: "Shift point" },
-  { name: /timed ignition correction/i, label: "TM timing" },
-  { name: /engine rpm cut percentage/i, label: "TM cut" },
-  { name: /engine rpm target error ignition correction/i, label: "TM timing on RPM error" },
-  { name: /engine rpm target$/i, label: "TM RPM line" },
-  { name: /driveshaft rpm target$/i, label: "TM driveshaft line" },
-  { name: /target lambda/i, label: "Target lambda" },
-  { name: /base fuel/i, label: "Base fuel" },
-  { name: /^fuel cylinder (\d+) correction/i, label: (m) => `Cyl ${m[1]} fuel trim` },
-  { name: /^fuel generic (\d+) correction/i, label: (m) => `Fuel trim ${m[1]}` },
-  { group: /launch control/i, name: /end rpm/i, label: "Launch end RPM" },
-  { group: /launch control/i, name: /^ignition/i, label: "Launch timing" },
-  { group: /launch control/i, name: /fuel correction/i, label: "Launch fuel" },
-  { group: /launch control/i, name: /^enable/i, label: "Launch control" },
-  { group: /trans-?brake/i, name: /rpm limiter method/i, label: "Trans-brake limiter" },
-  { name: /number of teeth/i, label: "Driveshaft sensor teeth" },
-  { group: /o2 control/i, name: /min rpm/i, label: "O2 control min RPM" },
-];
-
 /** Names that mean nothing without the group they sit in. */
-const GENERIC = /^(enable|pull up enable|method|type|channel \d+|condition \d+|operator \d+|number of operations)$/i;
+const GENERIC = /^(enable|pull up enable|.*method|type|channel \d+|condition \d+|operator \d+|number of operations)$/i;
 
-const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
-
-function friendlyName(c: TuneChange): string {
+/**
+ * A setting by the name NSP shows for it, trimmed of its group's prefix —
+ * unless that leaves something too short to place ("End RPM"), in which
+ * case the group goes back in front. Boost Control's target is "Boost".
+ */
+function settingName(c: TuneChange): string {
   const leaf = c.group[c.group.length - 1];
-  const where = c.group.join(" > ");
-  for (const f of FRIENDLY) {
-    if (f.group && !f.group.test(where)) continue;
-    const m = f.name.exec(inGroupLabel(c.name, leaf)) ?? f.name.exec(c.name);
-    if (m) return typeof f.label === "string" ? f.label : f.label(m);
-  }
+  if (/boost control/i.test(c.group.join(" ")) && /target pressure/i.test(c.name)) return "Boost";
   const own = inGroupLabel(c.name, leaf);
-  return GENERIC.test(own) && leaf ? sentence(`${leaf} ${own}`) : own;
+  if (leaf && (GENERIC.test(own) || own.split(/\s+/).length <= 2) && !own.toLowerCase().startsWith(leaf.toLowerCase())) {
+    return `${leaf} ${own}`;
+  }
+  return own;
+}
+
+/**
+ * Shift tables key their rows by the shift: "15,152" is up from 1st to 2nd,
+ * "5,352" down from 3rd to 2nd (a leading 1 for up, then 5 + each gear).
+ * Checked on a 2-speed (one row, 15,152) and a 3-speed (5,251 5,352 15,152
+ * 15,253). Null for anything else.
+ */
+function shiftOf(label: string): string | null {
+  const m = /^(1?)5(\d)5(\d)$/.exec(label.replace(/,/g, ""));
+  if (!m) return null;
+  return m[1] ? `${m[2]}-${m[3]} shift` : `${m[2]}-${m[3]} downshift`;
 }
 
 /** A position on one table axis, as a racer says it: "1.25 s", "knob 12", "6,500 RPM". */
 function axisPoint(name: string, unit: string, value: string): string {
-  if (/^trim knob \d+$/i.test(name)) return `knob ${value}`;
-  if (/torque management knob/i.test(name)) return `TM knob ${value}`;
+  if (/knob/i.test(name)) return `row ${value}`;
   if (/^time$/i.test(name)) return `${value} s`;
   if (/rpm$/i.test(name) && unit === "RPM") return `${value} RPM`;
   return `${name} ${value}${unit ? ` ${unit}` : ""}`;
@@ -127,12 +117,11 @@ function axisPoint(name: string, unit: string, value: string): string {
 /** An axis whose unit already names it: "6,250–7,750 RPM", not "RPM 6,250–7,750 RPM". */
 const selfNamed = (r: AxisRange) => /^rpm$/i.test(r.name) && r.unit === "RPM";
 
-/** "trim knob 1 12" -> "knob 12"; a single throttle value says nothing. */
+/** "trim knob 1 12" -> "row 12" (the knob picks the table row); a single throttle value says nothing. */
 function friendlyRange(r: AxisRange): string | null {
   if (/^throttle$/i.test(r.name) && r.from === r.to) return null;
   if (r.from === r.to) return axisPoint(r.name, r.unit, r.from);
-  if (/^trim knob \d+$/i.test(r.name)) return `knob ${r.from}–${r.to}`;
-  if (/torque management knob/i.test(r.name)) return `TM knob ${r.from}–${r.to}`;
+  if (/knob/i.test(r.name)) return `rows ${r.from}–${r.to}`;
   if (/^time$/i.test(r.name)) return `${r.from}–${r.to} s`;
   if (selfNamed(r)) return `${r.from}–${r.to} RPM`;
   return `${r.name} ${r.from}–${r.to}${r.unit ? ` ${r.unit}` : ""}`;
@@ -143,6 +132,10 @@ const onOff = (v: string | undefined) => (v === "Enable" ? "on" : v === "Disable
 /** One setting in a tune change, laid out for reading. */
 export interface TuneDetail {
   name: string;
+  /** The change said the way a tuner writes it down: "Added 2.3 to 5.5 psi to Boost at 1.25–1.75 s on row 12". */
+  sentence?: string;
+  /** The part of the sentence to make bold: "2.3 to 5.5 psi". */
+  amount?: string;
   /** The step: "+2.3 to +5.5 psi", "+100 RPM", or "on → off". */
   change: string;
   direction?: "up" | "down";
@@ -158,13 +151,24 @@ export interface TuneDetail {
 const MAX_CELLS = 4;
 
 function detailOf(c: TuneChange): TuneDetail {
-  const name = friendlyName(c);
+  const name = settingName(c);
   if (c.kind !== "table" || !c.table) {
-    return { name, change: `${onOff(c.before)} → ${onOff(c.after)}`, direction: c.direction };
+    const before = onOff(c.before);
+    const after = onOff(c.after);
+    if ((before === "on" || before === "off") && (after === "on" || after === "off")) {
+      return { name, change: `${before} → ${after}`, sentence: `Turned ${name} ${after}`, amount: after };
+    }
+    return {
+      name,
+      change: `${before} → ${after}`,
+      direction: c.direction,
+      sentence: `Changed ${name} from ${before} to ${after}`,
+      amount: `${after}`,
+    };
   }
   const t = c.table;
   const unit = t.unit ? ` ${t.unit}` : "";
-  if (!t.cellsChanged) return { name, change: "breakpoints moved" };
+  if (!t.cellsChanged) return { name, change: "breakpoints moved", sentence: `Moved the ${name} breakpoints` };
   const fmt = (v: number, signed = false) =>
     `${signed && v > 0 ? "+" : ""}${v.toLocaleString("en-US", { minimumFractionDigits: t.dp, maximumFractionDigits: t.dp })}`.replace("-", "−");
   const shown = (v: number) => fmt(v);
@@ -182,9 +186,16 @@ function detailOf(c: TuneChange): TuneDetail {
   const colAxis = t.cols > 1 ? t.colRange : undefined;
   const rowsVary = new Set(moved.map((m) => m.r)).size > 1;
   const colsVary = new Set(moved.map((m) => m.col)).size > 1;
+  // A shift table names its rows by the shift itself.
+  const shifts = !t.rowRange ? [...new Set(moved.map((m) => shiftOf(t.rowLabels[m.r])))] : [];
+  const shift = shifts.length > 0 && shifts.every((x) => x) ? shifts.join(" and ") : null;
+  const said = (d: TuneDetail): TuneDetail =>
+    deltas.length === 0
+      ? { ...d, sentence: `Changed ${name}` }
+      : { ...d, ...sentenceFor(d, t, deltas, [rowAxis, colAxis].filter((r): r is AxisRange => !!r), shift) };
   if (t.cellsChanged > MAX_CELLS || moved.length === 0) {
     const where = [rowAxis, colAxis].filter((r): r is AxisRange => !!r).map(friendlyRange).filter((r): r is string => !!r);
-    return { name, change, direction, unit: t.unit || undefined, where: where.join(" · ") || undefined };
+    return said({ name, change, direction, unit: t.unit || undefined, where: where.join(" · ") || undefined });
   }
   const where = [
     !rowsVary && rowAxis ? friendlyRange(rowAxis) : null,
@@ -193,13 +204,51 @@ function detailOf(c: TuneChange): TuneDetail {
   const cells = moved.map(({ r, col }) => ({
     at: [
       rowsVary && rowAxis ? axisPoint(rowAxis.name, rowAxis.unit, t.rowLabels[r]) : null,
+      rowsVary && !rowAxis ? shiftOf(t.rowLabels[r]) : null,
       colsVary && colAxis ? axisPoint(colAxis.name, colAxis.unit, t.colLabels[col]) : null,
     ].filter(Boolean).join(" · "),
     from: shown(t.before[r][col]),
     to: shown(t.after[r][col]),
     step: fmt(t.after[r][col] - t.before[r][col], true),
   }));
-  return { name, change, direction, unit: t.unit || undefined, where: where.join(" · ") || undefined, cells };
+  return said({ name, change, direction, unit: t.unit || undefined, where: where.join(" · ") || undefined, cells });
+}
+
+/**
+ * "Added 2.3 to 5.5 psi to Boost at 1.25–1.75 s on row 12": the action from
+ * the direction, the size as a plain amount, then where — time and RPM as
+ * "at", a knob position as the table row it picks.
+ */
+function sentenceFor(d: TuneDetail, t: NonNullable<TuneChange["table"]>, deltas: number[], places: AxisRange[], shift: string | null): { sentence: string; amount: string } {
+  const unit = !t.unit ? "" : t.unit === "°" ? "°" : t.unit === "%" ? "%" : ` ${t.unit}`;
+  const fmt = (v: number) => v.toLocaleString("en-US", { minimumFractionDigits: t.dp, maximumFractionDigits: t.dp });
+  // Steps that round away at this precision aren't part of the size.
+  const sizes = deltas.map(Math.abs).filter((v) => fmt(v) !== fmt(0));
+  if (sizes.length === 0) sizes.push(...deltas.map(Math.abs));
+  const lo = Math.min(...sizes);
+  const hi = Math.max(...sizes);
+  const span = fmt(lo) === fmt(hi) ? fmt(lo) : `${fmt(lo)} to ${fmt(hi)}`;
+  const object = shift ? `the ${shift}` : d.name;
+  const at: string[] = [];
+  const rows: string[] = [];
+  for (const r of places) {
+    const range = r.from === r.to ? r.from : `${r.from}–${r.to}`;
+    if (/knob/i.test(r.name)) rows.push(r.from === r.to ? `row ${range}` : `rows ${range}`);
+    else if (/^time$/i.test(r.name)) at.push(`${range} s`);
+    else if (selfNamed(r)) at.push(`${range} RPM`);
+    else if (!(/^throttle$/i.test(r.name) && r.from === r.to)) at.push(`${r.name} ${range}${r.unit ? ` ${r.unit}` : ""}`);
+  }
+  const where = [at.length ? `at ${at.join(", ")}` : "", rows.length ? `on ${rows.join(", ")}` : ""].filter(Boolean).join(" ");
+  if (d.direction === "up") {
+    const amount = `${span}${unit}`;
+    return { amount, sentence: `Added ${amount} to ${object}${where ? ` ${where}` : ""}` };
+  }
+  if (d.direction === "down") {
+    const amount = `${span}${unit}`;
+    return { amount, sentence: `Took ${amount} out of ${object}${where ? ` ${where}` : ""}` };
+  }
+  const amount = `${deltaSpan(t)}${unit}`;
+  return { amount, sentence: `Changed ${object} by ${amount}${where ? ` ${where}` : ""}` };
 }
 
 /**
@@ -213,11 +262,10 @@ export function tuneChangeEntry(changes: TuneChange[]): { title: string; items: 
     .sort((a, b) => a.rank - b.rank || a.c.name.localeCompare(b.c.name));
   const areas = [...new Set(ranked.map((r) => r.area))];
   const details = ranked.map(({ c }) => detailOf(c));
+  // The plain line is the sentence, with the cells' old and new values after it.
   const items = details.map((d) => {
-    const single = d.cells?.length === 1 && !d.cells[0].at ? d.cells[0] : null;
-    const change = single ? `${single.from} → ${single.to}${d.change.replace(/^[^\s]+/, "")} (${single.step})` : d.change;
-    const cells = d.cells && !single ? d.cells.map((x) => `${x.at} ${x.from} → ${x.to}`).join(", ") : null;
-    return `${d.name}: ${[change, d.where, cells].filter(Boolean).join(" · ")}`;
+    const cells = d.cells?.map((x) => `${x.at ? `${x.at} ` : ""}${x.from} → ${x.to}`).join(", ");
+    return `${d.sentence ?? `${d.name}: ${d.change}`}${cells ? ` (${cells})` : ""}`;
   });
   return { title: `${areas.slice(0, 3).join(", ")}${areas.length > 3 ? " and more" : ""}`, items, details };
 }

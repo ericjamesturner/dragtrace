@@ -5,6 +5,10 @@ import { v } from "convex/values";
 /** One setting in a tune change. */
 export const changeDetail = v.object({
   name: v.string(),
+  /** Said the way a tuner writes it: "Added 2.3 to 5.5 psi to Boost at 1.25–1.75 s on row 12". */
+  sentence: v.optional(v.string()),
+  /** The part of the sentence shown bold. */
+  amount: v.optional(v.string()),
   /** The step, "+2.3 to +5.5 psi", or "on → off" for a setting. */
   change: v.string(),
   /** "up" when it went up, "down" when down; absent for text or mixed. */
