@@ -322,6 +322,12 @@ export type Anomaly =
   | { kind: "limiter"; row: string; limiter: LimiterReading }
   /** A sensor that read fine on the line reported a fault during the pass. */
   | { kind: "fault"; row: string; fault: FaultReading }
+  /** The driveshaft ran well ahead of usual early on with no better a 60': the tires spun. */
+  | { kind: "spin"; row: string; ahead: number; at: number }
+  /** The last gear's RPM-to-driveshaft ratio ran well above usual: a converter or clutch slipping. */
+  | { kind: "slip"; row: string; slip: SlipReading; usual: number }
+  /** An injector stage ran near the end of its time. */
+  | { kind: "duty"; row: string; injector: InjectorReading }
   /** A wideband ran well lean of the target for a while. */
   | { kind: "lean"; row: string; label: string; seconds: number; at: number; worst: number }
   /** A wideband averaged lean of the target over the pass — judged without any history. */
@@ -404,6 +410,80 @@ export interface PassChecks {
   boost?: BoostReading | null;
   limiter?: LimiterReading | null;
   faults?: FaultReading[] | null;
+  /** Driveshaft speed after the launch (from the preview) and the slip's 60', for tire spin. */
+  driveshaft?: { after: number; rpm: number }[] | null;
+  sixtyFt?: number;
+  slip?: SlipReading | null;
+  injectors?: InjectorReading[] | null;
+}
+
+/**
+ * Engine RPM over driveshaft RPM in the last gear, from just after the last
+ * shift until the throttle comes off (preview version 18). A converter or a
+ * clutch that's slipping more than usual raises it.
+ */
+export interface SlipReading {
+  ratio: number;
+  /** Seconds after the launch the stretch started, and how many gears in. */
+  from: number;
+  shifts: number;
+}
+
+/** An injector stage's highest duty cycle on the pass, in percent (preview version 18). */
+export interface InjectorReading {
+  name: string;
+  max: number;
+  at: number;
+}
+
+/** After a shift, the converter and the RPM settle for this long before the ratio means anything. */
+const SLIP_SETTLE_S = 0.4;
+
+export function readSlip(
+  session: LogSession,
+  launchAt: number,
+  passEnd: number,
+  lastShiftAt: number | null,
+  shifts: number,
+): SlipReading | null {
+  const rpm = session.channels.get("RPM");
+  const ds = session.channels.get("Driveshaft RPM");
+  if (!rpm || !ds) return null;
+  const from = launchAt + (lastShiftAt ?? 1) + SLIP_SETTLE_S;
+  if (passEnd - from < 0.3) return null;
+  const ts = session.timestamps;
+  const ratios: number[] = [];
+  for (let i = lowerBound(ts, from); i < ts.length && ts[i] <= passEnd; i++) {
+    if (Number.isFinite(rpm[i]) && Number.isFinite(ds[i]) && ds[i] > 500) ratios.push(rpm[i] / ds[i]);
+  }
+  if (ratios.length < 20) return null;
+  return { ratio: median(ratios), from: from - launchAt, shifts };
+}
+
+/** Highest duty cycle channels, one per injector stage. */
+const INJECTOR_DUTY = /inject.*(highest|max).*duty|inject.*duty.*(highest|max)/i;
+
+export function readInjectors(parsed: ParsedLog, session: LogSession, launchAt: number, passEnd: number): InjectorReading[] {
+  const ts = session.timestamps;
+  const out: InjectorReading[] = [];
+  for (const def of parsed.channelDefs) {
+    if (!INJECTOR_DUTY.test(def.name)) continue;
+    const vals = session.channels.get(def.name);
+    if (!vals) continue;
+    let max = -Infinity;
+    let at = 0;
+    for (let i = lowerBound(ts, launchAt); i < ts.length && ts[i] <= passEnd; i++) {
+      // Held for SMOOTH_S, so one spiky sample doesn't count.
+      let lo = Infinity;
+      for (let j = i; j < ts.length && ts[j] <= ts[i] + SMOOTH_S; j++) if (Number.isFinite(vals[j])) lo = Math.min(lo, vals[j]);
+      if (Number.isFinite(lo) && lo > max) {
+        max = lo;
+        at = ts[i] - launchAt;
+      }
+    }
+    if (Number.isFinite(max) && max > 0) out.push({ name: def.name, max, at });
+  }
+  return out;
 }
 
 const MAP_NAME = /^(manifold (absolute )?pressure|map)$/i;
@@ -653,8 +733,58 @@ export function findAnomalies(pass: PassChecks, refs: PassChecks[]): Anomaly[] {
 
   // A sensor dropping out mid-pass is worth a look every time.
   for (const f of pass.faults ?? []) out.push({ kind: "fault", row: "Sensor faults", fault: f });
+
+  const spin = spinOf(pass, refs);
+  if (spin && spin.ahead >= SPIN_AHEAD && pass.sixtyFt !== undefined && spin.usual60 !== undefined && pass.sixtyFt >= spin.usual60 - SPIN_60_SLACK) {
+    out.push({ kind: "spin", row: "Tire spin", ahead: spin.ahead, at: spin.at });
+  }
+
+  if (pass.slip) {
+    const ratios = refs.flatMap((r) => (r.slip && r.slip.shifts === pass.slip!.shifts ? [r.slip.ratio] : []));
+    if (ratios.length >= MIN_REFS) {
+      const usual = median(ratios);
+      const spread = 1.4826 * median(ratios.map((x) => Math.abs(x - usual)));
+      if (pass.slip.ratio - usual > Math.max(3 * spread, usual * SLIP_MORE)) out.push({ kind: "slip", row: "Converter slip", slip: pass.slip, usual });
+    }
+  }
+
+  for (const inj of pass.injectors ?? []) if (inj.max >= DUTY_LIMIT) out.push({ kind: "duty", row: "Injector duty", injector: inj });
   return out;
 }
+
+/**
+ * How far the driveshaft ran ahead of this vehicle's usual speed at the same
+ * moment, between SPIN_FROM_S and SPIN_TO_S, at its furthest. Before that the
+ * shaft is turning a few hundred RPM and the percentages are noise.
+ */
+export function spinOf(pass: PassChecks, refs: PassChecks[]): { ahead: number; at: number; usual60?: number } | null {
+  if (!pass.driveshaft?.length) return null;
+  let best: { ahead: number; at: number } | null = null;
+  for (const d of pass.driveshaft) {
+    if (d.after < SPIN_FROM_S - 1e-9 || d.after > SPIN_TO_S + 1e-9) continue;
+    const same = refs.flatMap((r) => r.driveshaft?.filter((x) => Math.abs(x.after - d.after) < 1e-6).map((x) => x.rpm) ?? []);
+    if (same.length < MIN_REFS) continue;
+    const ahead = d.rpm / median(same) - 1;
+    if (!best || ahead > best.ahead) best = { ahead, at: d.after };
+  }
+  if (!best) return null;
+  const sixties = refs.flatMap((r) => (r.sixtyFt !== undefined ? [r.sixtyFt] : []));
+  return { ...best, usual60: sixties.length >= MIN_REFS ? median(sixties) : undefined };
+}
+
+const SPIN_FROM_S = 0.5;
+const SPIN_TO_S = 1.5;
+/**
+ * The driveshaft this far (7%) ahead of usual, with a 60' no quicker than usual
+ * (to within SPIN_60_SLACK). Calibrated on two vehicles: the truck pass that
+ * felt a spin ran 9% ahead, the clean ones 0–5%.
+ */
+const SPIN_AHEAD = 0.07;
+const SPIN_60_SLACK = 0.003;
+/** The last gear's ratio this much (3%) above usual. */
+const SLIP_MORE = 0.03;
+/** An injector stage held this busy is out of room. */
+const DUTY_LIMIT = 90;
 
 /** Peak boost this far (2 psi) from its usual, either way. */
 const BOOST_OFF_KPA = 14;

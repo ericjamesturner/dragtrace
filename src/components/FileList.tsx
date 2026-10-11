@@ -502,17 +502,33 @@ export function FileList({
 
   // The vehicle's counted passes' pressure and battery levels: what the
   // anomaly check calls usual. Every event the car has run, not just this one.
+  // Every pass's slip across the vehicle's events: the 60' the spin check compares with.
+  const slipsByVehicleFile = useMemo(() => {
+    const out = new Map<string, Doc<"timeslips">>();
+    for (const s of vehicleSlips ?? []) if (!out.has(s.fileId)) out.set(s.fileId, s);
+    return out;
+  }, [vehicleSlips]);
   const levelPool = useMemo(() => {
     const out = new Map<string, PassChecks>();
     for (const f of vehicleFiles ?? []) {
       if (f.excluded) continue;
       const p = parsePreview(f.preview);
-      if (p?.levels?.length || p?.cylinders?.length || p?.boost || p?.limiter) {
-        out.set(f._id, { levels: p.levels ?? [], cylinders: p.cylinders ?? [], boost: p.boost, limiter: p.limiter, faults: p.faults });
+      if (p?.levels?.length || p?.cylinders?.length || p?.boost || p?.limiter || p?.driveshaft?.length) {
+        out.set(f._id, {
+          levels: p.levels ?? [],
+          cylinders: p.cylinders ?? [],
+          boost: p.boost,
+          limiter: p.limiter,
+          faults: p.faults,
+          driveshaft: p.driveshaft,
+          sixtyFt: slipsByVehicleFile.get(f._id)?.sixtyFt,
+          slip: p.slip,
+          injectors: p.injectors,
+        });
       }
     }
     return out;
-  }, [vehicleFiles]);
+  }, [vehicleFiles, slipsByVehicleFile]);
 
   // The event's best value per metric, drawn in green on whichever card
   // holds it. With a single slip in the event everything would be "best",

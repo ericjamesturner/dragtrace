@@ -104,3 +104,47 @@ function lowerBound(ts: Float64Array, t: number): number {
   }
   return lo;
 }
+
+/**
+ * The delay box as the log shows it: from the driver letting go of the
+ * transbrake button to the transbrake letting go (preview version 18). Null
+ * without both channels, or without a release before the launch.
+ */
+export interface BoxReading {
+  /** Seconds from the last button release to the transbrake release. */
+  delay: number;
+  button: string;
+}
+
+const BOX_BUTTON = /trans-?brake button/i;
+const BOX_BRAKE = /trans-?brake (input )?state/i;
+/** The button is let go within this long of the transbrake releasing, or it's not this launch's. */
+const BOX_MAX_S = 6;
+
+export function readBox(parsed: ParsedLog, session: LogSession, launchAt: number): BoxReading | null {
+  const buttons = parsed.channelDefs.filter((d) => BOX_BUTTON.test(d.name));
+  // The switch state is the button itself; an output that copies it is the fallback.
+  const buttonDef = buttons.find((d) => /switch state/i.test(d.name)) ?? buttons[0];
+  const brakeDef =
+    parsed.channelDefs.find((d) => /trans-?brake input state/i.test(d.name)) ?? parsed.channelDefs.find((d) => BOX_BRAKE.test(d.name));
+  const button = buttonDef ? session.channels.get(buttonDef.name) : undefined;
+  const brake = brakeDef ? session.channels.get(brakeDef.name) : undefined;
+  if (!buttonDef || !button || !brake) return null;
+  const ts = session.timestamps;
+  // The transbrake's own release nearest the launch.
+  let release: number | null = null;
+  for (let i = lowerBound(ts, launchAt - 0.3); i < ts.length && ts[i] <= launchAt + 0.3; i++) {
+    if (i > 0 && brake[i - 1] > 0.5 && brake[i] <= 0.5) {
+      release = ts[i];
+      break;
+    }
+  }
+  if (release === null) return null;
+  // The last time the button was let go before that.
+  let letGo: number | null = null;
+  for (let i = lowerBound(ts, release - BOX_MAX_S); i < ts.length && ts[i] <= release; i++) {
+    if (i > 0 && button[i - 1] > 0.5 && button[i] <= 0.5) letGo = ts[i];
+  }
+  return letGo === null ? null : { delay: release - letGo, button: buttonDef.name };
+}
+

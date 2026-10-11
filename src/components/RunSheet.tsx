@@ -10,12 +10,12 @@ import { estimatePowerFromTimeslip, type WeightPowerEstimates } from "@/lib/drag
 import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
 import { convertForDisplay, getDisplayPrecision, getDisplayUnit, type UnitOverrides, type UnitSystem } from "@/lib/units";
 import { setHealthFocus, type HealthFocus } from "@/lib/health-focus";
-import { checksCut, findAnomalies, isCheckedLevel, offsetsOf, spreadOf, targetRatios, TARGET_OFF, type Anomaly, type BoostReading, type CylinderGroup, type FaultReading, type LimiterReading, type PassChecks, type PassLevel } from "@/lib/anomalies";
+import { checksCut, findAnomalies, isCheckedLevel, offsetsOf, spinOf, spreadOf, targetRatios, TARGET_OFF, type InjectorReading, type SlipReading, type Anomaly, type BoostReading, type CylinderGroup, type FaultReading, type LimiterReading, type PassChecks, type PassLevel } from "@/lib/anomalies";
 import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel } from "@/lib/changes";
 import { timeFromName } from "@/lib/tune-changes";
 import { parsePreview } from "@/lib/preview";
-import { DRIVESHAFT_TIMES, type DriveshaftReading, type ShiftReading } from "@/lib/pass-readings";
+import { DRIVESHAFT_TIMES, type BoxReading, type DriveshaftReading, type ShiftReading } from "@/lib/pass-readings";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -243,6 +243,11 @@ interface Col {
   boost: BoostReading | null;
   limiter: LimiterReading | null;
   faults: FaultReading[] | null;
+  /** The last gear's RPM-to-driveshaft ratio. */
+  convSlip: SlipReading | null;
+  injectors: InjectorReading[] | null;
+  /** The delay box as the log measured it. */
+  box: BoxReading | null;
   /** The health checks stopped short of the finish: the throttle came off early. */
   checksCut: number | null;
   /** Seconds after the launch the health checks ran to. */
@@ -260,6 +265,9 @@ interface Col {
 }
 
 const SPREAD_PCT_KEY = "dragtrace.runSheet.spreadPct";
+
+/** The log's box delay and the slip's agree to within this (the log samples every few ms). */
+const BOX_MATCH_S = 0.01;
 
 /** Tailwind green-500: a pass that counts. */
 const COUNTS_GREEN = "oklch(72.3% 0.219 149.579)";
@@ -510,6 +518,9 @@ export function RunSheet({
           boost: preview?.boost ?? null,
           limiter: preview?.limiter ?? null,
           faults: preview?.faults ?? null,
+          convSlip: preview?.slip ?? null,
+          injectors: preview?.injectors ?? null,
+          box: preview?.box ?? null,
           anomalies: findAnomalies(
             {
               levels: preview?.levels ?? [],
@@ -517,6 +528,10 @@ export function RunSheet({
               boost: preview?.boost,
               limiter: preview?.limiter,
               faults: preview?.faults,
+              driveshaft: preview?.driveshaft,
+              sixtyFt: slip?.sixtyFt,
+              slip: preview?.slip,
+              injectors: preview?.injectors,
             },
             [...levelPool].filter(([id]) => id !== file._id).map(([, checks]) => checks),
           ),
@@ -661,6 +676,27 @@ export function RunSheet({
             key: "box",
             label: "Box",
             cell: (c) => c.slip?.delayBox ?? DASH,
+          },
+          {
+            // What the log says the box did: button let go to transbrake let go.
+            // Red when it doesn't match the box written on the slip.
+            key: "box-log",
+            label: "Box Log",
+            cell: (c) => {
+              if (!c.box) return DASH;
+              const text = c.box.delay.toFixed(3);
+              const slipBox = c.slip?.delayBox;
+              const off = slipBox !== undefined && Math.abs(c.box.delay - slipBox) > BOX_MATCH_S;
+              return (
+                <Tip
+                  content={`The log: ${c.box.delay.toFixed(3)} s from letting go of the transbrake button to the transbrake letting go.${
+                    slipBox !== undefined ? (off ? ` The slip says ${slipBox} — they don't match.` : ` Matches the slip's ${slipBox}.`) : ""
+                  }`}
+                >
+                  <span className={off ? "font-bold text-red-400" : ""}>{text}</span>
+                </Tip>
+              );
+            },
           },
           metric("rt", "R.T."),
           {
@@ -1168,6 +1204,21 @@ export function RunSheet({
               text: `${a.limiter.seconds.toFixed(2)}s`,
               tip: `${a.limiter.name} was cutting for ${a.limiter.seconds.toFixed(2)} s, from ${a.limiter.at.toFixed(2)} s.`,
             };
+          case "spin":
+            return {
+              text: `+${(a.ahead * 100).toFixed(1)}%`,
+              tip: `The driveshaft ran ${(a.ahead * 100).toFixed(1)}% ahead of usual at ${a.at.toFixed(2)} s, but the 60' was no quicker — the tires spun.`,
+            };
+          case "slip":
+            return {
+              text: a.slip.ratio.toFixed(3),
+              tip: `The last gear ran ${a.slip.ratio.toFixed(3)} engine turns per driveshaft turn (normally ${a.usual.toFixed(3)}) — slipping more than usual.`,
+            };
+          case "duty":
+            return {
+              text: `${a.injector.max.toFixed(0)}%`,
+              tip: `${a.injector.name} reached ${a.injector.max.toFixed(1)}% at ${a.injector.at.toFixed(2)} s — out of room.`,
+            };
           case "fault":
             return {
               text: shortName(a.fault.name),
@@ -1246,7 +1297,7 @@ export function RunSheet({
       // Health is grouped by system, in this order; a group with nothing to
       // show is left out. Labels inside a group drop its name: "Temp", not
       // "Coolant temp".
-      const GROUPS = ["Fuel", "Oil", "Coolant", "Trans", "Boost", "Engine", "Wideband", "EGT"] as const;
+      const GROUPS = ["Fuel", "Oil", "Coolant", "Trans", "Traction", "Boost", "Engine", "Wideband", "EGT"] as const;
       type Group = (typeof GROUPS)[number];
       const grouped = new Map<Group, Row[]>(GROUPS.map((g) => [g, []]));
       const put = (g: Group, ...rows: Row[]) => grouped.get(g)!.push(...rows);
@@ -1393,6 +1444,66 @@ export function RunSheet({
               c.boost?.targetName
                 ? { channels: [c.boost.mapName, c.boost.targetName], ...wholeRunOf(c) }
                 : null,
+          ),
+        );
+      }
+      if (cols.some((c) => c.injectors?.length)) {
+        put(
+          "Fuel",
+          healthRow(
+            "Injector duty",
+            "Inj Duty",
+            [
+              "The busiest injector stage's highest duty cycle, held 25 ms, from the launch until the throttle comes off.",
+              "Red at 90% or more — the injectors are out of room, and any more power runs lean.",
+            ],
+            (c) => {
+              const top = c.injectors?.length ? c.injectors.reduce((a, b) => (b.max > a.max ? b : a)) : null;
+              return top ? { text: `${top.max.toFixed(0)}%`, tip: `${top.name}: ${top.max.toFixed(1)}% at ${top.at.toFixed(2)} s.` } : null;
+            },
+            (c) => {
+              const top = c.injectors?.length ? c.injectors.reduce((a, b) => (b.max > a.max ? b : a)) : null;
+              return top ? { channels: c.injectors!.map((i) => i.name), from: Math.max(-0.5, top.at - 1), to: top.at + 1, at: top.at } : null;
+            },
+          ),
+        );
+      }
+      if (cols.some((c) => c.convSlip)) {
+        put(
+          "Trans",
+          healthRow(
+            "Converter slip",
+            "Conv Slip",
+            [
+              "Engine RPM over driveshaft RPM in the last gear, from just after the last shift until the throttle comes off.",
+              "Red when it runs 3% or more above its usual — a converter or a clutch slipping more than it should.",
+              usualNote,
+            ],
+            (c) => (c.convSlip ? { text: c.convSlip.ratio.toFixed(3), tip: `${c.convSlip.ratio.toFixed(3)} engine turns per driveshaft turn, from ${c.convSlip.from.toFixed(2)} s.` } : null),
+            (c) => (c.convSlip ? { channels: ["RPM", "Driveshaft RPM"], from: c.convSlip.from, to: c.checksTo ?? c.convSlip.from + 2 } : null),
+          ),
+        );
+      }
+      if (cols.some((c) => c.driveshaft.length)) {
+        const others = (c: Col) => [...levelPool].filter(([id]) => id !== c.file._id).map(([, x]) => x);
+        put(
+          "Traction",
+          healthRow(
+            "Tire spin",
+            "Tire Spin",
+            [
+              "How far the driveshaft ran ahead of its usual speed at the same moment, from 0.5 s to 1.5 s.",
+              "Red at 7% or more ahead with a 60' no quicker than usual — the tires spun. A real hook comes with a better 60'.",
+              usualNote,
+            ],
+            (c) => {
+              const s = spinOf({ levels: [], cylinders: [], driveshaft: c.driveshaft }, others(c));
+              if (!s) return null;
+              return s.ahead > 0
+                ? { text: `+${(s.ahead * 100).toFixed(1)}%`, tip: `Driveshaft ${(s.ahead * 100).toFixed(1)}% ahead of usual at ${s.at.toFixed(2)} s.` }
+                : { text: "0.0%", tip: "Never ahead of its usual speed." };
+            },
+            (c) => ({ channels: ["Driveshaft RPM", "RPM"], from: 0, to: 2, at: spinOf({ levels: [], cylinders: [], driveshaft: c.driveshaft }, others(c))?.at }),
           ),
         );
       }

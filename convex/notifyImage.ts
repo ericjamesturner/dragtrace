@@ -88,7 +88,16 @@ export const sendLogAlert = internalAction({
 /** The Health check's inputs from a stored preview; null for a preview without them. */
 function checksOf(p: PreviewPayload | null): PassChecks | null {
   if (!p || (!p.levels?.length && !p.cylinders?.length && !p.boost && !p.limiter)) return null;
-  return { levels: p.levels ?? [], cylinders: p.cylinders ?? [], boost: p.boost, limiter: p.limiter, faults: p.faults };
+  return {
+    levels: p.levels ?? [],
+    cylinders: p.cylinders ?? [],
+    boost: p.boost,
+    limiter: p.limiter,
+    faults: p.faults,
+    driveshaft: p.driveshaft,
+    slip: p.slip,
+    injectors: p.injectors,
+  };
 }
 
 function parseOverrides(raw: string | null): UnitOverrides {

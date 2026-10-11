@@ -55,6 +55,12 @@ export function healthLines(pass: PassChecks, refs: PassChecks[], system: UnitSy
         return `Limiter cut for ${a.limiter.seconds.toFixed(2)} s`;
       case "fault":
         return `${a.fault.name} sensor fault`;
+      case "spin":
+        return `Tire spin: driveshaft ${pct(a.ahead)} ahead of usual at ${a.at.toFixed(2)} s`;
+      case "slip":
+        return `Converter slip: ${a.slip.ratio.toFixed(3)} (usually ${a.usual.toFixed(3)})`;
+      case "duty":
+        return `${a.injector.name} at ${a.injector.max.toFixed(0)}%`;
     }
   };
   return [...new Set(findAnomalies(pass, refs).map(line))];

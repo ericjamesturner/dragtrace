@@ -1,6 +1,6 @@
 import type { KnobReading, LaunchReading } from "./launch-readings";
-import type { DriveshaftReading, ShiftReading } from "./pass-readings";
-import type { BoostReading, CylinderGroup, FaultReading, LimiterReading, PassLevel } from "./anomalies";
+import type { BoxReading, DriveshaftReading, ShiftReading } from "./pass-readings";
+import type { BoostReading, CylinderGroup, FaultReading, InjectorReading, LimiterReading, PassLevel, SlipReading } from "./anomalies";
 
 /**
  * The precomputed shape of a pass, stored on the file when its dashboard
@@ -34,6 +34,10 @@ export interface PreviewPayload {
   boost?: BoostReading | null;
   limiter?: LimiterReading | null;
   faults?: FaultReading[] | null;
+  /** Stored from preview version 18. */
+  slip?: SlipReading | null;
+  injectors?: InjectorReading[] | null;
+  box?: BoxReading | null;
 }
 
 export function parsePreview(raw: string | undefined | null): PreviewPayload | null {
