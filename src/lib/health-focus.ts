@@ -1,7 +1,7 @@
 import type { PageConfig } from "./viewer-types";
 import type { ParsedLog } from "./log-types";
 import type { Id } from "../../convex/_generated/dataModel";
-import { cylinderChannels, targetChannel } from "./anomalies";
+import { cylinderChannels, readLevels, targetChannel, wideOpenEnd } from "./anomalies";
 
 /**
  * A Health value clicked on the run sheet, handed to the viewer: which pass,
@@ -59,18 +59,72 @@ export function clearHealthFocus() {
 }
 
 
-export const HEALTH_PAGE_ID = "__health";
+/** The vehicle's permanent Health tab, and its traces, by fixed id so they can be found and topped up. */
+export const HEALTH_PAGE_ID = "page-health";
+const TRACE_IDS = {
+  pressure: "health-pressures",
+  battery: "health-battery",
+  lambda: "health-widebands",
+  egt: "health-egts",
+} as const;
+
+type HealthLog = {
+  fileId: Id<"files">;
+  parsed: ParsedLog;
+  activeSessionIndex: number;
+  raceStartTime: number | null;
+};
 
 /**
- * The temporary page for a focus: one trace with the channels it names that
- * this log has, the first carrying a marker at the moment. Null when the log
- * has none of them.
+ * Every health channel of the loaded logs, one trace per kind so pressures,
+ * volts and lambda each get their own scale: the supply pressures the checks
+ * watch, the battery, the widebands with their target, and any EGTs. The
+ * pressures are the ones the run sheet shows — read off the log the same
+ * way, so a sensor on an unused system stays out. Null when no log has any.
  */
-export function healthPage(
-  focus: HealthFocus,
-  log: { fileId: Id<"files">; parsed: ParsedLog },
-): PageConfig | null {
-  const defs = log.parsed.channelDefs;
+export function buildHealthPage(logs: HealthLog[]): PageConfig | null {
+  const byTrace: Record<keyof typeof TRACE_IDS, { logFileId: Id<"files">; channelName: string }[]> = {
+    pressure: [],
+    battery: [],
+    lambda: [],
+    egt: [],
+  };
+  for (const log of logs) {
+    const session = log.parsed.sessions[log.activeSessionIndex];
+    if (session && log.raceStartTime != null) {
+      const end = wideOpenEnd(log.parsed, session, log.raceStartTime, null);
+      for (const l of readLevels(log.parsed, session, log.raceStartTime, end)) {
+        const battery = l.quantitySlug !== "pressure";
+        if (!battery && l.base < 70) continue;
+        byTrace[battery ? "battery" : "pressure"].push({ logFileId: log.fileId, channelName: l.name });
+      }
+    }
+    const defs = log.parsed.channelDefs;
+    const widebands = cylinderChannels(defs, "lambda").map((m) => m.name);
+    const target = targetChannel(defs);
+    for (const name of target && widebands.length ? [...widebands, target] : widebands) {
+      byTrace.lambda.push({ logFileId: log.fileId, channelName: name });
+    }
+    for (const m of cylinderChannels(defs, "egt")) byTrace.egt.push({ logFileId: log.fileId, channelName: m.name });
+  }
+  const traces = (Object.keys(TRACE_IDS) as (keyof typeof TRACE_IDS)[])
+    .filter((k) => byTrace[k].length)
+    .map((k) => ({ id: TRACE_IDS[k], channels: byTrace[k], height: 200 }));
+  return traces.length ? { id: HEALTH_PAGE_ID, label: "Health", traces } : null;
+}
+
+/** Whether `config` already has every channel of `page` (so nothing needs adding). */
+export function hasHealthPage(pages: PageConfig[], page: PageConfig): boolean {
+  const have = pages.find((p) => p.id === page.id);
+  if (!have) return false;
+  return page.traces.every((t) => {
+    const ht = have.traces.find((x) => x.id === t.id);
+    return !!ht && t.channels.every((c) => ht.channels.some((h) => h.logFileId === c.logFileId && h.channelName === c.channelName));
+  });
+}
+
+/** The channels a focus is about, by name, for one log: the named ones, or the cylinders (and target) it picks. */
+export function focusChannelNames(focus: HealthFocus, defs: { name: string; quantitySlug?: string }[]): string[] {
   let names = focus.channels ?? [];
   if (focus.cylinders) {
     const { kind, labels, withTarget } = focus.cylinders;
@@ -80,22 +134,5 @@ export function healthPage(
     const target = withTarget ? targetChannel(defs) : undefined;
     if (target) names.push(target);
   }
-  names = names.filter((n) => defs.some((d) => d.name === n));
-  if (!names.length) return null;
-  return {
-    id: HEALTH_PAGE_ID,
-    label: `Health: ${focus.label}`,
-    traces: [
-      {
-        id: `${HEALTH_PAGE_ID}-trace`,
-        height: 300,
-        channels: names.map((channelName, i) => ({
-          logFileId: log.fileId,
-          channelName,
-          // Hundredths, as the ruler under the chart labels it: 0.43, not 0.4259999.
-          ...(i === 0 && focus.at !== undefined ? { markers: { times: [Math.round(focus.at * 100) / 100] } } : {}),
-        })),
-      },
-    ],
-  };
+  return names.filter((n) => defs.some((d) => d.name === n));
 }

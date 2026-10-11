@@ -36,7 +36,7 @@ import { TracePanel } from "./viewer/TracePanel";
 import { RecordingPicker } from "./viewer/RecordingPicker";
 import { Share2Icon } from "lucide-react";
 import { fitPassWindow, inferPassWindow } from "@/lib/pass-window";
-import { HEALTH_PAGE_ID, clearHealthFocus, healthPage, readHealthFocus, type HealthFocus } from "@/lib/health-focus";
+import { HEALTH_PAGE_ID, buildHealthPage, clearHealthFocus, focusChannelNames, hasHealthPage, readHealthFocus, type HealthFocus } from "@/lib/health-focus";
 
 interface Props {
   vehicleId: Id<"vehicles">;
@@ -316,22 +316,56 @@ export function LogViewerReady({
   }, [fileIds, logs]);
 
   // Compute effective traces
-  // A Health value clicked on the run sheet opens here as a temporary page:
-  // shown on top of the saved layout, never written into it. Switching or
-  // closing the tab drops it.
+  // The vehicle's Health tab: kept present and holding every loaded log's
+  // health channels. Topped up, never pruned — what's on it is the racer's.
+  const wantedHealthPage = useMemo(() => (publicMode ? null : buildHealthPage(logs)), [publicMode, logs]);
+  // Deleting the tab sticks for this visit; it comes back the next time a log opens.
+  const healthRemovedRef = useRef(false);
+  useEffect(() => {
+    if (!wantedHealthPage || healthRemovedRef.current || hasHealthPage(config.pages, wantedHealthPage)) return;
+    dispatch({ type: "upsertHealthPage", page: wantedHealthPage });
+  }, [wantedHealthPage, config.pages]);
+
+  // A Health value clicked on the run sheet: go to the tab with just that
+  // channel on. The switches it sets are saved like any; the marker and the
+  // zoom that go with it are on screen only, until the tab is left.
   const [healthFocus, setHealthFocus] = useState<HealthFocus | null>(() =>
     publicMode ? null : readHealthFocus(fileIds as string[]),
   );
   useEffect(() => clearHealthFocus(), []);
+  const [healthFocused, setHealthFocused] = useState(false);
+  useEffect(() => {
+    if (!healthFocus || healthFocused || !wantedHealthPage || !hasHealthPage(config.pages, wantedHealthPage)) return;
+    const show = logs.flatMap((l) => focusChannelNames(healthFocus, l.parsed.channelDefs).map((n) => `${l.fileId}:${n}`));
+    dispatch({ type: "focusHealth", pageId: HEALTH_PAGE_ID, show });
+    setHealthFocused(true);
+  }, [healthFocus, healthFocused, wantedHealthPage, config.pages, logs]);
   const healthLog = healthFocus ? logs.find((l) => l.fileId === healthFocus.fileId) : undefined;
-  const healthTab = useMemo(
-    () => (healthFocus && healthLog ? healthPage(healthFocus, healthLog) : null),
-    [healthFocus, healthLog],
-  );
-  const viewConfig = useMemo(
-    () => (healthTab ? { ...config, pages: [...config.pages, healthTab], activePageId: HEALTH_PAGE_ID } : config),
-    [config, healthTab],
-  );
+  const focusing = healthFocused && !!healthFocus && config.activePageId === HEALTH_PAGE_ID;
+  const viewConfig = useMemo(() => {
+    if (!focusing || !healthFocus || healthFocus.at === undefined || !healthLog) return config;
+    // Hundredths, as the ruler under the chart labels it: 0.43, not 0.4259999.
+    const at = Math.round(healthFocus.at * 100) / 100;
+    const marked = focusChannelNames(healthFocus, healthLog.parsed.channelDefs)[0];
+    return {
+      ...config,
+      pages: config.pages.map((p) =>
+        p.id !== HEALTH_PAGE_ID
+          ? p
+          : {
+              ...p,
+              traces: p.traces.map((t) => ({
+                ...t,
+                channels: t.channels.map((c) =>
+                  c.logFileId === healthLog.fileId && c.channelName === marked
+                    ? { ...c, markers: { ...c.markers, times: [...(c.markers?.times ?? []), at] } }
+                    : c,
+                ),
+              })),
+            },
+      ),
+    };
+  }, [focusing, healthFocus, healthLog, config]);
   const effectiveTraces = useMemo(() => getEffectiveTraces(viewConfig), [viewConfig]);
   const pinnedFromOtherIds = useMemo(() => getPinnedFromOtherIds(viewConfig), [viewConfig]);
 
@@ -519,20 +553,17 @@ export function LogViewerReady({
     [logs, recordingTimeslips, alignment.offsets, showTimeslip],
   );
 
-  // The Health page's window, on the viewer's clock: the log's launch plus
-  // its alignment offset, then the focus's seconds either side. Panning it
-  // stays in this page and is never saved.
+  // The focus opens on the whole pass, as "Fit to pass" frames it. Panning
+  // there stays on screen until the tab is left, and isn't saved.
   const [healthZoomMoved, setHealthZoomMoved] = useState<[number, number] | null>(null);
-  // Opens on the whole pass, as "Fit to pass" frames it, with the marker
-  // showing the moment; the stretch the focus names is the fallback.
   const healthZoom = useMemo<[number, number] | null>(() => {
-    if (!healthTab || !healthFocus || !healthLog) return null;
+    if (!focusing || !healthFocus || !healthLog) return null;
     const pass = fitPassWindow(timeslipZones, alignment.globalRange, inferPassWindow(logs, alignment.offsets, alignment.globalRange));
     if (pass) return pass;
     if (healthLog.raceStartTime == null) return null;
     const launch = healthLog.raceStartTime + (alignment.offsets.get(healthLog.fileId) ?? 0);
     return [launch + healthFocus.from, launch + healthFocus.to];
-  }, [healthTab, healthFocus, healthLog, timeslipZones, logs, alignment]);
+  }, [focusing, healthFocus, healthLog, timeslipZones, logs, alignment]);
   const closeHealth = useCallback(() => {
     setHealthFocus(null);
     setHealthZoomMoved(null);
@@ -713,18 +744,23 @@ export function LogViewerReady({
           pages={viewConfig.pages}
           activePageId={viewConfig.activePageId}
           onAddPage={() => dispatch({ type: "addPage" })}
-          onRemovePage={(pageId) => (pageId === HEALTH_PAGE_ID ? closeHealth() : dispatch({ type: "removePage", pageId }))}
+          onRemovePage={(pageId) => {
+            if (pageId === HEALTH_PAGE_ID) {
+              healthRemovedRef.current = true;
+              closeHealth();
+            }
+            dispatch({ type: "removePage", pageId });
+          }}
           onRenamePage={(pageId, label) => dispatch({ type: "renamePage", pageId, label })}
           onSwitchPage={(pageId) => {
-            if (pageId === HEALTH_PAGE_ID) return;
-            if (healthTab) closeHealth();
+            if (pageId !== HEALTH_PAGE_ID && healthFocus) closeHealth();
             dispatch({ type: "switchPage", pageId });
           }}
           onToggleTracePin={(traceId) => dispatch({ type: "toggleTracePin", traceId })}
             syncKey={sync.key}
           offsets={alignment.offsets}
           globalRange={alignment.globalRange}
-          autoFitPass={autoFitPass && !healthTab}
+          autoFitPass={autoFitPass && !focusing}
           activeTraceId={activeTraceId}
           hiddenLogIds={config.hiddenLogIds ?? []}
           mirroredLogIds={config.mirroredLogIds ?? []}
@@ -814,8 +850,8 @@ export function LogViewerReady({
           }
             persistedSelection={config.selection ?? null}
           onPersistSelection={(sel) => dispatch({ type: "setSelection", selection: sel })}
-          persistedZoom={healthTab ? healthZoomMoved ?? healthZoom : config.zoom ?? null}
-          onPersistZoom={(zoom) => (healthTab ? setHealthZoomMoved(zoom) : dispatch({ type: "setZoom", zoom }))}
+          persistedZoom={focusing ? healthZoomMoved ?? healthZoom : config.zoom ?? null}
+          onPersistZoom={(zoom) => (focusing ? setHealthZoomMoved(zoom) : dispatch({ type: "setZoom", zoom }))}
           timeslipZones={timeslipZones}
           expandedTimeslipIds={config.expandedTimeslipIds ?? []}
           onToggleTimeslipExpand={(id) => dispatch({ type: "toggleTimeslipExpand", id })}

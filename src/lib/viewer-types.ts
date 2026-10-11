@@ -308,6 +308,13 @@ export type ViewerAction =
   | { type: "removePage"; pageId: string }
   | { type: "renamePage"; pageId: string; label: string }
   | { type: "switchPage"; pageId: string }
+  /** Add the Health tab, or top up its traces with channels from newly loaded logs. Never removes anything. */
+  | { type: "upsertHealthPage"; page: PageConfig }
+  /**
+   * Go to the Health tab with only `show` (`${logFileId}:${channelName}`) switched
+   * on: every other channel there off, and traces with nothing left showing collapsed.
+   */
+  | { type: "focusHealth"; pageId: string; show: string[] }
   | { type: "toggleTracePin"; traceId: string }
   | { type: "setUnitSystem"; system: UnitSystem }
   | { type: "cycleUnit"; quantitySlug: string }
@@ -414,6 +421,52 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
       };
     case "switchPage":
       return { ...state, activePageId: action.pageId };
+    case "upsertHealthPage": {
+      const existing = state.pages.find((p) => p.id === action.page.id);
+      if (!existing) return { ...state, pages: [...state.pages, action.page] };
+      return {
+        ...state,
+        pages: state.pages.map((p) => {
+          if (p.id !== action.page.id) return p;
+          const traces = [...p.traces];
+          for (const want of action.page.traces) {
+            const i = traces.findIndex((t) => t.id === want.id);
+            if (i < 0) {
+              traces.push(want);
+              continue;
+            }
+            const missing = want.channels.filter(
+              (c) => !traces[i].channels.some((h) => h.logFileId === c.logFileId && h.channelName === c.channelName),
+            );
+            if (missing.length) traces[i] = { ...traces[i], channels: [...traces[i].channels, ...missing] };
+          }
+          return { ...p, traces };
+        }),
+      };
+    }
+    case "focusHealth": {
+      const show = new Set(action.show);
+      return {
+        ...state,
+        activePageId: action.pageId,
+        pages: state.pages.map((p) =>
+          p.id !== action.pageId
+            ? p
+            : {
+                ...p,
+                traces: p.traces.map((t) => {
+                  const keys = t.channels.map((c) => `${c.logFileId}:${c.channelName}`);
+                  const hidden = keys.filter((k) => !show.has(k));
+                  return {
+                    ...t,
+                    hiddenChannels: hidden.length ? hidden : undefined,
+                    collapsed: hidden.length === keys.length,
+                  };
+                }),
+              },
+        ),
+      };
+    }
     case "toggleTracePin":
       return {
         ...state,
