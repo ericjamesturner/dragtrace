@@ -329,7 +329,7 @@ export function RunSheet({
     const metric = (
       key: MetricKey,
       label: string,
-      opts: { breakout?: (s: Doc<"timeslips">) => boolean; bold?: boolean } = {}
+      opts: { bold?: boolean } = {}
     ): Row => ({
       key,
       label,
@@ -338,19 +338,11 @@ export function RunSheet({
         const v = c.slip?.[key];
         if (v === undefined) return DASH;
         if (key === "rt" && v < 0) return <span className="text-red-400">{v}</span>;
-        // The hero ET already shows a breakout in red; here the event best stays green.
+        // Only the hero ET shows a breakout; the rows rank the passes, nothing more.
         if (v === eventBests[key]) return <span className="text-green-400">{v}</span>;
-        if (c.slip && opts.breakout?.(c.slip)) return <span className="text-red-400">{v}</span>;
         return <span style={shadeStyle(key, v, eventRanges)}>{v}</span>;
       },
     });
-    // On an eighth-mile slip the dial is an eighth dial, so the 1/8 clock is
-    // the one that can break out.
-    const quarterBreakout = (s: Doc<"timeslips">) =>
-      s.dialIn !== undefined && s.et !== undefined && s.et < s.dialIn;
-    const eighthBreakout = (s: Doc<"timeslips">) =>
-      s.dialIn !== undefined && s.et === undefined && s.eighthEt !== undefined && s.eighthEt < s.dialIn;
-
     const out: Section[] = [
       {
         key: "start",
@@ -376,13 +368,13 @@ export function RunSheet({
         rows: [
           metric("sixtyFt", "60'"),
           metric("threeThirty", "330'"),
-          metric("eighthEt", "1/8", { breakout: eighthBreakout }),
+          metric("eighthEt", "1/8"),
           metric("eighthMph", eighthOnly ? "MPH" : "1/8 MPH"),
           ...(eighthOnly
             ? []
             : [
                 metric("thousandFt", "1000'"),
-                metric("et", "1/4", { breakout: quarterBreakout, bold: true }),
+                metric("et", "1/4", { bold: true }),
                 metric("mph", "1/4 MPH", { bold: true }),
               ]),
         ],
