@@ -351,8 +351,13 @@ export function RunSheet({
           {
             key: "dial",
             label: "Dial",
-            cell: (c) =>
-              c.slip?.dialIn !== undefined ? <span className="text-amber-300/90">{c.slip.dialIn}</span> : DASH,
+            cell: (c) => {
+              const dial = c.slip?.dialIn;
+              if (dial === undefined) return DASH;
+              // Dials read in hundredths: 4.70, not 4.7. A finer dial keeps its digits.
+              const places = Math.max(2, (String(dial).split(".")[1] ?? "").length);
+              return <span className="text-amber-300/90">{dial.toFixed(places)}</span>;
+            },
           },
           {
             key: "box",
