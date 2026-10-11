@@ -266,10 +266,12 @@ function AvgArrow({ r, c, mean }: { r: Row; c: Col; mean: number | undefined }) 
   const gap = v - mean;
   if (Math.abs(gap) < 0.5 * 10 ** -places) return null;
   const Icon = gap > 0 ? ArrowUpIcon : ArrowDownIcon;
+  const better = r.avg!.better;
+  const tone = !better ? "text-muted-foreground" : (gap < 0) === (better === "low") ? "text-green-400" : "text-red-400";
   const size = Math.abs(gap).toLocaleString(undefined, { minimumFractionDigits: places, maximumFractionDigits: places });
   return (
     <Tip content={`${gap > 0 ? "+" : "−"}${size} from the average (${shown})`} delay={0}>
-      <span className="mr-0.5 inline-flex cursor-help text-muted-foreground">
+      <span className={`mr-0.5 inline-flex cursor-help ${tone}`}>
         <Icon className="size-3" />
       </span>
     </Tip>
@@ -341,7 +343,12 @@ interface Row {
   /** Sits beside the label, at the right of the label column. */
   extra?: React.ReactNode;
   /** The row's number per pass, for the average column. Rows without one leave it blank. */
-  avg?: { num: (c: Col) => number | undefined; fmt: (v: number) => string };
+  avg?: {
+    num: (c: Col) => number | undefined;
+    fmt: (v: number) => string;
+    /** Which way is better, for the hover arrow's colour. Unset: neither — a reading, not a result. */
+    better?: "low" | "high";
+  };
 }
 
 interface Section {
@@ -517,6 +524,7 @@ export function RunSheet({
           return key === "rt" && v !== undefined && v < 0 ? undefined : v;
         },
         fmt: (v) => v.toFixed(key === "mph" || key === "eighthMph" ? 2 : 3),
+        better: key === "mph" || key === "eighthMph" ? "high" : "low",
       },
       cell: (c) => {
         const v = c.slip?.[key];
@@ -564,6 +572,7 @@ export function RunSheet({
                 return pkg && !pkg.foul ? pkg.value : undefined;
               },
               fmt: (v) => v.toFixed(3),
+              better: "low",
             },
             cell: (c) => {
               const pkg = packageOf(c.slip);
@@ -600,7 +609,7 @@ export function RunSheet({
         rows: (eighthOnly ? SEGMENTS.slice(0, 2) : SEGMENTS).map((s) => ({
           key: s.key,
           label: s.label,
-          avg: { num: (c: Col) => c.segs[s.key], fmt: (v: number) => v.toFixed(3) },
+          avg: { num: (c: Col) => c.segs[s.key], fmt: (v: number) => v.toFixed(3), better: "low" as const },
           cell: (c: Col) => {
             const v = c.segs[s.key];
             if (v === undefined) return DASH;
@@ -629,7 +638,7 @@ export function RunSheet({
       };
       const powerRow = (method: "E.T." | "MPH"): Row => ({
         key: `power-${method}`,
-        avg: { num: (c) => hpOf(c, method), fmt: (v) => Math.round(v).toLocaleString() },
+        avg: { num: (c) => hpOf(c, method), fmt: (v) => Math.round(v).toLocaleString(), better: "high" },
         label: <span title={`Estimated from the ${raceWeightLb.toLocaleString()} lb race weight`}>≈ HP from {method}</span>,
         cell: (c) => {
           const hp = method === "E.T." ? c.power?.etHp : c.power?.mphHp;
@@ -780,13 +789,16 @@ export function RunSheet({
       get: (c: Col) => number | undefined,
       show: (v: number) => string,
       higherIsBetter = false,
+      /** False where neither way is better air, like the track temperature. */
+      ranked = true,
     ) => {
       const style = spreadStyler(inc.map(get), higherIsBetter);
+      const better: "low" | "high" | undefined = ranked ? (higherIsBetter ? "high" : "low") : undefined;
       return {
         key,
         label,
         has: get,
-        avg: { num: get, fmt: show },
+        avg: { num: get, fmt: show, better },
         cell: (c: Col) => {
           const v = get(c);
           return v === undefined ? DASH : <span style={style(v)}>{show(v)}</span>;
@@ -797,7 +809,7 @@ export function RunSheet({
       { key: "time", label: "Time", has: (c: Col) => c.slip?.runTime, cell: (c: Col) => c.slip?.runTime ? formatRunTime(c.slip.runTime) : DASH },
       { key: "lane", label: "Lane", has: (c: Col) => c.slip?.lane, cell: (c: Col) => c.slip?.lane ? (c.slip.lane === "left" ? "Left" : "Right") : DASH },
       airRow("air", "Air °F", (c) => c.slip?.airTemperatureF, (v) => String(Math.round(v * 10) / 10)),
-      airRow("track", "Track °F", (c) => c.slip?.trackTemperatureF, (v) => String(Math.round(v * 10) / 10)),
+      airRow("track", "Track °F", (c) => c.slip?.trackTemperatureF, (v) => String(Math.round(v * 10) / 10), false, false),
       airRow("humidity", "Humidity %", (c) => c.slip?.humidityPct, (v) => String(Math.round(v * 10) / 10)),
       airRow("baro", "Baro inHg", (c) => c.slip?.barometricPressureInHg, (v) => String(Math.round(v * 1000) / 1000), true),
       airRow("da", "D.A. ft", (c) => c.slip?.densityAltitudeFt, (v) => Math.round(v).toLocaleString()),
@@ -809,6 +821,7 @@ export function RunSheet({
         avg: {
           num: (c: Col) => windHelp(c.slip?.windDirection),
           fmt: (v: number) => (Math.abs(v) < 0.05 ? "0" : `${v < 0 ? "head" : "tail"} ${Math.abs(v).toFixed(1)}`),
+          better: "high" as const,
         },
         cell: (c: Col) => {
           const speed = c.slip?.windSpeedMph;
