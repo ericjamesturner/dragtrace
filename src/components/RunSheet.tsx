@@ -641,7 +641,7 @@ export function RunSheet({
         }, []).map((d) => (
           <div
             key={d.start}
-            className={`truncate px-2 pt-1.5 text-[10px] font-medium text-muted-foreground ${
+            className={`truncate px-2 pt-1.5 text-center text-[10px] font-medium text-muted-foreground ${
               d.start > 0 ? "border-l border-l-foreground/15" : ""
             }`}
             style={{ gridColumn: `span ${d.span}` }}
