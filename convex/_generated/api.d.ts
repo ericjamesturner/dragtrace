@@ -23,6 +23,7 @@ import type * as highlightZones from "../highlightZones.js";
 import type * as http from "../http.js";
 import type * as mathChannels from "../mathChannels.js";
 import type * as notify from "../notify.js";
+import type * as notifyImage from "../notifyImage.js";
 import type * as profile from "../profile.js";
 import type * as scatterSuggestions from "../scatterSuggestions.js";
 import type * as sharedLogs from "../sharedLogs.js";
@@ -57,6 +58,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   mathChannels: typeof mathChannels;
   notify: typeof notify;
+  notifyImage: typeof notifyImage;
   profile: typeof profile;
   scatterSuggestions: typeof scatterSuggestions;
   sharedLogs: typeof sharedLogs;

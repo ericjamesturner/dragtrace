@@ -1,24 +1,44 @@
-import { internalAction } from "./_generated/server";
+import { internalMutation, internalQuery } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
-/** The ntfy.sh topic that hears about new uploads. Anyone who knows the name can subscribe. */
-const NTFY_TOPIC = "dragtrace-alerts";
+/** What a new-log alert says, and the preview to draw for it. Null once the file is gone. */
+export const alertInfo = internalQuery({
+  args: { fileId: v.id("files") },
+  handler: async (ctx, args) => {
+    const file = await ctx.db.get(args.fileId);
+    if (!file) return null;
+    const [user, vehicle, event] = await Promise.all([
+      ctx.db.get(file.userId),
+      ctx.db.get(file.vehicleId),
+      ctx.db.get(file.eventId),
+    ]);
+    return {
+      title: `New log from ${user?.email ?? user?.name ?? file.userId}`,
+      message: [
+        `${vehicle?.name ?? "Unknown vehicle"} · ${event?.name ?? "Unknown event"}`,
+        `${file.fileName} (${(file.fileSize / (1024 * 1024)).toFixed(1)} MB)`,
+      ].join("\n"),
+      preview: file.preview ?? null,
+    };
+  },
+});
 
-/** Pushes a new-log alert. Never throws: an alert that fails must not matter to the upload. */
-export const newLog = internalAction({
-  args: { title: v.string(), message: v.string() },
-  handler: async (_ctx, args) => {
-    try {
-      // JSON to the root, not headers on the topic URL: a Title header can't carry
-      // non-ASCII, and vehicle or file names can.
-      const res = await fetch("https://ntfy.sh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: NTFY_TOPIC, title: args.title, message: args.message, tags: ["checkered_flag"] }),
-      });
-      if (!res.ok) console.warn(`ntfy alert failed: HTTP ${res.status}`);
-    } catch (e) {
-      console.warn("ntfy alert failed:", e);
-    }
+/** The fallback for an upload whose preview never came: alert without a picture. */
+export const flushUploadAlert = internalMutation({
+  args: { fileId: v.id("files") },
+  handler: async (ctx, args) => {
+    const file = await ctx.db.get(args.fileId);
+    if (!file?.uploadAlertPending) return;
+    await ctx.db.patch(args.fileId, { uploadAlertPending: undefined });
+    await ctx.scheduler.runAfter(0, internal.notifyImage.sendLogAlert, { fileId: args.fileId, withImage: false });
+  },
+});
+
+/** ntfy.sh drops a message after 12 hours; its picture has no use after that. */
+export const deleteAlertImage = internalMutation({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    await ctx.storage.delete(args.storageId);
   },
 });

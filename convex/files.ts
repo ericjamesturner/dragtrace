@@ -1,5 +1,8 @@
 import { query, mutation } from "./_generated/server";
 import { internal } from "./_generated/api";
+
+/** How long a new-log alert waits for the preview before it goes without one. */
+const UPLOAD_ALERT_WAIT_MS = 90_000;
 import { detachChangesFromFile } from "./changes";
 import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
@@ -51,16 +54,11 @@ export const saveFile = mutation({
       contentType: args.contentType,
       order: 0,
       uploadedAt: Date.now(),
+      uploadAlertPending: true,
     });
-    // Scheduled from here, so the alert goes out only once the file is saved.
-    const user = await ctx.db.get(userId);
-    await ctx.scheduler.runAfter(0, internal.notify.newLog, {
-      title: `New log from ${user?.email ?? user?.name ?? userId}`,
-      message: [
-        `${vehicle.name} · ${event.name}`,
-        `${args.fileName} (${(args.fileSize / (1024 * 1024)).toFixed(1)} MB)`,
-      ].join("\n"),
-    });
+    // The uploader's browser draws the preview within seconds, and the alert
+    // goes out with it then. If no preview comes, this sends it without one.
+    await ctx.scheduler.runAfter(UPLOAD_ALERT_WAIT_MS, internal.notify.flushUploadAlert, { fileId });
     return fileId;
   },
 });
@@ -166,7 +164,10 @@ export const savePreview = mutation({
     // format; letting it would ping-pong with newer browsers, each
     // replacing the other's preview on every view. Newest format wins.
     if (previewVersion(args.preview) < previewVersion(file.preview)) return;
-    await ctx.db.patch(args.id, { preview: args.preview });
+    await ctx.db.patch(args.id, { preview: args.preview, uploadAlertPending: undefined });
+    if (file.uploadAlertPending) {
+      await ctx.scheduler.runAfter(0, internal.notifyImage.sendLogAlert, { fileId: args.id, withImage: true });
+    }
   },
 });
 

@@ -92,6 +92,9 @@ export default defineSchema({
     // Precomputed dashboard preview (JSON blob) — logs never change, so
     // this is computed once client-side and reused.
     preview: v.optional(v.string()),
+    /** Set on upload until the new-log alert goes out. The alert waits for the
+     *  first preview so it can carry a picture of the pass. */
+    uploadAlertPending: v.optional(v.boolean()),
     /** Fingerprint of the ECU tune inside an .hlgzip upload. Two passes with
      *  different fingerprints ran different tunes. */
     tuneHash: v.optional(v.string()),
