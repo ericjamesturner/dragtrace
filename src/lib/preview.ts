@@ -28,6 +28,8 @@ export interface PreviewPayload {
   levels?: PassLevel[] | null;
   /** Per-cylinder widebands and EGTs through the pass (stored from preview version 11). */
   cylinders?: CylinderGroup[] | null;
+  /** Seconds after the launch the health checks ran to (stored from preview version 13). */
+  checksTo?: number | null;
 }
 
 export function parsePreview(raw: string | undefined | null): PreviewPayload | null {

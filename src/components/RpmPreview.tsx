@@ -15,7 +15,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
 // Bump when the preview computation changes so stored previews recompute.
-const PREVIEW_VERSION = 12;
+const PREVIEW_VERSION = 13;
 
 // Stored window around the race — wider than the rendered window so the
 // dashboard lead-in/tail can be tuned without recomputing stored previews.
@@ -49,6 +49,8 @@ export interface PreviewPayload {
   levels?: PassLevel[] | null;
   /** Per-cylinder widebands and EGTs through the pass (preview version 11); null without race data. */
   cylinders?: CylinderGroup[] | null;
+  /** Seconds after the launch the health checks ran to: where the throttle came off (preview version 13). */
+  checksTo?: number | null;
 }
 
 /** A file's stored preview, or null when absent or from an older version. */
@@ -241,6 +243,7 @@ async function computePreview(bytes: ArrayBuffer, fileName: string): Promise<Pre
     shifts: raceStart !== null ? readShifts(parsed, session, raceStart, raceEnd) : null,
     levels: raceStart !== null ? readLevels(parsed, session, raceStart, wideOpenEnd(parsed, session, raceStart, raceEnd)) : null,
     cylinders: raceStart !== null ? readCylinders(parsed, session, raceStart, wideOpenEnd(parsed, session, raceStart, raceEnd)) : null,
+    checksTo: raceStart !== null ? wideOpenEnd(parsed, session, raceStart, raceEnd) - raceStart : null,
   };
 }
 

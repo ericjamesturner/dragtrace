@@ -9,7 +9,7 @@ import { SEGMENTS, segmentTimes, type SegmentKey } from "@/lib/timeslip-segments
 import { estimatePowerFromTimeslip, type WeightPowerEstimates } from "@/lib/drag-performance";
 import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
 import { convertForDisplay, getDisplayPrecision, getDisplayUnit, type UnitOverrides, type UnitSystem } from "@/lib/units";
-import { findAnomalies, offsetsOf, spreadOf, type Anomaly, type CylinderGroup, type PassChecks, type PassLevel } from "@/lib/anomalies";
+import { checksCut, findAnomalies, offsetsOf, spreadOf, type Anomaly, type CylinderGroup, type PassChecks, type PassLevel } from "@/lib/anomalies";
 import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel } from "@/lib/changes";
 import { timeFromName } from "@/lib/tune-changes";
@@ -239,6 +239,8 @@ interface Col {
   shifts: ShiftReading[];
   levels: PassLevel[];
   cylinders: CylinderGroup[];
+  /** The health checks stopped short of the finish: the throttle came off early. */
+  checksCut: number | null;
   /** What the pass did that this vehicle's other passes usually don't. */
   anomalies: Anomaly[];
   segs: Partial<Record<SegmentKey, number>>;
@@ -497,6 +499,7 @@ export function RunSheet({
           shifts: preview?.shifts ?? [],
           levels: preview?.levels ?? [],
           cylinders: preview?.cylinders ?? [],
+          checksCut: checksCut(preview?.checksTo ?? undefined, passLen) ? preview!.checksTo! : null,
           anomalies: findAnomalies(
             { levels: preview?.levels ?? [], cylinders: preview?.cylinders ?? [] },
             [...levelPool].filter(([id]) => id !== file._id).map(([, checks]) => checks),
@@ -1063,6 +1066,14 @@ export function RunSheet({
               tip: `${level.name} fell to ${show(level.min, level.quantitySlug)} ${unit} at ${level.minAt.toFixed(2)} s (normally bottoms out at ${show(a.usualMin, level.quantitySlug)} ${unit}).`,
             };
           }
+          case "high": {
+            const { level } = a;
+            const unit = unitOf(level.quantitySlug);
+            return {
+              text: `↑ ${show(level.max!, level.quantitySlug)}`,
+              tip: `${level.name} rose to ${show(level.max!, level.quantitySlug)} ${unit} at ${(level.maxAt ?? 0).toFixed(2)} s (normally peaks at ${show(a.usualMax, level.quantitySlug)} ${unit}).`,
+            };
+          }
           case "lean":
             return {
               text: `${a.label} ${a.seconds.toFixed(2)}s`,
@@ -1113,20 +1124,32 @@ export function RunSheet({
           </Tip>
         ),
         cell: (c: Col) => {
+          // A pass whose throttle came off early was only checked that far:
+          // its numbers fade to italics, and say so.
+          const cutNote = c.checksCut !== null ? `Only checked to ${c.checksCut.toFixed(2)} s — the throttle came off early.` : null;
           const hits = c.anomalies.filter((a) => a.row === row);
           if (hits.length) {
             const parts = hits.map(describe);
             return (
-              <Tip content={<div className="space-y-1">{parts.map((p, i) => <div key={i}>{p.tip}</div>)}</div>}>
-                <span className="min-w-0 truncate text-right text-xs font-bold text-red-400">{parts.map((p) => p.text).join(" ")}</span>
+              <Tip
+                content={
+                  <div className="space-y-1">
+                    {parts.map((p, i) => <div key={i}>{p.tip}</div>)}
+                    {cutNote && <div>{cutNote}</div>}
+                  </div>
+                }
+              >
+                <span className={`min-w-0 truncate text-right text-xs font-bold text-red-400 ${cutNote ? "italic" : ""}`}>
+                  {parts.map((p) => p.text).join(" ")}
+                </span>
               </Tip>
             );
           }
           const n = normal(c);
           if (!n) return DASH;
           return (
-            <Tip content={n.tip}>
-              <span className="min-w-0 truncate text-right text-xs text-muted-foreground/60">{n.text}</span>
+            <Tip content={cutNote ? <div className="space-y-1"><div>{n.tip}</div><div>{cutNote}</div></div> : n.tip}>
+              <span className={`min-w-0 truncate text-right text-xs ${cutNote ? "italic text-muted-foreground/30" : "text-muted-foreground/60"}`}>{n.text}</span>
             </Tip>
           );
         },
@@ -1152,7 +1175,8 @@ export function RunSheet({
             shortName(name),
             [
               `${name}: the lowest point while the throttle is wide open, smoothed over 25 ms so one bad sample can't set it off.`,
-              "Red when it falls well below its usual low: more than 3 times its normal variation, and at least 10% of its level on the line.",
+              "Red when it falls well below its usual low, or rises well above its usual high: more than 3 times its normal variation, and at least 10% of its level on the line.",
+              "Italics: the throttle came off early, so only part of that pass was checked.",
               usualNote,
             ],
             (c) => {
@@ -1161,7 +1185,9 @@ export function RunSheet({
               const unit = unitOf(l.quantitySlug);
               return {
                 text: show(l.min, l.quantitySlug),
-                tip: `Lowest ${show(l.min, l.quantitySlug)} ${unit} at ${l.minAt.toFixed(2)} s, from ${show(l.base, l.quantitySlug)} ${unit} on the line.`,
+                tip: `Lowest ${show(l.min, l.quantitySlug)} ${unit} at ${l.minAt.toFixed(2)} s${
+                  l.max !== undefined ? `, highest ${show(l.max, l.quantitySlug)} ${unit} at ${(l.maxAt ?? 0).toFixed(2)} s` : ""
+                }, from ${show(l.base, l.quantitySlug)} ${unit} on the line.`,
               };
             },
           ),

@@ -20,6 +20,9 @@ export interface PassLevel {
   min: number;
   /** Seconds after the launch the low point came. */
   minAt: number;
+  /** Highest point during the pass, smoothed the same way (preview version 13). */
+  max?: number;
+  maxAt?: number;
 }
 
 /** Pressures that are commanded, atmospheric or follow the boost — not a supply that can fail. */
@@ -86,6 +89,8 @@ export function readLevels(parsed: ParsedLog, session: LogSession, launchAt: num
 
     let min = Infinity;
     let minAt = 0;
+    let max = -Infinity;
+    let maxAt = 0;
     const start = lowerBound(ts, launchAt + 0.05);
     for (let i = start; i < ts.length && ts[i] <= passEnd; i++) {
       // Median of the samples in the next SMOOTH_S: a dip has to last to count.
@@ -100,9 +105,13 @@ export function readLevels(parsed: ParsedLog, session: LogSession, launchAt: num
         min = m;
         minAt = ts[i] - launchAt;
       }
+      if (m > max) {
+        max = m;
+        maxAt = ts[i] - launchAt;
+      }
     }
     if (!Number.isFinite(min)) continue;
-    out.push({ name: def.name, quantitySlug: def.quantitySlug, base: sum / n, min, minAt });
+    out.push({ name: def.name, quantitySlug: def.quantitySlug, base: sum / n, min, minAt, max, maxAt });
   }
   return out;
 }
@@ -244,6 +253,8 @@ function meanIn(ts: Float64Array, vals: Float64Array, from: number, to: number):
 export type Anomaly =
   /** A pressure or the battery fell lower than it usually does. */
   | { kind: "low"; row: string; level: PassLevel; usualMin: number }
+  /** ...or rose higher than it usually does. */
+  | { kind: "high"; row: string; level: PassLevel; usualMax: number }
   /** A wideband ran well lean of the target for a while. */
   | { kind: "lean"; row: string; label: string; seconds: number; at: number; worst: number }
   /** A cylinder moved away from where it usually sits against the others. */
@@ -275,6 +286,20 @@ export interface PassChecks {
   cylinders: CylinderGroup[];
 }
 
+/**
+ * Whether a pass's checks stopped short: the throttle came off well before
+ * the finish (a pedal, a lift), so its lows and highs cover only part of the
+ * run. `checksTo` and `passLen` are seconds after the launch; the slip's clock
+ * starts about RELEASE_TO_CLOCK later than the log's launch.
+ */
+export function checksCut(checksTo: number | undefined, passLen: number | null): boolean {
+  if (checksTo === undefined || passLen === null) return false;
+  return checksTo < passLen + RELEASE_TO_CLOCK - CUT_MARGIN_S;
+}
+const RELEASE_TO_CLOCK = 0.18;
+/** A lift this close to the finish still covers the whole run. */
+const CUT_MARGIN_S = 0.3;
+
 export function findAnomalies(pass: PassChecks, refs: PassChecks[]): Anomaly[] {
   const out: Anomaly[] = [];
   for (const level of pass.levels) {
@@ -287,6 +312,14 @@ export function findAnomalies(pass: PassChecks, refs: PassChecks[]): Anomaly[] {
     const spread = 1.4826 * median(same.map((l) => Math.abs(l.min - usualMin)));
     const floor = Math.max(Math.abs(usualBase) * MIN_FALL_FRACTION, pressure ? MIN_FALL_KPA : MIN_FALL_VOLTS);
     if (usualMin - level.min > Math.max(3 * spread, floor)) out.push({ kind: "low", row: level.name, level, usualMin });
+
+    // The same test the other way: a regulator or a pressure control stuck high.
+    const maxes = same.flatMap((l) => (l.max !== undefined ? [l.max] : []));
+    if (level.max !== undefined && maxes.length >= MIN_REFS) {
+      const usualMax = median(maxes);
+      const maxSpread = 1.4826 * median(maxes.map((m) => Math.abs(m - usualMax)));
+      if (level.max - usualMax > Math.max(3 * maxSpread, floor)) out.push({ kind: "high", row: level.name, level, usualMax });
+    }
   }
 
   for (const g of pass.cylinders) {
