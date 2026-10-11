@@ -286,6 +286,9 @@ export function RunSheet({
 
   // Crosshair: the column under the pointer lights up with its row.
   const [hoverCol, setHoverCol] = useState<number | null>(null);
+  // The row under the pointer stays bright; every other row dims back.
+  const [hoverRow, setHoverRow] = useState<string | null>(null);
+  const dimmed = (key: string) => (hoverRow !== null && hoverRow !== key ? "opacity-30" : "");
 
   // Every other row carries a faint band so a row reads across the whole sheet.
   // Solid, so the pinned label column can wear it too.
@@ -616,7 +619,10 @@ export function RunSheet({
       <div
         className="grid"
         style={{ gridTemplateColumns: `8rem repeat(${cols.length}, 5.5rem)` }}
-        onMouseLeave={() => setHoverCol(null)}
+        onMouseLeave={() => {
+          setHoverCol(null);
+          setHoverRow(null);
+        }}
         onDragOver={(e) => {
           if (dragIdx === null) return;
           e.preventDefault();
@@ -669,7 +675,10 @@ export function RunSheet({
               setDragIdx(null);
               setDropIdx(null);
             }}
-            onMouseEnter={() => setHoverCol(i)}
+            onMouseEnter={() => {
+              setHoverCol(i);
+              setHoverRow(null);
+            }}
             onArmDrag={() => armDrag(i)}
             isBest={c.file._id === bestFileId}
             bestForAirMargin={airBest && airBest.id === c.file._id && airBest.id !== bestFileId ? airBest.margin : undefined}
@@ -699,17 +708,23 @@ export function RunSheet({
               const striped = stripe++ % 2 === 1;
               return (
                 <div key={r.key} className="group contents">
-                  <div className={`${labelCell} ${rule} ${striped ? STRIPE : "bg-card"}`}>
-                    {r.extra && <span className="mr-auto">{r.extra}</span>}
-                    {r.label}
+                  <div
+                    className={`${labelCell} ${rule} ${striped ? STRIPE : "bg-card"}`}
+                    onMouseEnter={() => setHoverRow(r.key)}
+                  >
+                    {r.extra && <span className={`mr-auto transition-opacity ${dimmed(r.key)}`}>{r.extra}</span>}
+                    <span className={`transition-opacity ${dimmed(r.key)}`}>{r.label}</span>
                   </div>
                   {cols.map((c, i) => (
                     <div
                       key={c.file._id}
                       className={`${valueCell} ${rule} ${r.bold ? "font-bold" : ""} ${colClass(i, striped)}`}
-                      onMouseEnter={() => setHoverCol(i)}
+                      onMouseEnter={() => {
+                        setHoverCol(i);
+                        setHoverRow(r.key);
+                      }}
                     >
-                      {r.cell(c)}
+                      <span className={`transition-opacity ${dimmed(r.key)}`}>{r.cell(c)}</span>
                     </div>
                   ))}
                 </div>
@@ -721,7 +736,10 @@ export function RunSheet({
 
         <div className={`${labelCell} border-t bg-card py-1`}>Notes</div>
         {cols.map((c, i) => (
-          <div key={c.file._id} className={`min-w-0 border-t px-2 py-1 ${colClass(i)}`} onMouseEnter={() => setHoverCol(i)}>
+          <div key={c.file._id} className={`min-w-0 border-t px-2 py-1 ${colClass(i)}`} onMouseEnter={() => {
+              setHoverCol(i);
+              setHoverRow(null);
+            }}>
             <NotesCell file={c.file} />
           </div>
         ))}
