@@ -246,6 +246,8 @@ interface Col {
   excluded: boolean;
 }
 
+const SPREAD_PCT_KEY = "dragtrace.runSheet.spreadPct";
+
 /** Tailwind green-500: a pass that counts. */
 const COUNTS_GREEN = "oklch(72.3% 0.219 149.579)";
 
@@ -269,7 +271,7 @@ function meanOf(r: Row, cols: Col[]): number | undefined {
  * Fastest to slowest (or high to low) over the passes that count, to the
  * average's own precision. Blank when fewer than two have a number.
  */
-function spreadText(r: Row, cols: Col[], mean: number | undefined): string | null {
+function spreadText(r: Row, cols: Col[], mean: number | undefined, asPct: boolean): string | null {
   if (!r.avg || mean === undefined) return null;
   const nums = cols.flatMap((c) => {
     if (c.excluded) return [];
@@ -277,9 +279,15 @@ function spreadText(r: Row, cols: Col[], mean: number | undefined): string | nul
     return v !== undefined && Number.isFinite(v) ? [v] : [];
   });
   if (nums.length < 2) return null;
-  const places = /\.(\d+)/.exec(r.avg.fmt(mean))?.[1].length ?? 0;
   const spread = Math.max(...nums) - Math.min(...nums);
+  if (asPct && r.avg.pct && mean !== 0) return formatPct((spread / Math.abs(mean)) * 100);
+  const places = /\.(\d+)/.exec(r.avg.fmt(mean))?.[1].length ?? 0;
   return spread.toLocaleString(undefined, { minimumFractionDigits: places, maximumFractionDigits: places, useGrouping: false });
+}
+
+/** "0.68%", "1.7%", "12%": two significant figures, enough to compare rows. */
+function formatPct(p: number): string {
+  return `${p < 1 ? p.toFixed(2) : p < 10 ? p.toFixed(1) : Math.round(p)}%`;
 }
 
 /**
@@ -298,7 +306,12 @@ function AvgArrow({ r, c, mean }: { r: Row; c: Col; mean: number | undefined }) 
   const tone = !better ? "text-muted-foreground" : (gap < 0) === (better === "low") ? "text-green-400" : "text-red-400";
   const size = Math.abs(gap).toLocaleString(undefined, { minimumFractionDigits: places, maximumFractionDigits: places });
   return (
-    <Tip content={`${gap > 0 ? "+" : "−"}${size} from the average (${shown})`} delay={0}>
+    <Tip
+      content={`${gap > 0 ? "+" : "−"}${size}${
+        r.avg!.pct && mean !== 0 ? ` (${formatPct((Math.abs(gap) / Math.abs(mean)) * 100)})` : ""
+      } from the average (${shown})`}
+      delay={0}
+    >
       <span className={`mr-0.5 inline-flex cursor-help ${tone}`}>
         <Icon className="size-3" />
       </span>
@@ -376,6 +389,12 @@ interface Row {
     fmt: (v: number) => string;
     /** Which way is better, for the hover arrow's colour. Unset: neither — a reading, not a result. */
     better?: "low" | "high";
+    /**
+     * The spread reads as a share of the average. Only where the number has
+     * a true zero and sits well away from it: not a reaction time, a wind
+     * that crosses from head to tail, or a temperature in °F.
+     */
+    pct?: boolean;
   };
 }
 
@@ -514,6 +533,23 @@ export function RunSheet({
   // The row under the pointer stays bright; every other row dims back.
   const [hoverRow, setHoverRow] = useState<string | null>(null);
   const setExcluded = useMutation(api.files.setExcluded);
+  // Raw spread or a share of the average: a viewing preference, kept per browser.
+  const [spreadPct, setSpreadPct] = useState(() => {
+    try {
+      return localStorage.getItem(SPREAD_PCT_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleSpreadPct = () =>
+    setSpreadPct((on) => {
+      try {
+        localStorage.setItem(SPREAD_PCT_KEY, on ? "0" : "1");
+      } catch {
+        // Private mode or blocked storage: the toggle still works for this visit.
+      }
+      return !on;
+    });
   const dimmed = (key: string) => (hoverRow !== null && hoverRow !== key ? "opacity-30" : "");
 
   // Every other row carries a faint band so a row reads across the whole sheet.
@@ -553,6 +589,7 @@ export function RunSheet({
         },
         fmt: (v) => v.toFixed(key === "mph" || key === "eighthMph" ? 2 : 3),
         better: key === "mph" || key === "eighthMph" ? "high" : "low",
+        pct: key !== "rt",
       },
       cell: (c) => {
         const v = c.slip?.[key];
@@ -643,7 +680,7 @@ export function RunSheet({
         rows: (eighthOnly ? SEGMENTS.slice(0, 2) : SEGMENTS).map((s) => ({
           key: s.key,
           label: s.label,
-          avg: { num: (c: Col) => c.segs[s.key], fmt: (v: number) => v.toFixed(3), better: "low" as const },
+          avg: { num: (c: Col) => c.segs[s.key], fmt: (v: number) => v.toFixed(3), better: "low" as const, pct: true },
           cell: (c: Col) => {
             const v = c.segs[s.key];
             if (v === undefined) return DASH;
@@ -672,7 +709,7 @@ export function RunSheet({
       };
       const powerRow = (method: "E.T." | "MPH"): Row => ({
         key: `power-${method}`,
-        avg: { num: (c) => hpOf(c, method), fmt: (v) => Math.round(v).toLocaleString(), better: "high" },
+        avg: { num: (c) => hpOf(c, method), fmt: (v) => Math.round(v).toLocaleString(), better: "high", pct: true },
         label: (
           <Tip content={`Estimated from the ${raceWeightLb.toLocaleString()} lb race weight`}>
             <span>≈ HP from {method}</span>
@@ -830,6 +867,7 @@ export function RunSheet({
       higherIsBetter = false,
       /** False where neither way is better air, like the track temperature. */
       ranked = true,
+      pct = false,
     ) => {
       const style = spreadStyler(inc.map(get), higherIsBetter);
       const better: "low" | "high" | undefined = ranked ? (higherIsBetter ? "high" : "low") : undefined;
@@ -837,7 +875,7 @@ export function RunSheet({
         key,
         label,
         has: get,
-        avg: { num: get, fmt: show, better },
+        avg: { num: get, fmt: show, better, pct },
         cell: (c: Col) => {
           const v = get(c);
           return v === undefined ? DASH : <span style={style(v)}>{show(v)}</span>;
@@ -850,9 +888,9 @@ export function RunSheet({
       airRow("air", "Air °F", (c) => c.slip?.airTemperatureF, (v) => String(Math.round(v * 10) / 10)),
       airRow("track", "Track °F", (c) => c.slip?.trackTemperatureF, (v) => String(Math.round(v * 10) / 10), false, false),
       airRow("humidity", "Humidity %", (c) => c.slip?.humidityPct, (v) => String(Math.round(v * 10) / 10)),
-      airRow("baro", "Baro inHg", (c) => c.slip?.barometricPressureInHg, (v) => String(Math.round(v * 1000) / 1000), true),
-      airRow("da", "D.A. ft", (c) => c.slip?.densityAltitudeFt, (v) => Math.round(v).toLocaleString()),
-      airRow("cf", "Corr.", (c) => c.cf, (v) => v.toFixed(4)),
+      airRow("baro", "Baro inHg", (c) => c.slip?.barometricPressureInHg, (v) => String(Math.round(v * 1000) / 1000), true, true, true),
+      airRow("da", "D.A. ft", (c) => c.slip?.densityAltitudeFt, (v) => Math.round(v).toLocaleString(), false, true, true),
+      airRow("cf", "Corr.", (c) => c.cf, (v) => v.toFixed(4), false, true, true),
       {
         key: "wind",
         label: "Wind mph",
@@ -906,7 +944,12 @@ export function RunSheet({
           return {
             key: `launch-${label}`,
             label: shared ? `${label} ${unit}` : label,
-            avg: { num, fmt: (v: number) => (places ? v.toFixed(places) : String(Math.round(v))) },
+            avg: {
+              num,
+              fmt: (v: number) => (places ? v.toFixed(places) : String(Math.round(v))),
+              // Engine speed has a true zero; temperatures and gauge boost don't.
+              pct: /^rpm$/i.test(label),
+            },
             cell: (c: Col) => {
               const v = c.launch.find((l) => l.label === label)?.value;
               if (v === undefined) return DASH;
@@ -934,6 +977,7 @@ export function RunSheet({
           avg: {
             num: (c: Col) => c.driveshaft.find((d) => d.after === after)?.rpm,
             fmt: (v: number) => String(Math.round(v)),
+            pct: true,
           },
           cell: (c: Col) => {
             const r = c.driveshaft.find((d) => d.after === after);
@@ -957,12 +1001,12 @@ export function RunSheet({
         title: k === 0 ? "Shift" : `Shift ${k + 1}`,
         caption: true,
         rows: [
-          { key: `shift-${k}-when`, label: "When", avg: { num: (c) => at(c)?.at, fmt: (v) => v.toFixed(2) }, cell: (c) => (at(c) ? <span style={when(at(c)!.at)}>{at(c)!.at.toFixed(2)}</span> : DASH) },
-          { key: `shift-${k}-takes`, label: "Takes", avg: { num: (c) => at(c)?.takes, fmt: (v) => v.toFixed(2) }, cell: (c) => (at(c) ? <span style={takes(at(c)!.takes)}>{at(c)!.takes.toFixed(2)}</span> : DASH) },
+          { key: `shift-${k}-when`, label: "When", avg: { num: (c) => at(c)?.at, fmt: (v) => v.toFixed(2), pct: true }, cell: (c) => (at(c) ? <span style={when(at(c)!.at)}>{at(c)!.at.toFixed(2)}</span> : DASH) },
+          { key: `shift-${k}-takes`, label: "Takes", avg: { num: (c) => at(c)?.takes, fmt: (v) => v.toFixed(2), pct: true }, cell: (c) => (at(c) ? <span style={takes(at(c)!.takes)}>{at(c)!.takes.toFixed(2)}</span> : DASH) },
           {
             key: `shift-${k}-drop`,
             label: withUnit("Drop", "rpm"),
-            avg: { num: (c) => at(c)?.drop, fmt: (v) => Math.round(v).toLocaleString() },
+            avg: { num: (c) => at(c)?.drop, fmt: (v) => Math.round(v).toLocaleString(), pct: true },
             cell: (c) => (at(c) ? <span style={drop(at(c)!.drop)}>{Math.round(at(c)!.drop).toLocaleString()}</span> : DASH),
           },
         ],
@@ -1129,7 +1173,11 @@ export function RunSheet({
           Average
         </div>
         <div className="flex items-end justify-end border-b px-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-violet-300/60">
-          Spread
+          <Tip content={spreadPct ? "Showing the spread as a share of the average. Click for the raw spread." : "Click to show the spread as a share of the average"}>
+            <button type="button" className="cursor-pointer uppercase tracking-wider hover:text-violet-300" onClick={toggleSpreadPct}>
+              Spread {spreadPct ? "%" : "±"}
+            </button>
+          </Tip>
         </div>
 
         {/* Groups part with a rule; only a group whose labels need it gets a caption. */}
@@ -1188,7 +1236,7 @@ export function RunSheet({
                       setHoverRow(r.key);
                     }}
                   >
-                    <span className={`transition-opacity ${dimmed(r.key)}`}>{spreadText(r, cols, means.get(r.key))}</span>
+                    <span className={`transition-opacity ${dimmed(r.key)}`}>{spreadText(r, cols, means.get(r.key), spreadPct)}</span>
                   </div>
                 </div>
               );
