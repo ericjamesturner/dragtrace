@@ -266,6 +266,23 @@ function meanOf(r: Row, cols: Col[]): number | undefined {
 }
 
 /**
+ * Fastest to slowest (or high to low) over the passes that count, to the
+ * average's own precision. Blank when fewer than two have a number.
+ */
+function spreadText(r: Row, cols: Col[], mean: number | undefined): string | null {
+  if (!r.avg || mean === undefined) return null;
+  const nums = cols.flatMap((c) => {
+    if (c.excluded) return [];
+    const v = r.avg!.num(c);
+    return v !== undefined && Number.isFinite(v) ? [v] : [];
+  });
+  if (nums.length < 2) return null;
+  const places = /\.(\d+)/.exec(r.avg.fmt(mean))?.[1].length ?? 0;
+  const spread = Math.max(...nums) - Math.min(...nums);
+  return spread.toLocaleString(undefined, { minimumFractionDigits: places, maximumFractionDigits: places, useGrouping: false });
+}
+
+/**
  * Beside a hovered pass's number: which way it sits from the event average,
  * with the gap in the tooltip, to the row's own precision.
  */
@@ -589,7 +606,13 @@ export function RunSheet({
               const pkg = packageOf(c.slip);
               if (!pkg) return DASH;
               const text = pkg.value.toFixed(3);
-              if (pkg.foulText) return <span className="text-red-400" title={`Package ${text}`}>{pkg.foulText}</span>;
+              if (pkg.foulText) {
+                return (
+                  <Tip content={`Package ${text}`}>
+                    <span className="text-red-400">{pkg.foulText}</span>
+                  </Tip>
+                );
+              }
               if (bestPackage === undefined) return text;
               if (pkg.value === bestPackage) return <span className="text-green-400">{text}</span>;
               return <span style={fadeStyle(pkg.value - bestPackage, PACKAGE_FADE_AT)}>{text}</span>;
@@ -650,7 +673,11 @@ export function RunSheet({
       const powerRow = (method: "E.T." | "MPH"): Row => ({
         key: `power-${method}`,
         avg: { num: (c) => hpOf(c, method), fmt: (v) => Math.round(v).toLocaleString(), better: "high" },
-        label: <span title={`Estimated from the ${raceWeightLb.toLocaleString()} lb race weight`}>≈ HP from {method}</span>,
+        label: (
+          <Tip content={`Estimated from the ${raceWeightLb.toLocaleString()} lb race weight`}>
+            <span>≈ HP from {method}</span>
+          </Tip>
+        ),
         cell: (c) => {
           const hp = method === "E.T." ? c.power?.etHp : c.power?.mphHp;
           const d = c.power?.distance;
@@ -697,9 +724,9 @@ export function RunSheet({
           ) : c.lift.finalLift === null ? (
             <span className="text-muted-foreground/40">none</span>
           ) : (
-            <span className="text-amber-300/90" title="How long before the finish the throttle came out">
-              {Math.max(0, c.passLen - c.lift.finalLift).toFixed(2)}s
-            </span>
+            <Tip content="How long before the finish the throttle came out">
+              <span className="text-amber-300/90">{Math.max(0, c.passLen - c.lift.finalLift).toFixed(2)}s</span>
+            </Tip>
           ),
       });
     }
@@ -772,13 +799,12 @@ export function RunSheet({
     const firstEstimate = liftRows.find((r) => r.key.startsWith("est-"));
     if (firstEstimate) {
       firstEstimate.extra = (
+        <Tip content="Which no-lift passes the estimate learns from">
+        <span>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <button
-                className="font-sans text-[10px] normal-case tracking-normal text-muted-foreground/60 transition-colors hover:text-foreground"
-                title="Which no-lift passes the estimate learns from"
-              />
+              <button className="font-sans text-[10px] normal-case tracking-normal text-muted-foreground/60 transition-colors hover:text-foreground" />
             }
           >
             {estScope === "event" ? "event" : "all"} ▾
@@ -788,6 +814,8 @@ export function RunSheet({
             <DropdownMenuItem onClick={() => onEstScopeChange("all")}>All data</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </span>
+        </Tip>
       );
     }
     if (liftRows.length) out.push({ key: "lift", title: "Lift", rows: liftRows });
@@ -840,12 +868,9 @@ export function RunSheet({
           if (speed === undefined && !dir) return DASH;
           // The head/tail part is what moves the clocks; the gust speed rides on hover.
           return (
-            <span
-              title={[speed !== undefined ? `${speed} mph` : "", dir].filter(Boolean).join(" · ")}
-              style={windStyle(windHelp(dir))}
-            >
-              {dir || speed}
-            </span>
+            <Tip content={[speed !== undefined ? `${speed} mph` : "", dir].filter(Boolean).join(" · ")}>
+              <span style={windStyle(windHelp(dir))}>{dir || speed}</span>
+            </Tip>
           );
         },
       },
@@ -980,7 +1005,7 @@ export function RunSheet({
     <div className="mt-3 w-fit max-w-full overflow-x-auto rounded-lg border bg-card font-mono">
       <div
         className="grid"
-        style={{ gridTemplateColumns: `8rem repeat(${cols.length}, 5.5rem) 5.5rem` }}
+        style={{ gridTemplateColumns: `8rem repeat(${cols.length}, 5.5rem) 5.5rem 5.5rem` }}
         onMouseLeave={() => {
           setHoverCol(null);
           setHoverRow(null);
@@ -1013,12 +1038,12 @@ export function RunSheet({
               d.start > 0 ? "border-l border-l-foreground/15" : ""
             }`}
             style={{ gridColumn: `span ${d.span}` }}
-            title={d.day}
           >
             {d.day}
           </div>
         ))}
         <div className={AVG_COL} />
+        <div />
 
         {/* Whether each pass counts toward the bests, colours and averages. */}
         <div className="sticky left-0 z-10 bg-card" />
@@ -1040,6 +1065,7 @@ export function RunSheet({
           </div>
         ))}
         <div className={AVG_COL} />
+        <div />
 
         {/* A plain way into each pass's log. */}
         <div className="sticky left-0 z-10 bg-card" />
@@ -1063,6 +1089,7 @@ export function RunSheet({
           </div>
         ))}
         <div className={AVG_COL} />
+        <div />
 
         {/* Column heads */}
         <div className={`${labelCell} border-b bg-card`} />
@@ -1099,7 +1126,10 @@ export function RunSheet({
           />
         ))}
         <div className={`${AVG_COL} flex items-end justify-end border-b px-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-violet-300`}>
-          Avg
+          Average
+        </div>
+        <div className="flex items-end justify-end border-b px-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-violet-300/60">
+          Spread
         </div>
 
         {/* Groups part with a rule; only a group whose labels need it gets a caption. */}
@@ -1110,7 +1140,7 @@ export function RunSheet({
             {s.caption && (
               <>
                 <div className={`${labelCell} h-5 border-t bg-card pt-1 text-[9px] text-muted-foreground/50`}>{s.title}</div>
-                <div className="border-t" style={{ gridColumn: `span ${cols.length + 1}` }} />
+                <div className="border-t" style={{ gridColumn: `span ${cols.length + 2}` }} />
               </>
             )}
             {s.rows.map((r, ri) => {
@@ -1151,6 +1181,15 @@ export function RunSheet({
                       {means.get(r.key) !== undefined ? r.avg!.fmt(means.get(r.key)!) : null}
                     </span>
                   </div>
+                  <div
+                    className={`${valueCell} ${rule} ${striped ? STRIPE : ""} text-violet-300/60`}
+                    onMouseEnter={() => {
+                      setHoverCol(null);
+                      setHoverRow(r.key);
+                    }}
+                  >
+                    <span className={`transition-opacity ${dimmed(r.key)}`}>{spreadText(r, cols, means.get(r.key))}</span>
+                  </div>
                 </div>
               );
             })}
@@ -1168,6 +1207,7 @@ export function RunSheet({
           </div>
         ))}
         <div className={`${AVG_COL} border-t`} />
+        <div className="border-t" />
       </div>
     </div>
   );
@@ -1293,13 +1333,14 @@ function PassHead({
         onMouseEnter={onMouseEnter}
         className={`group/head relative flex min-w-0 flex-col border-b px-2 pb-1 pt-1 ${className}`}
       >
-        <span
-          className="absolute left-0 top-1 cursor-grab text-muted-foreground/40 opacity-0 transition-opacity hover:text-muted-foreground active:cursor-grabbing group-hover/head:opacity-100"
-          onMouseDown={onArmDrag}
-          title="Drag to reorder"
-        >
-          <GripVerticalIcon className="size-3" />
-        </span>
+        <Tip content="Drag to reorder">
+          <span
+            className="absolute left-0 top-1 cursor-grab text-muted-foreground/40 opacity-0 transition-opacity hover:text-muted-foreground active:cursor-grabbing group-hover/head:opacity-100"
+            onMouseDown={onArmDrag}
+          >
+            <GripVerticalIcon className="size-3" />
+          </span>
+        </Tip>
         <div className="flex items-center">
           {editingRound ? (
             <input
@@ -1318,10 +1359,10 @@ function PassHead({
               }}
             />
           ) : (
+            <Tip content={`${name} — click to set the round`}>
             <button
               type="button"
               className="min-w-0 cursor-text truncate font-mono text-xs font-semibold uppercase tracking-wider decoration-muted-foreground/50 hover:underline"
-              title={`${name} — click to set the round`}
               onClick={() => {
                 setRoundDraft(passRound ?? "");
                 setEditingRound(true);
@@ -1329,6 +1370,7 @@ function PassHead({
             >
               {shownRound ?? <span className="text-muted-foreground/60">#{index + 1}</span>}
             </button>
+            </Tip>
           )}
           <div className="ml-auto -mr-1 flex items-center">
             <Popover>
@@ -1440,27 +1482,31 @@ function PassHead({
             type="button"
             className="cursor-pointer text-right font-mono leading-tight tabular-nums"
             onClick={onOpenViewer}
-            title="Open the log"
           >
-            <span
-              className={`block text-[15px] font-semibold ${breakout ? "text-red-400" : etBest || isBest ? "text-green-400" : ""}`}
-            >
-              {heroEt ?? "—"}
-            </span>
+            <Tip content={breakout ? "Broke out — ran under the dial. Click to open the log" : "Click to open the log"}>
+              <span
+                className={`block text-[15px] font-semibold ${breakout ? "text-red-400" : etBest || isBest ? "text-green-400" : ""}`}
+              >
+                {heroEt ?? "—"}
+              </span>
+            </Tip>
             <span className="flex items-center justify-end gap-1 text-[11px]">
               {isBest && (
                 // The win light: solid green, black text, like the bulb at the stripe.
-                <span className="mr-auto rounded-sm bg-green-500 px-0.5 font-sans text-[8px] font-bold uppercase tracking-wider text-black">
-                  Best
-                </span>
+                <Tip content="Quickest pass of the event">
+                  <span className="mr-auto rounded-sm bg-green-500 px-0.5 font-sans text-[8px] font-bold uppercase tracking-wider text-black">
+                    Best
+                  </span>
+                </Tip>
               )}
               {bestForAirMargin !== undefined && (
-                <span
-                  className="mr-auto rounded-sm border border-sky-400/70 px-0.5 font-sans text-[8px] font-bold uppercase tracking-wider text-sky-300"
-                  title={`Quickest pass once the air is evened out — ${bestForAirMargin.toFixed(3)}s ahead of the next on equal air. Track conditions aren't counted.`}
+                <Tip
+                  content={`Quickest pass once the air is evened out — ${bestForAirMargin.toFixed(3)}s ahead of the next on equal air. Track conditions aren't counted.`}
                 >
-                  Air
-                </span>
+                  <span className="mr-auto rounded-sm border border-sky-400/70 px-0.5 font-sans text-[8px] font-bold uppercase tracking-wider text-sky-300">
+                    Air
+                  </span>
+                </Tip>
               )}
               {heroMph !== undefined && (
                 <span className={mphBest ? "text-green-400" : "text-muted-foreground"}>{heroMph}</span>
@@ -1511,13 +1557,25 @@ function ChangesCell({
   return (
     <div className="flex min-w-0 flex-col items-end gap-1 py-0.5 font-sans">
       {hardware.map((c) => (
-        <span
+        <Tip
           key={c._id}
-          className="max-w-full truncate rounded border border-amber-400/50 px-1.5 py-px text-[9px] font-medium uppercase tracking-wider text-amber-300"
-          title={[`${categoryLabel(c.category)}: ${c.title}`, ...(c.items ?? []).map((l) => `  ${l}`)].join("\n")}
+          content={
+            <div>
+              <div>
+                {categoryLabel(c.category)}: {c.title}
+              </div>
+              {(c.items ?? []).map((l) => (
+                <div key={l} className="pl-2">
+                  {l}
+                </div>
+              ))}
+            </div>
+          }
         >
-          {categoryLabel(c.category)} · {c.title}
-        </span>
+          <span className="max-w-full truncate rounded border border-amber-400/50 px-1.5 py-px text-[9px] font-medium uppercase tracking-wider text-amber-300">
+            {categoryLabel(c.category)} · {c.title}
+          </span>
+        </Tip>
       ))}
       {(tune.length > 0 || knobs) && (
         <Popover>
@@ -1607,16 +1665,17 @@ function NotesCell({ file }: { file: Doc<"files"> }) {
       }}
     />
   ) : (
-    <p
-      className={`cursor-text whitespace-pre-wrap break-words text-xs ${file.notes ? "text-muted-foreground" : "text-muted-foreground/30"}`}
-      onClick={() => {
-        setNotes(file.notes ?? "");
-        setEditing(true);
-      }}
-      title="Click to edit the note"
-    >
-      {file.notes || "Add a note"}
-    </p>
+    <Tip content="Click to edit the note">
+      <p
+        className={`cursor-text whitespace-pre-wrap break-words text-xs ${file.notes ? "text-muted-foreground" : "text-muted-foreground/30"}`}
+        onClick={() => {
+          setNotes(file.notes ?? "");
+          setEditing(true);
+        }}
+      >
+        {file.notes || "Add a note"}
+      </p>
+    </Tip>
   );
 }
 
