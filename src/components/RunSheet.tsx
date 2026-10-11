@@ -322,8 +322,9 @@ export function RunSheet({
         const v = c.slip?.[key];
         if (v === undefined) return DASH;
         if (key === "rt" && v < 0) return <span className="text-red-400">{v}</span>;
-        if (c.slip && opts.breakout?.(c.slip)) return <span className="text-red-400">{v}</span>;
+        // The hero ET already shows a breakout in red; here the event best stays green.
         if (v === eventBests[key]) return <span className="text-green-400">{v}</span>;
+        if (c.slip && opts.breakout?.(c.slip)) return <span className="text-red-400">{v}</span>;
         return <span style={shadeStyle(key, v, eventRanges)}>{v}</span>;
       },
     });
