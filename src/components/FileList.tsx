@@ -259,7 +259,7 @@ export function FileList({
     const history: DialPass[] = [];
     for (const f of ordered) {
       const s = slipFor.get(f._id);
-      if (!s) continue;
+      if (!s || f.excluded) continue;
       const cf = correctionFactor(s);
       if (cf === null) continue;
       const et = dialDistance === "1/8" ? s.eighthEt : s.et;
@@ -304,7 +304,7 @@ export function FileList({
 
   const bestFileId = useMemo(() => {
     if (!files) return null;
-    const ids = new Set<string>(files.map(f => f._id));
+    const ids = new Set<string>(files.filter((f) => !f.excluded).map((f) => f._id));
     let bestQuarter: [string, number] | null = null;
     let bestEighth: [string, number] | null = null;
     for (const [id, v] of Object.entries(slipStats)) {
@@ -504,7 +504,7 @@ export function FileList({
   // which says nothing — so it needs at least two.
   const eventBests = useMemo<MetricBests>(() => {
     if (!files) return {};
-    const ids = new Set<string>(files.map(f => f._id));
+    const ids = new Set<string>(files.filter((f) => !f.excluded).map((f) => f._id));
     const stats = Object.entries(slipStats).filter(
       ([id, v]) => ids.has(id) && Object.keys(v.metrics).length > 0
     );
@@ -531,6 +531,7 @@ export function FileList({
     if (!files) return {};
     const ids = new Set<string>();
     for (const f of files) {
+      if (f.excluded) continue;
       const lift = readLift(f.preview, slipStats[f._id]?.lastSplit ?? null);
       if (lift && (lift.finalLift !== null || lift.pedals.length > 0)) continue;
       ids.add(f._id);

@@ -95,6 +95,8 @@ export default defineSchema({
     /** Set on upload until the new-log alert goes out. The alert waits for the
      *  first preview so it can carry a picture of the pass. */
     uploadAlertPending: v.optional(v.boolean()),
+    /** Left out of the event's bests, colours and averages: a bad pass the racer unticked. */
+    excluded: v.optional(v.boolean()),
     /** Fingerprint of the ECU tune inside an .hlgzip upload. Two passes with
      *  different fingerprints ran different tunes. */
     tuneHash: v.optional(v.string()),

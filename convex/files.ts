@@ -226,6 +226,18 @@ export const updateRound = mutation({
   },
 });
 
+/** Leave a pass out of the event's bests, colours and averages, or put it back. */
+export const setExcluded = mutation({
+  args: { id: v.id("files"), excluded: v.boolean() },
+  handler: async (ctx, args) => {
+    const userId = await getEffectiveUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
+    const file = await ctx.db.get(args.id);
+    if (!file || file.userId !== userId) throw new Error("Not found");
+    await ctx.db.patch(args.id, { excluded: args.excluded || undefined });
+  },
+});
+
 export const updateNotes = mutation({
   args: {
     id: v.id("files"),

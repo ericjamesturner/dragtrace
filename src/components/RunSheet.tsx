@@ -15,6 +15,7 @@ import { timeFromName } from "@/lib/tune-changes";
 import { parsePreview } from "@/lib/preview";
 import { DRIVESHAFT_TIMES, type DriveshaftReading, type ShiftReading } from "@/lib/pass-readings";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu,
@@ -23,9 +24,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tip } from "@/components/ui/tooltip";
 import {
   ActivityIcon,
+  ArrowDownIcon,
   ArrowLeftRightIcon,
+  ArrowUpIcon,
   DownloadIcon,
   GripVerticalIcon,
   MoreVerticalIcon,
@@ -230,6 +234,46 @@ interface Col {
   estimate?: PassEstimate;
   /** The day it ran, as shown: NSP's stamp in the file name, else the upload day. */
   day: string;
+  /** Unticked by the racer: shown grey, and left out of bests, colours and averages. */
+  excluded: boolean;
+}
+
+/** The average column: set off from the passes by a rule. */
+const AVG_COL = "border-l border-l-foreground/15";
+/** An unticked pass: its numbers stay readable, but plainly out of play. */
+const EXCLUDED = "opacity-35 grayscale";
+
+/** The row's mean over the passes that count; undefined when fewer than two have a number. */
+function meanOf(r: Row, cols: Col[]): number | undefined {
+  if (!r.avg) return undefined;
+  const nums = cols.flatMap((c) => {
+    if (c.excluded) return [];
+    const v = r.avg!.num(c);
+    return v !== undefined && Number.isFinite(v) ? [v] : [];
+  });
+  return nums.length < 2 ? undefined : nums.reduce((a, b) => a + b) / nums.length;
+}
+
+/**
+ * Beside a hovered pass's number: which way it sits from the event average,
+ * with the gap in the tooltip, to the row's own precision.
+ */
+function AvgArrow({ r, c, mean }: { r: Row; c: Col; mean: number | undefined }) {
+  const v = r.avg?.num(c);
+  if (mean === undefined || v === undefined || !Number.isFinite(v)) return null;
+  const shown = r.avg!.fmt(mean);
+  const places = /\.(\d+)/.exec(shown)?.[1].length ?? 0;
+  const gap = v - mean;
+  if (Math.abs(gap) < 0.5 * 10 ** -places) return null;
+  const Icon = gap > 0 ? ArrowUpIcon : ArrowDownIcon;
+  const size = Math.abs(gap).toLocaleString(undefined, { minimumFractionDigits: places, maximumFractionDigits: places });
+  return (
+    <Tip content={`${gap > 0 ? "+" : "−"}${size} from the average (${shown})`} delay={0}>
+      <span className="mr-0.5 inline-flex cursor-help text-muted-foreground">
+        <Icon className="size-3" />
+      </span>
+    </Tip>
+  );
 }
 
 /** Shifts this far apart in time, on different passes, are different shifts. */
@@ -264,8 +308,9 @@ function shiftSlots(cols: Col[]): Map<string, ShiftReading>[] {
   }
   // A gear change shows on most passes. A dip that only one or two passes
   // have, where the rest have nothing, is the tires or the converter.
-  const most = Math.max(0, ...slots.map((m) => m.size));
-  return slots.filter((m) => m.size * 2 >= most);
+  const counted = (m: Map<string, ShiftReading>) => cols.filter((c) => !c.excluded && m.has(c.file._id)).length;
+  const most = Math.max(0, ...slots.map(counted));
+  return slots.filter((m) => counted(m) * 2 >= most && (most === 0 || counted(m) > 0));
 }
 
 /** "16:25" -> "4:25 pm". Anything that isn't HH:MM shows as typed. */
@@ -295,6 +340,8 @@ interface Row {
   bold?: boolean;
   /** Sits beside the label, at the right of the label column. */
   extra?: React.ReactNode;
+  /** The row's number per pass, for the average column. Rows without one leave it blank. */
+  avg?: { num: (c: Col) => number | undefined; fmt: (v: number) => string };
 }
 
 interface Section {
@@ -397,6 +444,7 @@ export function RunSheet({
                 })
               : null,
           estimate: estimates[file._id],
+          excluded: !!file.excluded,
           day: new Date(timeFromName(file.fileName) ?? file.uploadedAt).toLocaleDateString(undefined, {
             weekday: "short",
             month: "short",
@@ -430,6 +478,7 @@ export function RunSheet({
   const [hoverCol, setHoverCol] = useState<number | null>(null);
   // The row under the pointer stays bright; every other row dims back.
   const [hoverRow, setHoverRow] = useState<string | null>(null);
+  const setExcluded = useMutation(api.files.setExcluded);
   const dimmed = (key: string) => (hoverRow !== null && hoverRow !== key ? "opacity-30" : "");
 
   // Every other row carries a faint band so a row reads across the whole sheet.
@@ -452,6 +501,8 @@ export function RunSheet({
       const v = f(c);
       return v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && v.length === 0);
     });
+    // The passes that count: an unticked pass still shows, but sets nothing.
+    const inc = cols.filter((c) => !c.excluded);
     const metric = (
       key: MetricKey,
       label: string,
@@ -460,6 +511,13 @@ export function RunSheet({
       key,
       label,
       bold: opts.bold,
+      avg: {
+        num: (c) => {
+          const v = c.slip?.[key];
+          return key === "rt" && v !== undefined && v < 0 ? undefined : v;
+        },
+        fmt: (v) => v.toFixed(key === "mph" || key === "eighthMph" ? 2 : 3),
+      },
       cell: (c) => {
         const v = c.slip?.[key];
         if (v === undefined) return DASH;
@@ -470,7 +528,7 @@ export function RunSheet({
       },
     });
     // Only a clean package can be the event's best; with one, there's nothing to rank.
-    const clean = cols.flatMap((c) => {
+    const clean = inc.flatMap((c) => {
       const pkg = packageOf(c.slip);
       return pkg && !pkg.foul ? [pkg.value] : [];
     });
@@ -500,6 +558,13 @@ export function RunSheet({
           {
             key: "package",
             label: "Package",
+            avg: {
+              num: (c) => {
+                const pkg = packageOf(c.slip);
+                return pkg && !pkg.foul ? pkg.value : undefined;
+              },
+              fmt: (v) => v.toFixed(3),
+            },
             cell: (c) => {
               const pkg = packageOf(c.slip);
               if (!pkg) return DASH;
@@ -535,6 +600,7 @@ export function RunSheet({
         rows: (eighthOnly ? SEGMENTS.slice(0, 2) : SEGMENTS).map((s) => ({
           key: s.key,
           label: s.label,
+          avg: { num: (c: Col) => c.segs[s.key], fmt: (v: number) => v.toFixed(3) },
           cell: (c: Col) => {
             const v = c.segs[s.key];
             if (v === undefined) return DASH;
@@ -555,7 +621,7 @@ export function RunSheet({
       const hpOf = (c: Col, method: "E.T." | "MPH") => (method === "E.T." ? c.power?.etHp : c.power?.mphHp);
       // Most power in green, fading as it falls short — like the clocks.
       const bestHp = (method: "E.T." | "MPH") => {
-        const all = cols.flatMap((c) => {
+        const all = inc.flatMap((c) => {
           const hp = hpOf(c, method);
           return hp === undefined ? [] : [Math.round(hp)];
         });
@@ -563,6 +629,7 @@ export function RunSheet({
       };
       const powerRow = (method: "E.T." | "MPH"): Row => ({
         key: `power-${method}`,
+        avg: { num: (c) => hpOf(c, method), fmt: (v) => Math.round(v).toLocaleString() },
         label: <span title={`Estimated from the ${raceWeightLb.toLocaleString()} lb race weight`}>≈ HP from {method}</span>,
         cell: (c) => {
           const hp = method === "E.T." ? c.power?.etHp : c.power?.mphHp;
@@ -711,14 +778,15 @@ export function RunSheet({
       key: string,
       label: string,
       get: (c: Col) => number | undefined,
-      show: (v: number) => React.ReactNode,
+      show: (v: number) => string,
       higherIsBetter = false,
     ) => {
-      const style = spreadStyler(cols.map(get), higherIsBetter);
+      const style = spreadStyler(inc.map(get), higherIsBetter);
       return {
         key,
         label,
         has: get,
+        avg: { num: get, fmt: show },
         cell: (c: Col) => {
           const v = get(c);
           return v === undefined ? DASH : <span style={style(v)}>{show(v)}</span>;
@@ -728,16 +796,20 @@ export function RunSheet({
     const air: Row[] = [
       { key: "time", label: "Time", has: (c: Col) => c.slip?.runTime, cell: (c: Col) => c.slip?.runTime ? formatRunTime(c.slip.runTime) : DASH },
       { key: "lane", label: "Lane", has: (c: Col) => c.slip?.lane, cell: (c: Col) => c.slip?.lane ? (c.slip.lane === "left" ? "Left" : "Right") : DASH },
-      airRow("air", "Air °F", (c) => c.slip?.airTemperatureF, (v) => v),
-      airRow("track", "Track °F", (c) => c.slip?.trackTemperatureF, (v) => v),
-      airRow("humidity", "Humidity %", (c) => c.slip?.humidityPct, (v) => v),
-      airRow("baro", "Baro inHg", (c) => c.slip?.barometricPressureInHg, (v) => v, true),
-      airRow("da", "D.A. ft", (c) => c.slip?.densityAltitudeFt, (v) => v.toLocaleString()),
+      airRow("air", "Air °F", (c) => c.slip?.airTemperatureF, (v) => String(Math.round(v * 10) / 10)),
+      airRow("track", "Track °F", (c) => c.slip?.trackTemperatureF, (v) => String(Math.round(v * 10) / 10)),
+      airRow("humidity", "Humidity %", (c) => c.slip?.humidityPct, (v) => String(Math.round(v * 10) / 10)),
+      airRow("baro", "Baro inHg", (c) => c.slip?.barometricPressureInHg, (v) => String(Math.round(v * 1000) / 1000), true),
+      airRow("da", "D.A. ft", (c) => c.slip?.densityAltitudeFt, (v) => Math.round(v).toLocaleString()),
       airRow("cf", "Corr.", (c) => c.cf, (v) => v.toFixed(4)),
       {
         key: "wind",
         label: "Wind mph",
         has: (c: Col) => c.slip?.windSpeedMph ?? c.slip?.windDirection,
+        avg: {
+          num: (c: Col) => windHelp(c.slip?.windDirection),
+          fmt: (v: number) => (Math.abs(v) < 0.05 ? "0" : `${v < 0 ? "head" : "tail"} ${Math.abs(v).toFixed(1)}`),
+        },
         cell: (c: Col) => {
           const speed = c.slip?.windSpeedMph;
           const dir = c.slip?.windDirection;
@@ -779,10 +851,13 @@ export function RunSheet({
             return Number.isFinite(n) ? n : undefined;
           };
           // Hotter than usual in amber, cooler in blue.
-          const style = spreadStyler(cols.map(num));
+          const style = spreadStyler(inc.map(num));
+          // The average keeps the readings' own decimals.
+          const places = (parts[0]?.n.split(".")[1] ?? "").length;
           return {
             key: `launch-${label}`,
             label: shared ? `${label} ${unit}` : label,
+            avg: { num, fmt: (v: number) => (places ? v.toFixed(places) : String(Math.round(v))) },
             cell: (c: Col) => {
               const v = c.launch.find((l) => l.label === label)?.value;
               if (v === undefined) return DASH;
@@ -796,7 +871,7 @@ export function RunSheet({
     // Driveshaft speed off the line, from the full-rate log.
     // Faster than usual in amber — on a pass whose 60' is no better, that's spin — slower in blue.
     const dsStyles = new Map(
-      DRIVESHAFT_TIMES.map((after) => [after, spreadStyler(cols.map((c) => c.driveshaft.find((d) => d.after === after)?.rpm))]),
+      DRIVESHAFT_TIMES.map((after) => [after, spreadStyler(inc.map((c) => c.driveshaft.find((d) => d.after === after)?.rpm))]),
     );
     if (any((c) => c.driveshaft.length || undefined)) {
       out.push({
@@ -807,6 +882,10 @@ export function RunSheet({
           key: `ds-${after}`,
           // ".25": the seconds go without saying.
           label: String(after).replace(/^0(?=\.)/, ""),
+          avg: {
+            num: (c: Col) => c.driveshaft.find((d) => d.after === after)?.rpm,
+            fmt: (v: number) => Math.round(v).toLocaleString(),
+          },
           cell: (c: Col) => {
             const r = c.driveshaft.find((d) => d.after === after);
             return r ? <span style={dsStyles.get(after)?.(r.rpm)}>{Math.round(r.rpm).toLocaleString()}</span> : DASH;
@@ -821,19 +900,20 @@ export function RunSheet({
     const slots = shiftSlots(cols);
     slots.forEach((slot, k) => {
       const at = (c: Col) => slot.get(c.file._id);
-      const when = spreadStyler(cols.map((c) => at(c)?.at));
-      const takes = spreadStyler(cols.map((c) => at(c)?.takes));
-      const drop = spreadStyler(cols.map((c) => at(c)?.drop));
+      const when = spreadStyler(inc.map((c) => at(c)?.at));
+      const takes = spreadStyler(inc.map((c) => at(c)?.takes));
+      const drop = spreadStyler(inc.map((c) => at(c)?.drop));
       out.push({
         key: `shift-${k}`,
         title: k === 0 ? "Shift" : `Shift ${k + 1}`,
         caption: true,
         rows: [
-          { key: `shift-${k}-when`, label: "When", cell: (c) => (at(c) ? <span style={when(at(c)!.at)}>{at(c)!.at.toFixed(2)}</span> : DASH) },
-          { key: `shift-${k}-takes`, label: "Takes", cell: (c) => (at(c) ? <span style={takes(at(c)!.takes)}>{at(c)!.takes.toFixed(2)}</span> : DASH) },
+          { key: `shift-${k}-when`, label: "When", avg: { num: (c) => at(c)?.at, fmt: (v) => v.toFixed(2) }, cell: (c) => (at(c) ? <span style={when(at(c)!.at)}>{at(c)!.at.toFixed(2)}</span> : DASH) },
+          { key: `shift-${k}-takes`, label: "Takes", avg: { num: (c) => at(c)?.takes, fmt: (v) => v.toFixed(2) }, cell: (c) => (at(c) ? <span style={takes(at(c)!.takes)}>{at(c)!.takes.toFixed(2)}</span> : DASH) },
           {
             key: `shift-${k}-drop`,
             label: withUnit("Drop", "rpm"),
+            avg: { num: (c) => at(c)?.drop, fmt: (v) => Math.round(v).toLocaleString() },
             cell: (c) => (at(c) ? <span style={drop(at(c)!.drop)}>{Math.round(at(c)!.drop).toLocaleString()}</span> : DASH),
           },
         ],
@@ -862,6 +942,11 @@ export function RunSheet({
     return out;
   }, [cols, eighthOnly, eventBests, eventRanges, estScope, onEstScopeChange, raceWeightLb, changesAt, tuneAt, knobMovesAt]);
 
+  const means = useMemo(
+    () => new Map(sections.flatMap((s) => s.rows.map((r) => [r.key, meanOf(r, cols)] as const))),
+    [sections, cols],
+  );
+
   const labelCell =
     "sticky left-0 z-10 flex items-center justify-end gap-1 border-r px-2.5 text-right text-[10px] font-medium uppercase tracking-wider text-muted-foreground group-hover:bg-muted";
   const valueCell =
@@ -871,7 +956,7 @@ export function RunSheet({
     <div className="mt-3 w-fit max-w-full overflow-x-auto rounded-lg border bg-card">
       <div
         className="grid"
-        style={{ gridTemplateColumns: `8rem repeat(${cols.length}, 5.5rem)` }}
+        style={{ gridTemplateColumns: `8rem repeat(${cols.length}, 5.5rem) 5.5rem` }}
         onMouseLeave={() => {
           setHoverCol(null);
           setHoverRow(null);
@@ -909,6 +994,7 @@ export function RunSheet({
             {d.day}
           </div>
         ))}
+        <div className={AVG_COL} />
 
         {/* A plain way into each pass's log. */}
         <div className="sticky left-0 z-10 bg-card" />
@@ -921,16 +1007,24 @@ export function RunSheet({
               setHoverRow(null);
             }}
           >
-            <Button
-              variant="outline"
-              size="xs"
-              className="h-5 w-full text-[10px]"
-              onClick={() => onOpenViewer(c.file._id)}
-            >
-              Open
-            </Button>
+            <div className="flex items-center gap-1">
+              <Switch
+                checked={!c.excluded}
+                onChange={(on) => void setExcluded({ id: c.file._id, excluded: !on })}
+                title={c.excluded ? "Count this pass again" : "Leave this pass out of the colours and averages"}
+              />
+              <Button
+                variant="outline"
+                size="xs"
+                className="h-5 min-w-0 flex-1 text-[10px]"
+                onClick={() => onOpenViewer(c.file._id)}
+              >
+                Open
+              </Button>
+            </div>
           </div>
         ))}
+        <div className={AVG_COL} />
 
         {/* Column heads */}
         <div className={`${labelCell} border-b bg-card`} />
@@ -966,6 +1060,9 @@ export function RunSheet({
             slipRefs={slipRefs}
           />
         ))}
+        <div className={`${AVG_COL} flex items-end justify-end border-b px-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground`}>
+          Avg
+        </div>
 
         {/* Groups part with a rule; only a group whose labels need it gets a caption. */}
         {(() => {
@@ -975,7 +1072,7 @@ export function RunSheet({
             {s.caption && (
               <>
                 <div className={`${labelCell} h-5 border-t bg-card pt-1 text-[9px] text-muted-foreground/50`}>{s.title}</div>
-                <div className="border-t" style={{ gridColumn: `span ${cols.length}` }} />
+                <div className="border-t" style={{ gridColumn: `span ${cols.length + 1}` }} />
               </>
             )}
             {s.rows.map((r, ri) => {
@@ -999,9 +1096,23 @@ export function RunSheet({
                         setHoverRow(r.key);
                       }}
                     >
-                      <span className={`transition-opacity ${dimmed(r.key)}`}>{r.cell(c)}</span>
+                      {hoverCol === i && <AvgArrow r={r} c={c} mean={means.get(r.key)} />}
+                      <span className={`transition-opacity ${dimmed(r.key)}`}>
+                        {c.excluded ? <span className={EXCLUDED}>{r.cell(c)}</span> : r.cell(c)}
+                      </span>
                     </div>
                   ))}
+                  <div
+                    className={`${valueCell} ${rule} ${r.bold ? "font-bold" : ""} ${AVG_COL} ${striped ? STRIPE : ""} text-muted-foreground`}
+                    onMouseEnter={() => {
+                      setHoverCol(null);
+                      setHoverRow(r.key);
+                    }}
+                  >
+                    <span className={`transition-opacity ${dimmed(r.key)}`}>
+                      {means.get(r.key) !== undefined ? r.avg!.fmt(means.get(r.key)!) : null}
+                    </span>
+                  </div>
                 </div>
               );
             })}
@@ -1018,6 +1129,7 @@ export function RunSheet({
             <NotesCell file={c.file} />
           </div>
         ))}
+        <div className={`${AVG_COL} border-t`} />
       </div>
     </div>
   );
