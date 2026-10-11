@@ -45,9 +45,24 @@ const LIFT_FRACTION = 0.9;
 const THROTTLE_SETTLE_S = 0.3;
 const MAX_PASS_S = 8;
 
+/** Engine, transmission and oil temperatures — not the air, the ECU or an EGT. */
+const WATCHED_TEMP = /coolant|engine temp|transmission|trans\b|oil temp/i;
+const NOT_WATCHED_TEMP = /ambient|intake|air|ecu|egt|exhaust|fuel|target|correction|limit/i;
+
 function isWatched(name: string, quantitySlug: string | undefined): boolean {
   if (/battery voltage/i.test(name)) return true;
+  if (quantitySlug === "temperature") return WATCHED_TEMP.test(name) && !NOT_WATCHED_TEMP.test(name);
   return quantitySlug === "pressure" && /pressure/i.test(name) && !NOT_SUPPLY.test(name);
+}
+
+/**
+ * Whether a level is checked at all. A supply pressure near zero on the line
+ * is a sensor on a system that isn't in use (nitrous on a truck without it,
+ * the brakes) — except coolant pressure, which normally sits at a few psi.
+ */
+export function isCheckedLevel(l: { name: string; quantitySlug?: string; base: number }): boolean {
+  if (l.quantitySlug !== "pressure") return true;
+  return l.base >= MIN_BASE_KPA || (/coolant/i.test(l.name) && l.base >= MIN_COOLANT_BASE_KPA);
 }
 
 /** Where the wide-open part of the pass ends: the first time the throttle falls under LIFT_FRACTION of its peak. */
@@ -294,6 +309,16 @@ export type Anomaly =
   | { kind: "high"; row: string; level: PassLevel; usualMax: number }
   /** ...or ran well below what the ECU expected it to be — judged without any history. */
   | { kind: "short"; row: string; level: PassLevel }
+  /** A temperature reached a limit no engine or transmission should — judged without any history. */
+  | { kind: "hot"; row: string; level: PassLevel; limit: number }
+  /** Peak boost well below or above where this vehicle usually peaks. */
+  | { kind: "boost"; row: string; boost: BoostReading; usual: number }
+  /** Boost fell well short of what the ECU commanded — judged without any history. */
+  | { kind: "boost-target"; row: string; boost: BoostReading }
+  /** The rev limiter or an engine cut fired during the pass. */
+  | { kind: "limiter"; row: string; limiter: LimiterReading }
+  /** A sensor that read fine on the line reported a fault during the pass. */
+  | { kind: "fault"; row: string; fault: FaultReading }
   /** A wideband ran well lean of the target for a while. */
   | { kind: "lean"; row: string; label: string; seconds: number; at: number; worst: number }
   /** A cylinder moved away from where it usually sits against the others. */
@@ -318,6 +343,20 @@ const MIN_FALL_VOLTS = 0.5;
  */
 const SHORT_FRACTION = 0.1;
 const SHORT_MIN_KPA = 14;
+/**
+ * Temperatures past these on a pass are trouble whatever the vehicle usually
+ * does: coolant boiling under a typical cap, transmission fluid starting to
+ * break down, oil past what most oils are rated for.
+ */
+const TEMP_LIMITS_C: { match: RegExp; limitC: number }[] = [
+  { match: /coolant|engine temp/i, limitC: 110 },
+  { match: /transmission|trans\b/i, limitC: 105 },
+  { match: /oil/i, limitC: 135 },
+];
+/** A temperature this much above its usual high on a pass (8 °C, about 15 °F). */
+const TEMP_RISE_C = 8;
+/** Coolant pressure is checked from 1 psi on the line. */
+const MIN_COOLANT_BASE_KPA = 7;
 /** A supply this low on the line is a sensor on an unused system, not a supply. */
 const MIN_BASE_KPA = 70;
 
@@ -326,9 +365,148 @@ const MIN_BASE_KPA = 70;
  * `refs`, the vehicle's other passes: more than three spreads below their
  * usual low, and at least MIN_FALL_FRACTION of their line level.
  */
+/** Manifold pressure through the pass, for boosted engines (preview version 16). */
+export interface BoostReading {
+  /** The highest boost, smoothed over BOOST_SMOOTH_S, and when. Canonical kPa. */
+  peak: number;
+  peakAt: number;
+  /** With a boost target logged: the furthest boost fell short of it from 1 s on. */
+  targetGap?: number;
+  targetName?: string;
+  mapName: string;
+}
+
+/** The limiter or an engine cut during the pass (preview version 16). */
+export interface LimiterReading {
+  name: string;
+  /** How long it was cutting, from LIMITER_FROM_S until the throttle came off. */
+  seconds: number;
+  at: number;
+  /** The most it cut, in the channel's own units (percent for a cut percentage). */
+  worst: number;
+}
+
+/** A channel that read fine on the line and then faulted during the pass (preview version 16). */
+export interface FaultReading {
+  name: string;
+  seconds: number;
+  at: number;
+}
+
 export interface PassChecks {
   levels: PassLevel[];
   cylinders: CylinderGroup[];
+  boost?: BoostReading | null;
+  limiter?: LimiterReading | null;
+  faults?: FaultReading[] | null;
+}
+
+const MAP_NAME = /^(manifold (absolute )?pressure|map)$/i;
+const BOOST_TARGET = /^(boost (control )?target( pressure)?|target boost|boost target)$/i;
+const BOOST_SMOOTH_S = 0.05;
+/** Below this peak (3 psi) the engine isn't boosted; there's nothing to check. */
+const BOOSTED_KPA = 21;
+
+export function readBoost(parsed: ParsedLog, session: LogSession, launchAt: number, passEnd: number): BoostReading | null {
+  const mapDef = parsed.channelDefs.find((d) => MAP_NAME.test(d.name.trim()));
+  const map = mapDef ? session.channels.get(mapDef.name) : undefined;
+  if (!mapDef || !map) return null;
+  const ts = session.timestamps;
+  const targetDef = parsed.channelDefs.find((d) => BOOST_TARGET.test(d.name.trim()));
+  const target = targetDef ? session.channels.get(targetDef.name) : undefined;
+  let peak = -Infinity;
+  let peakAt = 0;
+  let targetGap: number | undefined;
+  for (let i = lowerBound(ts, launchAt + THROTTLE_SETTLE_S); i < ts.length && ts[i] <= passEnd; i++) {
+    let sum = 0;
+    let n = 0;
+    let tSum = 0;
+    let tn = 0;
+    for (let j = i; j < ts.length && ts[j] <= ts[i] + BOOST_SMOOTH_S; j++) {
+      if (Number.isFinite(map[j])) {
+        sum += map[j];
+        n++;
+      }
+      if (target && Number.isFinite(target[j])) {
+        tSum += target[j];
+        tn++;
+      }
+    }
+    if (!n) continue;
+    const m = sum / n;
+    if (m > peak) {
+      peak = m;
+      peakAt = ts[i] - launchAt;
+    }
+    if (tn && ts[i] - launchAt >= 1) {
+      const gap = tSum / tn - m;
+      if (targetGap === undefined || gap > targetGap) targetGap = gap;
+    }
+  }
+  if (!Number.isFinite(peak) || peak < BOOSTED_KPA) return null;
+  return { peak, peakAt, targetGap, targetName: targetDef?.name, mapName: mapDef.name };
+}
+
+/** A cut percentage is the clearest record of a limiter; an on/off flag will do. */
+const LIMITER_CUT = /limiter.*cut percentage|overall cut percentage/i;
+const LIMITER_ACTIVE = /limiter active|rev limit(er)? active/i;
+/** The launch limiter is still letting go just after the release. */
+const LIMITER_FROM_S = 0.3;
+
+export function readLimiter(parsed: ParsedLog, session: LogSession, launchAt: number, passEnd: number): LimiterReading | null {
+  const def = parsed.channelDefs.find((d) => LIMITER_CUT.test(d.name)) ?? parsed.channelDefs.find((d) => LIMITER_ACTIVE.test(d.name));
+  const vals = def ? session.channels.get(def.name) : undefined;
+  if (!def || !vals) return null;
+  const ts = session.timestamps;
+  let seconds = 0;
+  let at = -1;
+  let worst = 0;
+  const from = lowerBound(ts, launchAt + LIMITER_FROM_S);
+  for (let i = from; i < ts.length && ts[i] <= passEnd; i++) {
+    if (Number.isFinite(vals[i]) && vals[i] > 0) {
+      if (at < 0) at = ts[i] - launchAt;
+      worst = Math.max(worst, vals[i]);
+      if (i + 1 < ts.length) seconds += ts[i + 1] - ts[i];
+    }
+  }
+  return { name: def.name, seconds, at: Math.max(at, 0), worst };
+}
+
+/** A fault this long or longer counts; one dropped sample is noise. */
+const FAULT_MIN_S = 0.02;
+
+/**
+ * Every channel that read fine for the two seconds before the launch and then
+ * faulted during the pass. A sensor that was never reading — not fitted, or
+ * dead all day — isn't news on any one pass.
+ */
+export function readFaults(session: LogSession, launchAt: number, passEnd: number): FaultReading[] {
+  const ts = session.timestamps;
+  const preFrom = lowerBound(ts, launchAt - 2);
+  const passFrom = lowerBound(ts, launchAt);
+  const out: FaultReading[] = [];
+  for (const [name] of session.channelStatus) {
+    const vals = session.channels.get(name);
+    if (!vals) continue;
+    let clean = true;
+    for (let i = preFrom; i < passFrom; i++) {
+      if (!Number.isFinite(vals[i])) {
+        clean = false;
+        break;
+      }
+    }
+    if (!clean || passFrom === preFrom) continue;
+    let seconds = 0;
+    let at = -1;
+    for (let i = passFrom; i < ts.length && ts[i] <= passEnd; i++) {
+      if (!Number.isFinite(vals[i])) {
+        if (at < 0) at = ts[i] - launchAt;
+        if (i + 1 < ts.length) seconds += ts[i + 1] - ts[i];
+      }
+    }
+    if (seconds >= FAULT_MIN_S) out.push({ name, seconds, at });
+  }
+  return out;
 }
 
 /**
@@ -349,7 +527,13 @@ export function findAnomalies(pass: PassChecks, refs: PassChecks[]): Anomaly[] {
   const out: Anomaly[] = [];
   for (const level of pass.levels) {
     const pressure = level.quantitySlug === "pressure";
-    if (pressure && level.base < MIN_BASE_KPA) continue;
+    const temperature = level.quantitySlug === "temperature";
+    if (!isCheckedLevel(level)) continue;
+    // A temperature past what an engine or transmission should see, with or without history.
+    const limit = temperature ? TEMP_LIMITS_C.find((t) => t.match.test(level.name))?.limitC : undefined;
+    if (limit !== undefined && level.max !== undefined && level.max >= limit) {
+      out.push({ kind: "hot", row: level.name, level, limit });
+    }
     // Against the ECU's own expected value: needs no other passes.
     const sf = level.shortfall;
     if (sf && sf.expected > 0 && sf.gap >= Math.max(sf.expected * SHORT_FRACTION, SHORT_MIN_KPA)) {
@@ -360,8 +544,11 @@ export function findAnomalies(pass: PassChecks, refs: PassChecks[]): Anomaly[] {
     const usualMin = median(same.map((l) => l.min));
     const usualBase = median(same.map((l) => l.base));
     const spread = 1.4826 * median(same.map((l) => Math.abs(l.min - usualMin)));
-    const floor = Math.max(Math.abs(usualBase) * MIN_FALL_FRACTION, pressure ? MIN_FALL_KPA : MIN_FALL_VOLTS);
-    if (usualMin - level.min > Math.max(3 * spread, floor)) out.push({ kind: "low", row: level.name, level, usualMin });
+    const floor = temperature
+      ? TEMP_RISE_C
+      : Math.max(Math.abs(usualBase) * MIN_FALL_FRACTION, pressure ? MIN_FALL_KPA : MIN_FALL_VOLTS);
+    // A cold engine or transmission isn't a fault; only a temperature that ran hot is.
+    if (!temperature && usualMin - level.min > Math.max(3 * spread, floor)) out.push({ kind: "low", row: level.name, level, usualMin });
 
     // The same test the other way: a regulator or a pressure control stuck high.
     const maxes = same.flatMap((l) => (l.max !== undefined ? [l.max] : []));
@@ -432,8 +619,39 @@ export function findAnomalies(pass: PassChecks, refs: PassChecks[]): Anomaly[] {
       });
     }
   }
+
+  // Boost: the peak against this vehicle's usual peak, both ways — a leak or a
+  // stuck wastegate pulls it down, a control fault overshoots.
+  const b = pass.boost;
+  if (b) {
+    const peaks = refs.flatMap((r) => (r.boost && r.boost.mapName === b.mapName ? [r.boost.peak] : []));
+    if (peaks.length >= MIN_REFS) {
+      const usual = median(peaks);
+      const spread = 1.4826 * median(peaks.map((p) => Math.abs(p - usual)));
+      if (Math.abs(b.peak - usual) > Math.max(3 * spread, BOOST_OFF_KPA)) out.push({ kind: "boost", row: "Boost", boost: b, usual });
+    }
+    // Short of what the ECU commanded: a leak, a wastegate, or turbos out of
+    // map. A setup that can never reach its target shows this every pass —
+    // which is worth knowing too.
+    if (b.targetGap !== undefined && b.targetGap >= BOOST_TARGET_SHORT_KPA) {
+      out.push({ kind: "boost-target", row: "Boost vs target", boost: b });
+    }
+  }
+
+  // The limiter during the pass is never part of the plan.
+  if (pass.limiter && pass.limiter.seconds >= LIMITER_MIN_S) out.push({ kind: "limiter", row: "Limiter", limiter: pass.limiter });
+
+  // A sensor dropping out mid-pass is worth a look every time.
+  for (const f of pass.faults ?? []) out.push({ kind: "fault", row: "Sensor faults", fault: f });
   return out;
 }
+
+/** Peak boost this far (2 psi) from its usual, either way. */
+const BOOST_OFF_KPA = 14;
+/** Boost this far (3 psi) short of its target, held 50 ms, from 1 s on. */
+const BOOST_TARGET_SHORT_KPA = 21;
+/** Cutting this long during the pass. Nine clean passes on two vehicles: none at all after 0.3 s. */
+const LIMITER_MIN_S = 0.05;
 
 /** Lean of target by LEAN_RATIO for this long. Calibrated on one truck: a fuel pressure dip held it 0.17 s, nine clean passes 0.024 s at most. */
 const LEAN_MIN_S = 0.1;

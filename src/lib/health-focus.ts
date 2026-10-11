@@ -1,7 +1,7 @@
 import type { PageConfig } from "./viewer-types";
 import type { ParsedLog } from "./log-types";
 import type { Id } from "../../convex/_generated/dataModel";
-import { cylinderChannels, readLevels, targetChannel, wideOpenEnd } from "./anomalies";
+import { cylinderChannels, isCheckedLevel, readBoost, readLevels, readLimiter, targetChannel, wideOpenEnd } from "./anomalies";
 
 /**
  * A Health value clicked on the run sheet, handed to the viewer: which pass,
@@ -63,7 +63,10 @@ export function clearHealthFocus() {
 export const HEALTH_PAGE_ID = "page-health";
 const TRACE_IDS = {
   pressure: "health-pressures",
+  temperature: "health-temperatures",
+  boost: "health-boost",
   battery: "health-battery",
+  limiter: "health-limiter",
   lambda: "health-widebands",
   egt: "health-egts",
 } as const;
@@ -85,7 +88,10 @@ type HealthLog = {
 export function buildHealthPage(logs: HealthLog[]): PageConfig | null {
   const byTrace: Record<keyof typeof TRACE_IDS, { logFileId: Id<"files">; channelName: string }[]> = {
     pressure: [],
+    temperature: [],
+    boost: [],
     battery: [],
+    limiter: [],
     lambda: [],
     egt: [],
   };
@@ -94,11 +100,18 @@ export function buildHealthPage(logs: HealthLog[]): PageConfig | null {
     if (session && log.raceStartTime != null) {
       const end = wideOpenEnd(log.parsed, session, log.raceStartTime, null);
       for (const l of readLevels(log.parsed, session, log.raceStartTime, end)) {
-        const battery = l.quantitySlug !== "pressure";
-        if (!battery && l.base < 70) continue;
-        byTrace[battery ? "battery" : "pressure"].push({ logFileId: log.fileId, channelName: l.name });
+        if (!isCheckedLevel(l)) continue;
+        const trace = l.quantitySlug === "pressure" ? "pressure" : l.quantitySlug === "temperature" ? "temperature" : "battery";
+        byTrace[trace].push({ logFileId: log.fileId, channelName: l.name });
         if (l.shortfall) byTrace.pressure.push({ logFileId: log.fileId, channelName: l.shortfall.expectedName });
       }
+      const boost = readBoost(log.parsed, session, log.raceStartTime, end);
+      if (boost) {
+        byTrace.boost.push({ logFileId: log.fileId, channelName: boost.mapName });
+        if (boost.targetName) byTrace.boost.push({ logFileId: log.fileId, channelName: boost.targetName });
+      }
+      const limiter = readLimiter(log.parsed, session, log.raceStartTime, end);
+      if (limiter) byTrace.limiter.push({ logFileId: log.fileId, channelName: limiter.name });
     }
     const defs = log.parsed.channelDefs;
     const widebands = cylinderChannels(defs, "lambda").map((m) => m.name);

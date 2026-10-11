@@ -7,7 +7,7 @@ import { parseDatalogBytes } from "@/lib/datalog-parser";
 import { lttbDownsample } from "@/lib/downsample";
 import { readKnobs, readLaunch, type KnobReading, type LaunchReading } from "@/lib/launch-readings";
 import { readDriveshaft, readShifts, type DriveshaftReading, type ShiftReading } from "@/lib/pass-readings";
-import { readCylinders, readLevels, wideOpenEnd, type CylinderGroup, type PassLevel } from "@/lib/anomalies";
+import { readBoost, readCylinders, readFaults, readLevels, readLimiter, wideOpenEnd, type BoostReading, type CylinderGroup, type FaultReading, type LimiterReading, type PassLevel } from "@/lib/anomalies";
 import { parsePreview } from "@/lib/preview";
 import { passSessionIndex } from "@/lib/load-haltech-log";
 import type { PassLift } from "@/lib/lift-estimate";
@@ -15,7 +15,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
 // Bump when the preview computation changes so stored previews recompute.
-const PREVIEW_VERSION = 15;
+const PREVIEW_VERSION = 16;
 
 // Stored window around the race — wider than the rendered window so the
 // dashboard lead-in/tail can be tuned without recomputing stored previews.
@@ -51,6 +51,12 @@ export interface PreviewPayload {
   cylinders?: CylinderGroup[] | null;
   /** Seconds after the launch the health checks ran to: where the throttle came off (preview version 13). */
   checksTo?: number | null;
+  /** Peak boost, and its gap to a logged target (preview version 16); null when not boosted. */
+  boost?: BoostReading | null;
+  /** The limiter during the pass (preview version 16); null without a limiter channel. */
+  limiter?: LimiterReading | null;
+  /** Sensors that faulted during the pass (preview version 16). */
+  faults?: FaultReading[] | null;
 }
 
 /** A file's stored preview, or null when absent or from an older version. */
@@ -244,6 +250,9 @@ async function computePreview(bytes: ArrayBuffer, fileName: string): Promise<Pre
     levels: raceStart !== null ? readLevels(parsed, session, raceStart, wideOpenEnd(parsed, session, raceStart, raceEnd)) : null,
     cylinders: raceStart !== null ? readCylinders(parsed, session, raceStart, wideOpenEnd(parsed, session, raceStart, raceEnd)) : null,
     checksTo: raceStart !== null ? wideOpenEnd(parsed, session, raceStart, raceEnd) - raceStart : null,
+    boost: raceStart !== null ? readBoost(parsed, session, raceStart, wideOpenEnd(parsed, session, raceStart, raceEnd)) : null,
+    limiter: raceStart !== null ? readLimiter(parsed, session, raceStart, wideOpenEnd(parsed, session, raceStart, raceEnd)) : null,
+    faults: raceStart !== null ? readFaults(session, raceStart, wideOpenEnd(parsed, session, raceStart, raceEnd)) : null,
   };
 }
 

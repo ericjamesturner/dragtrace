@@ -507,7 +507,9 @@ export function FileList({
     for (const f of vehicleFiles ?? []) {
       if (f.excluded) continue;
       const p = parsePreview(f.preview);
-      if (p?.levels?.length || p?.cylinders?.length) out.set(f._id, { levels: p.levels ?? [], cylinders: p.cylinders ?? [] });
+      if (p?.levels?.length || p?.cylinders?.length || p?.boost || p?.limiter) {
+        out.set(f._id, { levels: p.levels ?? [], cylinders: p.cylinders ?? [], boost: p.boost, limiter: p.limiter, faults: p.faults });
+      }
     }
     return out;
   }, [vehicleFiles]);

@@ -4,7 +4,10 @@ import { deflateSync } from "node:zlib";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { parsePreview, raceSeries } from "../src/lib/preview";
+import { parsePreview, raceSeries, type PreviewPayload } from "../src/lib/preview";
+import { healthLines } from "../src/lib/health-text";
+import type { PassChecks } from "../src/lib/anomalies";
+import type { UnitOverrides } from "../src/lib/units";
 
 /** The ntfy.sh topic that hears about new uploads. Anyone who knows the name can subscribe. */
 const NTFY_TOPIC = "dragtrace-alerts";
@@ -28,6 +31,21 @@ export const sendLogAlert = internalAction({
   handler: async (ctx, args) => {
     const info = await ctx.runQuery(internal.notify.alertInfo, { fileId: args.fileId });
     if (!info) return;
+    // The Health check, so the phone says whether the pass needs a look.
+    let health: string[] | null = null;
+    try {
+      const pass = checksOf(parsePreview(info.preview));
+      if (pass) {
+        const refs = info.refPreviews.flatMap((raw) => {
+          const c = checksOf(parsePreview(raw));
+          return c ? [c] : [];
+        });
+        const overrides = Object.assign({}, ...info.unitOverrides.map(parseOverrides)) as UnitOverrides;
+        health = healthLines(pass, refs, info.unitSystem === "metric" ? "metric" : "imperial", overrides);
+      }
+    } catch (e) {
+      console.warn("Alert health check failed:", e);
+    }
     let attach: string | null = null;
     try {
       const preview = args.withImage ? parsePreview(info.preview) : null;
@@ -49,8 +67,14 @@ export const sendLogAlert = internalAction({
         body: JSON.stringify({
           topic: NTFY_TOPIC,
           title: info.title,
-          message: info.message,
-          tags: ["checkered_flag"],
+          message:
+            health === null
+              ? info.message
+              : health.length
+                ? `${info.message}\n⚠️ ${health.join("\n⚠️ ")}`
+                : `${info.message}\nHealth: all clear`,
+          tags: health?.length ? ["warning"] : ["checkered_flag"],
+          ...(health?.length ? { priority: 4 } : {}),
           ...(attach ? { attach, filename: "pass.png" } : {}),
         }),
       });
@@ -60,6 +84,22 @@ export const sendLogAlert = internalAction({
     }
   },
 });
+
+/** The Health check's inputs from a stored preview; null for a preview without them. */
+function checksOf(p: PreviewPayload | null): PassChecks | null {
+  if (!p || (!p.levels?.length && !p.cylinders?.length && !p.boost && !p.limiter)) return null;
+  return { levels: p.levels ?? [], cylinders: p.cylinders ?? [], boost: p.boost, limiter: p.limiter, faults: p.faults };
+}
+
+function parseOverrides(raw: string | null): UnitOverrides {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as UnitOverrides) : {};
+  } catch {
+    return {};
+  }
+}
 
 /**
  * The pass as the run sheet's trace shows it: RPM, throttle and driveshaft,

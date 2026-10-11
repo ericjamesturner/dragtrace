@@ -10,7 +10,7 @@ import { estimatePowerFromTimeslip, type WeightPowerEstimates } from "@/lib/drag
 import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
 import { convertForDisplay, getDisplayPrecision, getDisplayUnit, type UnitOverrides, type UnitSystem } from "@/lib/units";
 import { setHealthFocus, type HealthFocus } from "@/lib/health-focus";
-import { checksCut, findAnomalies, offsetsOf, spreadOf, type Anomaly, type CylinderGroup, type PassChecks, type PassLevel } from "@/lib/anomalies";
+import { checksCut, findAnomalies, isCheckedLevel, offsetsOf, spreadOf, type Anomaly, type BoostReading, type CylinderGroup, type FaultReading, type LimiterReading, type PassChecks, type PassLevel } from "@/lib/anomalies";
 import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel } from "@/lib/changes";
 import { timeFromName } from "@/lib/tune-changes";
@@ -240,6 +240,9 @@ interface Col {
   shifts: ShiftReading[];
   levels: PassLevel[];
   cylinders: CylinderGroup[];
+  boost: BoostReading | null;
+  limiter: LimiterReading | null;
+  faults: FaultReading[] | null;
   /** The health checks stopped short of the finish: the throttle came off early. */
   checksCut: number | null;
   /** Seconds after the launch the health checks ran to. */
@@ -504,8 +507,17 @@ export function RunSheet({
           cylinders: preview?.cylinders ?? [],
           checksCut: checksCut(preview?.checksTo ?? undefined, passLen) ? preview!.checksTo! : null,
           checksTo: preview?.checksTo ?? null,
+          boost: preview?.boost ?? null,
+          limiter: preview?.limiter ?? null,
+          faults: preview?.faults ?? null,
           anomalies: findAnomalies(
-            { levels: preview?.levels ?? [], cylinders: preview?.cylinders ?? [] },
+            {
+              levels: preview?.levels ?? [],
+              cylinders: preview?.cylinders ?? [],
+              boost: preview?.boost,
+              limiter: preview?.limiter,
+              faults: preview?.faults,
+            },
             [...levelPool].filter(([id]) => id !== file._id).map(([, checks]) => checks),
           ),
           segs: slip ? segmentTimes(slip) : {},
@@ -1129,6 +1141,33 @@ export function RunSheet({
               text: `${a.label} ${show(a.peak, a.quantitySlug)}`,
               tip: `${sensor(a.label)} peaked at ${show(a.peak, a.quantitySlug)} ${unitOf(a.quantitySlug)} (normally about ${show(a.usual, a.quantitySlug)} ${unitOf(a.quantitySlug)}).`,
             };
+          case "hot": {
+            const unit = unitOf(a.level.quantitySlug);
+            return {
+              text: `↑ ${show(a.level.max!, a.level.quantitySlug)}`,
+              tip: `${a.level.name} reached ${show(a.level.max!, a.level.quantitySlug)} ${unit} — past the ${show(a.limit, a.level.quantitySlug)} ${unit} limit.`,
+            };
+          }
+          case "boost":
+            return {
+              text: `${a.boost.peak < a.usual ? "↓" : "↑"} ${show(a.boost.peak, "pressure")}`,
+              tip: `Boost peaked at ${show(a.boost.peak, "pressure")} ${unitOf("pressure")} at ${a.boost.peakAt.toFixed(2)} s (normally ${show(a.usual, "pressure")} ${unitOf("pressure")}).`,
+            };
+          case "boost-target":
+            return {
+              text: `−${showGap(a.boost.targetGap!, "pressure")}`,
+              tip: `Boost fell ${showGap(a.boost.targetGap!, "pressure")} ${unitOf("pressure")} short of its target.`,
+            };
+          case "limiter":
+            return {
+              text: `${a.limiter.seconds.toFixed(2)}s`,
+              tip: `${a.limiter.name} was cutting for ${a.limiter.seconds.toFixed(2)} s, from ${a.limiter.at.toFixed(2)} s.`,
+            };
+          case "fault":
+            return {
+              text: shortName(a.fault.name),
+              tip: `${a.fault.name} reported a sensor fault for ${a.fault.seconds.toFixed(2)} s, from ${a.fault.at.toFixed(2)} s.`,
+            };
         }
       };
 
@@ -1205,16 +1244,22 @@ export function RunSheet({
       const levelNames: string[] = [];
       for (const c of cols) {
         for (const l of c.levels) {
-          const watched = l.quantitySlug !== "pressure" || l.base >= 70;
-          if (watched && !levelNames.includes(l.name)) levelNames.push(l.name);
+          if (isCheckedLevel(l) && !levelNames.includes(l.name)) levelNames.push(l.name);
         }
       }
       for (const name of levelNames) {
+        const isTemp = cols.some((c) => c.levels.some((l) => l.name === name && l.quantitySlug === "temperature"));
         rows.push(
           healthRow(
             name,
             shortName(name),
-            [
+            isTemp
+              ? [
+                  `${name}: the highest it got, from the line until the throttle comes off.`,
+                  `Red when it runs ${tempGap(8)} or more above its usual high, or reaches a limit no engine or transmission should — that one from the very first pass.`,
+                  usualNote,
+                ]
+              : [
               `${name}: the lowest point while the throttle is wide open, smoothed over 25 ms so one bad sample can't set it off.`,
               "Red when it falls well below its usual low, or rises well above its usual high: more than 3 times its normal variation, and at least 10% of its level on the line.",
               ...(cols.some((c) => c.levels.some((l) => l.name === name && l.shortfall))
@@ -1227,6 +1272,12 @@ export function RunSheet({
               const l = c.levels.find((x) => x.name === name);
               if (!l) return null;
               const unit = unitOf(l.quantitySlug);
+              if (l.quantitySlug === "temperature" && l.max !== undefined) {
+                return {
+                  text: show(l.max, l.quantitySlug),
+                  tip: `Highest ${show(l.max, l.quantitySlug)} ${unit} at ${(l.maxAt ?? 0).toFixed(2)} s, from ${show(l.base, l.quantitySlug)} ${unit} on the line.`,
+                };
+              }
               return {
                 text: show(l.min, l.quantitySlug),
                 tip: `Lowest ${show(l.min, l.quantitySlug)} ${unit} at ${l.minAt.toFixed(2)} s${
@@ -1246,10 +1297,97 @@ export function RunSheet({
               const channels = l.shortfall ? [name, l.shortfall.expectedName] : [name];
               const at = flagged("short") && !flagged("low")
                 ? l.shortfall!.at
-                : flagged("high") && !flagged("low")
+                : (flagged("high") || flagged("hot") || l.quantitySlug === "temperature") && !flagged("low")
                   ? l.maxAt ?? l.minAt
                   : l.minAt;
               return { channels, from: Math.max(-0.5, at - 1), to: at + 1, at };
+            },
+          ),
+        );
+      }
+
+      const wholeRunOf = (c: Col) => ({ from: 0, to: c.checksTo ?? 5 });
+      if (cols.some((c) => c.boost)) {
+        rows.push(
+          healthRow(
+            "Boost",
+            "Boost",
+            [
+              "The highest boost while the throttle is wide open, smoothed over 50 ms.",
+              `Red when it peaks well away from its usual peak, either way: more than 3 times its normal variation and at least ${showGap(14, "pressure")} ${unitOf("pressure")}.`,
+              usualNote,
+            ],
+            (c) =>
+              c.boost
+                ? { text: show(c.boost.peak, "pressure"), tip: `Peak ${show(c.boost.peak, "pressure")} ${unitOf("pressure")} at ${c.boost.peakAt.toFixed(2)} s.` }
+                : null,
+            (c) =>
+              c.boost
+                ? {
+                    channels: c.boost.targetName ? [c.boost.mapName, c.boost.targetName] : [c.boost.mapName],
+                    from: Math.max(-0.5, c.boost.peakAt - 1),
+                    to: c.boost.peakAt + 1,
+                    at: c.boost.peakAt,
+                  }
+                : null,
+          ),
+        );
+      }
+      if (cols.some((c) => c.boost?.targetGap !== undefined)) {
+        rows.push(
+          healthRow(
+            "Boost vs target",
+            "Boost vs target",
+            [
+              "How far boost fell short of its commanded target, from 1 s until the throttle comes off, held 50 ms.",
+              `Red at ${showGap(21, "pressure")} ${unitOf("pressure")} or more short, from the very first pass — a leak, a wastegate, or turbos out of map.`,
+            ],
+            (c) =>
+              c.boost?.targetGap !== undefined
+                ? { text: showGap(c.boost.targetGap, "pressure"), tip: `At most ${showGap(c.boost.targetGap, "pressure")} ${unitOf("pressure")} below target.` }
+                : null,
+            (c) =>
+              c.boost?.targetName
+                ? { channels: [c.boost.mapName, c.boost.targetName], ...wholeRunOf(c) }
+                : null,
+          ),
+        );
+      }
+      if (cols.some((c) => c.limiter)) {
+        rows.push(
+          healthRow(
+            "Limiter",
+            "Limiter",
+            [
+              "How long the rev limiter or an engine cut was cutting, from 0.3 s (after the launch limiter lets go) until the throttle comes off.",
+              "Red at 0.05 s or more — it should never cut during the pass.",
+            ],
+            (c) =>
+              c.limiter
+                ? c.limiter.seconds > 0
+                  ? { text: `${c.limiter.seconds.toFixed(2)}s`, tip: `Cutting ${c.limiter.seconds.toFixed(2)} s from ${c.limiter.at.toFixed(2)} s.` }
+                  : { text: "none", tip: "No cut during the pass." }
+                : null,
+            (c) =>
+              c.limiter
+                ? { channels: [c.limiter.name], ...(c.limiter.seconds > 0 ? { from: Math.max(-0.5, c.limiter.at - 1), to: c.limiter.at + 1, at: c.limiter.at } : wholeRunOf(c)) }
+                : null,
+          ),
+        );
+      }
+      if (cols.some((c) => c.faults)) {
+        rows.push(
+          healthRow(
+            "Sensor faults",
+            "Sensor faults",
+            [
+              "Any sensor that read fine for the 2 s before the launch, then reported a fault during the pass for 0.02 s or more.",
+              "Always red — a sensor dropping out mid-pass is worth a look.",
+            ],
+            (c) => (c.faults ? { text: "none", tip: "Every sensor that read on the line kept reading." } : null),
+            (c) => {
+              const f = c.faults?.[0];
+              return f ? { channels: c.faults!.map((x) => x.name), from: Math.max(-0.5, f.at - 1), to: f.at + 1, at: f.at } : null;
             },
           ),
         );

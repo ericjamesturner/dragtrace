@@ -2,6 +2,9 @@ import { internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
+/** How many of the vehicle's latest passes the alert's Health check compares against. */
+const HEALTH_REFS = 30;
+
 /** What a new-log alert says, and the preview to draw for it. Null once the file is gone. */
 export const alertInfo = internalQuery({
   args: { fileId: v.id("files") },
@@ -13,10 +16,28 @@ export const alertInfo = internalQuery({
       ctx.db.get(file.vehicleId),
       ctx.db.get(file.eventId),
     ]);
+    // What the Health check needs: this pass, the vehicle's other counted
+    // passes to judge it against (the latest ones are enough), and the units.
+    const others = (
+      await ctx.db
+        .query("files")
+        .withIndex("by_vehicle", (q) => q.eq("vehicleId", file.vehicleId))
+        .collect()
+    )
+      .filter((f) => f._id !== file._id && !f.excluded && f.preview)
+      .sort((a, b) => b.uploadedAt - a.uploadedAt)
+      .slice(0, HEALTH_REFS);
+    const prefs = await ctx.db
+      .query("userPreferences")
+      .withIndex("by_user", (q) => q.eq("userId", file.userId))
+      .first();
     return {
       title: `New log from ${user?.email ?? user?.name ?? file.userId}`,
       message: `${vehicle?.name ?? "Unknown vehicle"} · ${event?.name ?? "Unknown event"}`,
       preview: file.preview ?? null,
+      refPreviews: others.map((f) => f.preview!),
+      unitSystem: prefs?.unitSystem ?? null,
+      unitOverrides: [prefs?.unitOverrides ?? null, vehicle?.unitOverrides ?? null],
     };
   },
 });
