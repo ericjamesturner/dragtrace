@@ -238,6 +238,9 @@ interface Col {
   excluded: boolean;
 }
 
+/** Tailwind green-500: a pass that counts. */
+const COUNTS_GREEN = "oklch(72.3% 0.219 149.579)";
+
 /** The average column: set off from the passes by a rule. */
 const AVG_COL = "border-l border-l-foreground/15";
 /** An unticked pass: its numbers stay readable, but plainly out of play. */
@@ -1009,6 +1012,27 @@ export function RunSheet({
         ))}
         <div className={AVG_COL} />
 
+        {/* Whether each pass counts toward the bests, colours and averages. */}
+        <div className="sticky left-0 z-10 bg-card" />
+        {cols.map((c, i) => (
+          <div
+            key={c.file._id}
+            className={`flex justify-center pt-1.5 ${colClass(i)}`}
+            onMouseEnter={() => {
+              setHoverCol(i);
+              setHoverRow(null);
+            }}
+          >
+            <Switch
+              checked={!c.excluded}
+              color={COUNTS_GREEN}
+              onChange={(on) => void setExcluded({ id: c.file._id, excluded: !on })}
+              title={c.excluded ? "Count this pass again" : "Leave this pass out of the colours and averages"}
+            />
+          </div>
+        ))}
+        <div className={AVG_COL} />
+
         {/* A plain way into each pass's log. */}
         <div className="sticky left-0 z-10 bg-card" />
         {cols.map((c, i) => (
@@ -1020,21 +1044,14 @@ export function RunSheet({
               setHoverRow(null);
             }}
           >
-            <div className="flex items-center gap-1">
-              <Switch
-                checked={!c.excluded}
-                onChange={(on) => void setExcluded({ id: c.file._id, excluded: !on })}
-                title={c.excluded ? "Count this pass again" : "Leave this pass out of the colours and averages"}
-              />
-              <Button
-                variant="outline"
-                size="xs"
-                className="h-5 min-w-0 flex-1 text-[10px]"
-                onClick={() => onOpenViewer(c.file._id)}
-              >
-                Open
-              </Button>
-            </div>
+            <Button
+              variant="outline"
+              size="xs"
+              className="h-5 w-full text-[10px]"
+              onClick={() => onOpenViewer(c.file._id)}
+            >
+              Open
+            </Button>
           </div>
         ))}
         <div className={AVG_COL} />
