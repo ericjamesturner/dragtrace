@@ -1244,6 +1244,9 @@ export function RunSheet({
       });
 
       const rows: Row[] = [];
+      // The O2 sensors and the EGTs get their own groups under Health.
+      const o2Rows: Row[] = [];
+      const egtRows: Row[] = [];
 
       // Supplies: one row per pressure the checks watch, and the battery.
       // "Device Battery Voltage" -> "Battery", "Transmission Line Pressure" -> "Trans Line Pressure".
@@ -1414,7 +1417,7 @@ export function RunSheet({
       // The whole checked stretch of the pass, for rows about averages.
       const wholeRun = (c: Col) => ({ from: 0, to: c.checksTo ?? 5 });
       if (cols.some((c) => groupOf(c, "lambda")?.lean)) {
-        rows.push(
+        o2Rows.push(
           healthRow(
             "Lean spike",
             "Lean spike",
@@ -1440,10 +1443,10 @@ export function RunSheet({
         );
       }
       if (cols.some((c) => { const g = groupOf(c, "lambda"); return g ? targetRatios(g) : null; })) {
-        rows.push(
+        o2Rows.push(
           healthRow(
             "Wideband vs target",
-            "λ vs target",
+            "vs target",
             [
               "Each wideband's average against Target Lambda's average, from 1 s until the throttle comes off. Shown: the one furthest off — + is lean, − is rich.",
               `Red when one averages ${pct(TARGET_OFF)} or more lean of target, from the very first pass. Blue when it's that far rich: off, but the safe way. Grey within ${pct(TARGET_OFF)}.`,
@@ -1474,10 +1477,10 @@ export function RunSheet({
         );
       }
       if (cols.some((c) => groupOf(c, "lambda"))) {
-        rows.push(
+        o2Rows.push(
           healthRow(
             "Wideband drift",
-            "λ drift",
+            "Drift",
             [
               "Each wideband's average from 1 s until the throttle comes off, against the average of all of them. Shown: the leanest one.",
               "Red when a cylinder runs 1.7% or more leaner against the others than it usually does, and is now leaner than average.",
@@ -1495,7 +1498,7 @@ export function RunSheet({
           ),
           healthRow(
             "Wideband spread",
-            "λ spread",
+            "Spread",
             ["Leanest wideband minus richest, from their averages after 1 s.", "Red when 2.5% or more wider than usual.", usualNote],
             (c) => {
               const g = groupOf(c, "lambda");
@@ -1506,10 +1509,10 @@ export function RunSheet({
         );
       }
       if (cols.some((c) => groupOf(c, "egt"))) {
-        rows.push(
+        egtRows.push(
           healthRow(
             "EGT spike",
-            "EGT spike",
+            "Spike",
             [
               "Each EGT's highest point from 0.15 s until the throttle comes off, held at least 50 ms. Shown: the hottest.",
               `Red when a cylinder peaks ${tempGap(100)} or more above its usual peak — or, with no history yet, ${tempGap(200)} above the other cylinders.`,
@@ -1525,7 +1528,7 @@ export function RunSheet({
           ),
           healthRow(
             "EGT drift",
-            "EGT drift",
+            "Drift",
             [
               "Each EGT's average from 1 s until the throttle comes off, against the average of all of them. Shown: the one furthest off.",
               `Red when a cylinder sits ${tempGap(50)} or more hotter or colder against the others than it usually does.`,
@@ -1545,7 +1548,7 @@ export function RunSheet({
           ),
           healthRow(
             "EGT spread",
-            "EGT spread",
+            "Spread",
             [`Hottest EGT minus coldest, from their averages after 1 s. Red when ${tempGap(75)} or more wider than usual.`, usualNote],
             (c) => {
               const g = groupOf(c, "egt");
@@ -1556,10 +1559,10 @@ export function RunSheet({
         );
         // Only with no history to judge drift by; shown when it fires.
         if (cols.some((c) => c.anomalies.some((a) => a.kind === "egt-odd"))) {
-          rows.push(
+          egtRows.push(
             healthRow(
               "EGT odd one out",
-              "EGT odd one out",
+              "Odd one out",
               [
                 `With fewer than 3 earlier passes to compare against: a cylinder whose EGT averages ${tempGap(150)} or more off the others.`,
                 "Cold can mean it isn't firing; hot can mean it's lean.",
@@ -1572,6 +1575,8 @@ export function RunSheet({
       }
 
       if (rows.length) out.push({ key: "health", title: "Health", caption: true, rows });
+      if (o2Rows.length) out.push({ key: "health-o2", title: "O2", caption: true, rows: o2Rows });
+      if (egtRows.length) out.push({ key: "health-egt", title: "EGT", caption: true, rows: egtRows });
     }
 
     if (any((c) => changesAt.get(c.file._id) ?? tuneAt.get(c.file._id) ?? knobMovesAt.get(c.file._id))) {
