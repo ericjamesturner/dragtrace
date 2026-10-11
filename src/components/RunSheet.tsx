@@ -631,6 +631,26 @@ export function RunSheet({
           setDropIdx(null);
         }}
       >
+        {/* One date over each day's passes. */}
+        <div className="sticky left-0 z-10 bg-card" />
+        {cols.reduce<{ day: string; start: number; span: number }[]>((days, c, i) => {
+          const last = days[days.length - 1];
+          if (last && last.day === c.day) last.span++;
+          else days.push({ day: c.day, start: i, span: 1 });
+          return days;
+        }, []).map((d) => (
+          <div
+            key={d.start}
+            className={`truncate px-2 pt-1.5 text-[10px] font-medium text-muted-foreground ${
+              d.start > 0 ? "border-l border-l-foreground/15" : ""
+            }`}
+            style={{ gridColumn: `span ${d.span}` }}
+            title={d.day}
+          >
+            {d.day}
+          </div>
+        ))}
+
         {/* Column heads */}
         <div className={`${labelCell} border-b bg-card`} />
         {cols.map((c, i) => (
@@ -839,7 +859,6 @@ function PassHead({
         >
           <GripVerticalIcon className="size-3" />
         </span>
-        <div className="text-[10px] leading-tight text-muted-foreground/70">{col.day}</div>
         <div className="flex items-center">
           {editingRound ? (
             <input
