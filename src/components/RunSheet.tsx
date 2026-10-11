@@ -594,7 +594,7 @@ export function RunSheet({
   }, [cols, eighthOnly, eventBests, eventRanges, estScope, onEstScopeChange, raceWeightLb, changesAt, tuneAt, knobMovesAt]);
 
   const labelCell =
-    "sticky left-0 z-10 flex items-center gap-1 border-r bg-card px-2.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground group-hover:bg-muted";
+    "sticky left-0 z-10 flex items-center justify-end gap-1 border-r bg-card px-2.5 text-right text-[10px] font-medium uppercase tracking-wider text-muted-foreground group-hover:bg-muted";
   const valueCell =
     "flex h-5 items-center justify-end whitespace-nowrap px-2 text-right font-mono text-[13px] tabular-nums group-hover:bg-muted/40";
 
@@ -664,8 +664,8 @@ export function RunSheet({
               return (
                 <div key={r.key} className="group contents">
                   <div className={`${labelCell} ${rule}`}>
+                    {r.extra && <span className="mr-auto">{r.extra}</span>}
                     {r.label}
-                    {r.extra && <span className="ml-auto">{r.extra}</span>}
                   </div>
                   {cols.map((c, i) => (
                     <div
