@@ -134,6 +134,8 @@ interface Col {
   cf?: number;
   power: WeightPowerEstimates | null;
   estimate?: PassEstimate;
+  /** The day it ran, as shown: NSP's stamp in the file name, else the upload day. */
+  day: string;
 }
 
 /** "16:25" -> "4:25 pm". Anything that isn't HH:MM shows as typed. */
@@ -253,6 +255,11 @@ export function RunSheet({
                 })
               : null,
           estimate: estimates[file._id],
+          day: new Date(timeFromName(file.fileName) ?? file.uploadedAt).toLocaleDateString(undefined, {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+          }),
         };
       }),
     [files, slipsByFile, unitSystem, unitOverrides, raceWeightLb, estimates]
@@ -286,6 +293,8 @@ export function RunSheet({
   const colClass = (i: number, striped = false) =>
     [
       hoverCol === i ? "bg-muted/60" : striped ? STRIPE : "",
+      // A faint rule where a new day starts.
+      i > 0 && cols[i].day !== cols[i - 1].day ? "border-l border-l-foreground/15" : "",
       showDrop && dropIdx === i ? "shadow-[inset_2px_0_0_0_var(--color-primary)]" : "",
       showDrop && dropIdx === cols.length && i === cols.length - 1
         ? "shadow-[inset_-2px_0_0_0_var(--color-primary)]"
@@ -765,12 +774,6 @@ function PassHead({
   const shownRound =
     passRound ?? file.fileName.split(/\s+/).find((w) => /^[A-Z]{1,2}\d{1,2}$/i.test(w))?.toUpperCase();
   const name = file.fileName.replace(/\.[^.]+$/, "");
-  // The day it ran: NSP's stamp in the file name, else the day it was uploaded.
-  const ranOn = new Date(timeFromName(file.fileName) ?? file.uploadedAt).toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
 
   // The headline: full ET when the slip has one, otherwise the eighth-mile pair.
   const quarter = slip?.et !== undefined || slip?.mph !== undefined;
@@ -836,7 +839,7 @@ function PassHead({
         >
           <GripVerticalIcon className="size-3" />
         </span>
-        <div className="text-[10px] leading-tight text-muted-foreground/70">{ranOn}</div>
+        <div className="text-[10px] leading-tight text-muted-foreground/70">{col.day}</div>
         <div className="flex items-center">
           {editingRound ? (
             <input
