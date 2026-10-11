@@ -1091,6 +1091,49 @@ export function RunSheet({
             };
         }
       };
+      // How each check is worked out, on its row label. "Usual" is always
+      // this vehicle's other switched-on passes; it takes three of them.
+      const tempGap = (c: number) => `${showGap(c, "temperature")} ${unitOf("temperature")}`;
+      const usualNote = "“Usual” means this vehicle's other passes that are switched on — at least 3 of them.";
+      const explainRow = (name: string | null): React.ReactNode[] => {
+        const kind = name === null ? null : cols.flatMap((c) => c.anomalies).find((a) => a.row === name)?.kind;
+        const lines: Record<string, string[]> = {
+          low: [
+            `${name}: the lowest point while the throttle is wide open, smoothed over 25 ms so one bad sample can't set it off.`,
+            "Flagged when it falls well below its usual low: more than 3 times its normal variation, and at least 10% of its level on the line.",
+            usualNote,
+          ],
+          lean: [
+            "The longest time any one wideband stays 10% or more lean of target, from 0.15 s until the throttle comes off.",
+            "Flagged at 0.1 s or longer, so a spike anywhere in the pass shows.",
+          ],
+          drift: name?.startsWith("EGT")
+            ? [
+                "Each EGT's average from 1 s until the throttle comes off, against the average of all of them.",
+                `Flagged when a cylinder sits ${tempGap(50)} or more hotter or colder against the others than it usually does.`,
+                "Averages hide short spikes.",
+                usualNote,
+              ]
+            : [
+                "Each wideband's average from 1 s until the throttle comes off, against the average of all of them.",
+                "Flagged when a cylinder runs 1.7% or more leaner against the others than it usually does, and is now leaner than average.",
+                "Averages hide short spikes — Lean spike catches those.",
+                usualNote,
+              ],
+          spread: name?.startsWith("EGT")
+            ? [`Hottest EGT minus coldest, from their averages after 1 s. Flagged when ${tempGap(75)} or more wider than usual.`, usualNote]
+            : ["Leanest wideband minus richest, from their averages after 1 s. Flagged when 2.5% or more wider than usual.", usualNote],
+          "egt-odd": [
+            `With fewer than 3 earlier passes to compare against: a cylinder whose EGT averages ${tempGap(150)} or more off the others.`,
+            "Cold can mean it isn't firing; hot can mean it's lean.",
+          ],
+          none: [
+            "Checked: supply pressures and battery for lows, widebands for lean spikes, drift and spread, and EGTs when the log has them.",
+            "Nothing on these passes was out of line with this vehicle's usual.",
+          ],
+        };
+        return (lines[kind ?? "none"] ?? lines.none).map((l, i) => <div key={i}>{l}</div>);
+      };
       out.push({
         key: "anomalies",
         title: "Anomalies",
@@ -1100,7 +1143,7 @@ export function RunSheet({
               key: `anomaly-${name}`,
               alert: true,
               label: (
-                <Tip content={name}>
+                <Tip content={<div className="max-w-xs space-y-1">{explainRow(name)}</div>}>
                   <span className="block max-w-[6.5rem] truncate">{name}</span>
                 </Tip>
               ),
@@ -1119,7 +1162,11 @@ export function RunSheet({
           : [
               {
                 key: "anomaly-none",
-                label: "None found",
+                label: (
+                  <Tip content={<div className="max-w-xs space-y-1">{explainRow(null)}</div>}>
+                    <span>None found</span>
+                  </Tip>
+                ),
                 cell: (c: Col) =>
                   c.levels.length || c.cylinders.length ? (
                     <Tip content="Pressures, battery and cylinders held up like they do on this vehicle's other passes">
