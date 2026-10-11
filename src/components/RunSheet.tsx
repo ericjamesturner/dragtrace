@@ -11,6 +11,7 @@ import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
 import type { UnitOverrides, UnitSystem } from "@/lib/units";
 import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel } from "@/lib/changes";
+import { timeFromName } from "@/lib/tune-changes";
 import { parsePreview } from "@/lib/preview";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -764,6 +765,12 @@ function PassHead({
   const shownRound =
     passRound ?? file.fileName.split(/\s+/).find((w) => /^[A-Z]{1,2}\d{1,2}$/i.test(w))?.toUpperCase();
   const name = file.fileName.replace(/\.[^.]+$/, "");
+  // The day it ran: NSP's stamp in the file name, else the day it was uploaded.
+  const ranOn = new Date(timeFromName(file.fileName) ?? file.uploadedAt).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 
   // The headline: full ET when the slip has one, otherwise the eighth-mile pair.
   const quarter = slip?.et !== undefined || slip?.mph !== undefined;
@@ -829,6 +836,7 @@ function PassHead({
         >
           <GripVerticalIcon className="size-3" />
         </span>
+        <div className="text-[10px] leading-tight text-muted-foreground/70">{ranOn}</div>
         <div className="flex items-center">
           {editingRound ? (
             <input
