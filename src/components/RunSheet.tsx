@@ -848,9 +848,7 @@ function PassHead({
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
         onMouseEnter={onMouseEnter}
-        className={`group/head relative flex min-w-0 flex-col border-b px-2 pb-1 pt-1 ${
-          isBest ? "border-t-2 border-t-green-500" : "border-t-2 border-t-transparent"
-        } ${className}`}
+        className={`group/head relative flex min-w-0 flex-col border-b px-2 pb-1 pt-1 ${className}`}
       >
         <span
           className="absolute left-0 top-1 cursor-grab text-muted-foreground/40 opacity-0 transition-opacity hover:text-muted-foreground active:cursor-grabbing group-hover/head:opacity-100"
