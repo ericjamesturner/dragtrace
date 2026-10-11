@@ -8,8 +8,19 @@ import { findGearChannel, findThrottleChannel, shiftMarkers } from "./channel-ma
  * from: a driveshaft sample every 25 ms jumps by hundreds of RPM.
  */
 
-/** Seconds after the launch the run sheet reads the driveshaft at. */
-export const DRIVESHAFT_TIMES = [0.1, 0.25, 0.5, 0.75];
+/** Seconds after the launch the run sheet shows the driveshaft at. */
+export const DRIVESHAFT_TIMES = [0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
+/**
+ * The preview stores the driveshaft every this many seconds out to
+ * DRIVESHAFT_STORED_TO, so showing another time needs no new preview version.
+ */
+const DRIVESHAFT_STORED_STEP = 0.05;
+const DRIVESHAFT_STORED_TO = 3;
+const STORED_TIMES = Array.from(
+  { length: Math.round(DRIVESHAFT_STORED_TO / DRIVESHAFT_STORED_STEP) },
+  (_, k) => Math.round((k + 1) * DRIVESHAFT_STORED_STEP * 100) / 100,
+);
 
 /** Averaged over ±this many seconds, so one noisy sample can't set it. */
 const DS_HALF_WINDOW_S = 0.02;
@@ -34,7 +45,7 @@ export function readDriveshaft(session: LogSession, launchAt: number): Driveshaf
   if (!ds) return null;
   const ts = session.timestamps;
   const out: DriveshaftReading[] = [];
-  for (const after of DRIVESHAFT_TIMES) {
+  for (const after of STORED_TIMES) {
     const from = launchAt + after - DS_HALF_WINDOW_S;
     const to = launchAt + after + DS_HALF_WINDOW_S;
     let sum = 0;

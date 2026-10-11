@@ -893,15 +893,15 @@ export function RunSheet({
         caption: true,
         rows: DRIVESHAFT_TIMES.map((after) => ({
           key: `ds-${after}`,
-          // ".25": the seconds go without saying.
-          label: String(after).replace(/^0(?=\.)/, ""),
+          // ".25", "1.0": the seconds go without saying.
+          label: after < 1 ? String(after).replace(/^0(?=\.)/, "") : Number.isInteger(after) ? after.toFixed(1) : String(after),
           avg: {
             num: (c: Col) => c.driveshaft.find((d) => d.after === after)?.rpm,
-            fmt: (v: number) => Math.round(v).toLocaleString(),
+            fmt: (v: number) => String(Math.round(v)),
           },
           cell: (c: Col) => {
             const r = c.driveshaft.find((d) => d.after === after);
-            return r ? <span style={dsStyles.get(after)?.(r.rpm)}>{Math.round(r.rpm).toLocaleString()}</span> : DASH;
+            return r ? <span style={dsStyles.get(after)?.(r.rpm)}>{Math.round(r.rpm)}</span> : DASH;
           },
         })),
       });
@@ -966,7 +966,7 @@ export function RunSheet({
     "flex h-5 items-center justify-end whitespace-nowrap px-2 text-right font-mono text-[13px] tabular-nums group-hover:bg-muted/40";
 
   return (
-    <div className="mt-3 w-fit max-w-full overflow-x-auto rounded-lg border bg-card">
+    <div className="mt-3 w-fit max-w-full overflow-x-auto rounded-lg border bg-card font-mono">
       <div
         className="grid"
         style={{ gridTemplateColumns: `8rem repeat(${cols.length}, 5.5rem) 5.5rem` }}
