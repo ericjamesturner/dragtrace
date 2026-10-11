@@ -167,6 +167,14 @@ function packageOf(slip: Doc<"timeslips"> | undefined) {
     value: Math.round((slip.rt + over) * 1000) / 1000,
     /** A red light or a breakout: the package doesn't count. */
     foul: slip.rt < 0 || over < 0,
+    /** What the sheet shows for a foul instead of the package. */
+    foulText:
+      slip.rt < 0
+        ? "RED"
+        : over < 0
+          ? // When both break out, the smaller breakout wins: how far under is the number that matters.
+            `BO ${(-over).toFixed(3).replace(/^0/, "")}`
+          : null,
   };
 }
 
@@ -581,7 +589,7 @@ export function RunSheet({
               const pkg = packageOf(c.slip);
               if (!pkg) return DASH;
               const text = pkg.value.toFixed(3);
-              if (pkg.foul) return <span className="text-red-400">{text}</span>;
+              if (pkg.foulText) return <span className="text-red-400" title={`Package ${text}`}>{pkg.foulText}</span>;
               if (bestPackage === undefined) return text;
               if (pkg.value === bestPackage) return <span className="text-green-400">{text}</span>;
               return <span style={fadeStyle(pkg.value - bestPackage, PACKAGE_FADE_AT)}>{text}</span>;
