@@ -15,10 +15,7 @@ export const alertInfo = internalQuery({
     ]);
     return {
       title: `New log from ${user?.email ?? user?.name ?? file.userId}`,
-      message: [
-        `${vehicle?.name ?? "Unknown vehicle"} · ${event?.name ?? "Unknown event"}`,
-        `${file.fileName} (${(file.fileSize / (1024 * 1024)).toFixed(1)} MB)`,
-      ].join("\n"),
+      message: `${vehicle?.name ?? "Unknown vehicle"} · ${event?.name ?? "Unknown event"}`,
       preview: file.preview ?? null,
     };
   },
