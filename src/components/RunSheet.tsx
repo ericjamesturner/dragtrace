@@ -1243,10 +1243,28 @@ export function RunSheet({
         },
       });
 
-      const rows: Row[] = [];
-      // The widebands and the EGTs get their own groups under Health.
-      const o2Rows: Row[] = [];
-      const egtRows: Row[] = [];
+      // Health is grouped by system, in this order; a group with nothing to
+      // show is left out. Labels inside a group drop its name: "Temp", not
+      // "Coolant temp".
+      const GROUPS = ["Fuel", "Oil", "Coolant", "Trans", "Boost", "Engine", "Wideband", "EGT"] as const;
+      type Group = (typeof GROUPS)[number];
+      const grouped = new Map<Group, Row[]>(GROUPS.map((g) => [g, []]));
+      const put = (g: Group, ...rows: Row[]) => grouped.get(g)!.push(...rows);
+      const groupOfLevel = (name: string): Group =>
+        /battery/i.test(name)
+          ? "Engine"
+          : /trans|converter|line pressure/i.test(name)
+            ? "Trans"
+            : /coolant/i.test(name)
+              ? "Coolant"
+              : /oil/i.test(name)
+                ? "Oil"
+                : "Fuel";
+      // "Coolant temp" under Coolant -> "Temp"; "Line press." under Trans stays.
+      const inGroup = (label: string, g: Group) => {
+        const rest = label.replace(new RegExp(`^${g}\\s+`, "i"), "");
+        return rest === label ? label : rest.charAt(0).toUpperCase() + rest.slice(1);
+      };
 
       // Supplies: one row per pressure the checks watch, and the battery.
       // "Device Battery Voltage" -> "Battery", "Transmission Line Pressure" -> "Trans Line Pressure".
@@ -1269,10 +1287,11 @@ export function RunSheet({
       }
       for (const name of levelNames) {
         const isTemp = cols.some((c) => c.levels.some((l) => l.name === name && l.quantitySlug === "temperature"));
-        rows.push(
+        put(
+          groupOfLevel(name),
           healthRow(
             name,
-            shortName(name),
+            inGroup(shortName(name), groupOfLevel(name)),
             isTemp
               ? [
                   `${name}: the highest it got, from the line until the throttle comes off.`,
@@ -1328,10 +1347,11 @@ export function RunSheet({
 
       const wholeRunOf = (c: Col) => ({ from: 0, to: c.checksTo ?? 5 });
       if (cols.some((c) => c.boost)) {
-        rows.push(
+        put(
+          "Boost",
           healthRow(
             "Boost",
-            "Boost",
+            "Peak",
             [
               "The highest boost while the throttle is wide open, smoothed over 50 ms.",
               `Red when it peaks well away from its usual peak, either way: more than 3 times its normal variation and at least ${showGap(14, "pressure")} ${unitOf("pressure")}.`,
@@ -1354,10 +1374,11 @@ export function RunSheet({
         );
       }
       if (cols.some((c) => c.boost?.targetGap !== undefined)) {
-        rows.push(
+        put(
+          "Boost",
           healthRow(
             "Boost vs target",
-            "Boost vs target",
+            "vs target",
             [
               "How far boost fell short of its commanded target, from 1 s until the throttle comes off, held 50 ms.",
               `Red at ${showGap(21, "pressure")} ${unitOf("pressure")} or more short, from the very first pass — a leak, a wastegate, or turbos out of map.`,
@@ -1374,7 +1395,8 @@ export function RunSheet({
         );
       }
       if (cols.some((c) => c.limiter)) {
-        rows.push(
+        put(
+          "Engine",
           healthRow(
             "Limiter",
             "Limiter",
@@ -1396,7 +1418,8 @@ export function RunSheet({
         );
       }
       if (cols.some((c) => c.faults)) {
-        rows.push(
+        put(
+          "Engine",
           healthRow(
             "Sensor faults",
             "Sensor faults",
@@ -1417,7 +1440,7 @@ export function RunSheet({
       // The whole checked stretch of the pass, for rows about averages.
       const wholeRun = (c: Col) => ({ from: 0, to: c.checksTo ?? 5 });
       if (cols.some((c) => groupOf(c, "lambda")?.lean)) {
-        o2Rows.push(
+        put("Wideband", 
           healthRow(
             "Lean spike",
             "Lean spike",
@@ -1443,7 +1466,7 @@ export function RunSheet({
         );
       }
       if (cols.some((c) => { const g = groupOf(c, "lambda"); return g ? targetRatios(g) : null; })) {
-        o2Rows.push(
+        put("Wideband", 
           healthRow(
             "Wideband vs target",
             "vs target",
@@ -1477,7 +1500,7 @@ export function RunSheet({
         );
       }
       if (cols.some((c) => groupOf(c, "lambda"))) {
-        o2Rows.push(
+        put("Wideband", 
           healthRow(
             "Wideband drift",
             "Drift",
@@ -1509,7 +1532,7 @@ export function RunSheet({
         );
       }
       if (cols.some((c) => groupOf(c, "egt"))) {
-        egtRows.push(
+        put("EGT", 
           healthRow(
             "EGT spike",
             "Spike",
@@ -1559,7 +1582,7 @@ export function RunSheet({
         );
         // Only with no history to judge drift by; shown when it fires.
         if (cols.some((c) => c.anomalies.some((a) => a.kind === "egt-odd"))) {
-          egtRows.push(
+          put("EGT", 
             healthRow(
               "EGT odd one out",
               "Odd one out",
@@ -1574,9 +1597,12 @@ export function RunSheet({
         }
       }
 
-      if (rows.length) out.push({ key: "health", title: "Health", caption: true, rows });
-      if (o2Rows.length) out.push({ key: "health-o2", title: "Wideband", caption: true, rows: o2Rows });
-      if (egtRows.length) out.push({ key: "health-egt", title: "EGT", caption: true, rows: egtRows });
+      const filled = GROUPS.filter((g) => grouped.get(g)!.length);
+      if (filled.length) {
+        // The heading for the lot, then a caption per group.
+        out.push({ key: "health", title: "Health", caption: true, rows: [] });
+        for (const g of filled) out.push({ key: `health-${g}`, title: g, caption: true, rows: grouped.get(g)! });
+      }
     }
 
     if (any((c) => changesAt.get(c.file._id) ?? tuneAt.get(c.file._id) ?? knobMovesAt.get(c.file._id))) {
