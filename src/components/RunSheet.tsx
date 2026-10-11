@@ -266,6 +266,11 @@ interface Col {
 
 const SPREAD_PCT_KEY = "dragtrace.runSheet.spreadPct";
 
+/** A slip number as the scoreboard prints it: thousandths for times, hundredths for speeds. */
+function slipNumber(key: MetricKey, v: number): string {
+  return v.toFixed(key === "mph" || key === "eighthMph" ? 2 : 3);
+}
+
 /** The log's box delay and the slip's agree to within this (the log samples every few ms). */
 const BOX_MATCH_S = 0.01;
 
@@ -644,10 +649,12 @@ export function RunSheet({
       cell: (c) => {
         const v = c.slip?.[key];
         if (v === undefined) return DASH;
-        if (key === "rt" && v < 0) return <span className="text-red-400">{v}</span>;
+        // Fixed places so the digits line up down the column: 1.080, not 1.08.
+        const text = slipNumber(key, v);
+        if (key === "rt" && v < 0) return <span className="text-red-400">{text}</span>;
         // Only the hero ET shows a breakout; the rows rank the passes, nothing more.
-        if (v === eventBests[key]) return <span className="text-green-400">{v}</span>;
-        return <span style={shadeStyle(key, v, eventRanges)}>{v}</span>;
+        if (v === eventBests[key]) return <span className="text-green-400">{text}</span>;
+        return <span style={shadeStyle(key, v, eventRanges)}>{text}</span>;
       },
     });
     // Only a clean package can be the event's best; with one, there's nothing to rank.
@@ -675,7 +682,7 @@ export function RunSheet({
           {
             key: "box",
             label: "Box",
-            cell: (c) => c.slip?.delayBox ?? DASH,
+            cell: (c) => (c.slip?.delayBox !== undefined ? c.slip.delayBox.toFixed(3) : DASH),
           },
           {
             // What the log says the box did: button let go to transbrake let go.
@@ -2242,7 +2249,7 @@ function PassHead({
               <span
                 className={`block text-[15px] font-semibold ${breakout ? "text-red-400" : etBest || isBest ? "text-green-400" : ""}`}
               >
-                {heroEt ?? "—"}
+                {heroEt !== undefined ? heroEt.toFixed(3) : "—"}
               </span>
             </Tip>
             <span className="flex items-center justify-end gap-1 text-[11px]">
@@ -2264,7 +2271,7 @@ function PassHead({
                 </Tip>
               )}
               {heroMph !== undefined && (
-                <span className={mphBest ? "text-green-400" : "text-muted-foreground"}>{heroMph}</span>
+                <span className={mphBest ? "text-green-400" : "text-muted-foreground"}>{heroMph.toFixed(2)}</span>
               )}
             </span>
           </button>
