@@ -1090,7 +1090,7 @@ export function RunSheet({
             slipRefs={slipRefs}
           />
         ))}
-        <div className={`${AVG_COL} flex items-end justify-end border-b px-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground`}>
+        <div className={`${AVG_COL} flex items-end justify-end border-b px-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-violet-300`}>
           Avg
         </div>
 
@@ -1133,7 +1133,7 @@ export function RunSheet({
                     </div>
                   ))}
                   <div
-                    className={`${valueCell} ${rule} ${r.bold ? "font-bold" : ""} ${AVG_COL} ${striped ? STRIPE : ""} text-muted-foreground`}
+                    className={`${valueCell} ${rule} ${r.bold ? "font-bold" : ""} ${AVG_COL} ${striped ? STRIPE : ""} text-violet-300`}
                     onMouseEnter={() => {
                       setHoverCol(null);
                       setHoverRow(r.key);
