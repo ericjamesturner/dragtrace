@@ -131,10 +131,35 @@ function shadeStyle(
   const r = ranges[k];
   if (!r || v === undefined || r.count < 2 || v === r.best) return undefined;
   if (k === "rt" && v < 0) return undefined;
-  const t = Math.min(1, Math.sqrt(Math.abs(v - r.best) / FADE_AT[k]));
+  return fadeStyle(Math.abs(v - r.best), FADE_AT[k]);
+}
+
+/** The colour for a result `gap` off the best, fully grey at `fadeAt`. */
+function fadeStyle(gap: number, fadeAt: number): React.CSSProperties {
+  const t = Math.min(1, Math.sqrt(gap / fadeAt));
   // Only the best is solid green; everything else tops out a step below it.
   const green = Math.round(80 * (1 - t));
   return { color: `color-mix(in oklab, ${BEST_GREEN} ${green}%, var(--muted-foreground))` };
+}
+
+/** A package this far off the event's best is fully grey. */
+const PACKAGE_FADE_AT = 0.03;
+
+/**
+ * Reaction time plus how far over the dial the pass ran — the number a
+ * bracket race is decided on. Only for a slip with a dial and a light; the
+ * finish is the full E.T. when there is one, else the eighth.
+ */
+function packageOf(slip: Doc<"timeslips"> | undefined) {
+  if (!slip || slip.dialIn === undefined || slip.rt === undefined) return null;
+  const finish = slip.et !== undefined || slip.mph !== undefined ? slip.et : slip.eighthEt;
+  if (finish === undefined) return null;
+  const over = finish - slip.dialIn;
+  return {
+    value: Math.round((slip.rt + over) * 1000) / 1000,
+    /** A red light or a breakout: the package doesn't count. */
+    foul: slip.rt < 0 || over < 0,
+  };
 }
 
 /** Everything one pass's column shows, worked out once. */
@@ -343,6 +368,12 @@ export function RunSheet({
         return <span style={shadeStyle(key, v, eventRanges)}>{v}</span>;
       },
     });
+    // Only a clean package can be the event's best; with one, there's nothing to rank.
+    const clean = cols.flatMap((c) => {
+      const pkg = packageOf(c.slip);
+      return pkg && !pkg.foul ? [pkg.value] : [];
+    });
+    const bestPackage = clean.length >= 2 ? Math.min(...clean) : undefined;
     const out: Section[] = [
       {
         key: "start",
@@ -365,6 +396,19 @@ export function RunSheet({
             cell: (c) => c.slip?.delayBox ?? DASH,
           },
           metric("rt", "R.T."),
+          {
+            key: "package",
+            label: "Package",
+            cell: (c) => {
+              const pkg = packageOf(c.slip);
+              if (!pkg) return DASH;
+              const text = pkg.value.toFixed(3);
+              if (pkg.foul) return <span className="text-red-400">{text}</span>;
+              if (bestPackage === undefined) return text;
+              if (pkg.value === bestPackage) return <span className="text-green-400">{text}</span>;
+              return <span style={fadeStyle(pkg.value - bestPackage, PACKAGE_FADE_AT)}>{text}</span>;
+            },
+          },
         ],
       },
       {
