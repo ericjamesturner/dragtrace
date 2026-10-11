@@ -9,7 +9,7 @@ import { SEGMENTS, segmentTimes, type SegmentKey } from "@/lib/timeslip-segments
 import { estimatePowerFromTimeslip, type WeightPowerEstimates } from "@/lib/drag-performance";
 import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
 import { convertForDisplay, getDisplayPrecision, getDisplayUnit, type UnitOverrides, type UnitSystem } from "@/lib/units";
-import { findAnomalies, LEAN_RATIO, type Anomaly, type CylinderGroup, type PassChecks, type PassLevel } from "@/lib/anomalies";
+import { findAnomalies, type Anomaly, type CylinderGroup, type PassChecks, type PassLevel } from "@/lib/anomalies";
 import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel } from "@/lib/changes";
 import { timeFromName } from "@/lib/tune-changes";
@@ -1049,6 +1049,9 @@ export function RunSheet({
       };
       const unitOf = (slug: string | undefined) => (slug ? getDisplayUnit(slug, unitSystem, unitOverrides) ?? "" : "");
       const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+      // "C5" -> "Cylinder 5", "B2" -> "Bank 2", for the sentences.
+      const sensor = (label: string) => `${label.startsWith("B") ? "Bank" : "Cylinder"} ${label.slice(1)}`;
+      // One plain sentence each: what happened, then what's normal in brackets.
       const describe = (a: Anomaly): { text: string; tip: string } => {
         switch (a.kind) {
           case "low": {
@@ -1056,35 +1059,35 @@ export function RunSheet({
             const unit = unitOf(level.quantitySlug);
             return {
               text: `↓ ${show(level.min, level.quantitySlug)}`,
-              tip: `Fell to ${show(level.min, level.quantitySlug)} ${unit} at ${level.minAt.toFixed(2)} s, from ${show(level.base, level.quantitySlug)} ${unit} on the line. On this vehicle's other passes it bottoms out near ${show(a.usualMin, level.quantitySlug)} ${unit}.`,
+              tip: `${level.name} fell to ${show(level.min, level.quantitySlug)} ${unit} at ${level.minAt.toFixed(2)} s (normally bottoms out at ${show(a.usualMin, level.quantitySlug)} ${unit}).`,
             };
           }
           case "lean":
             return {
               text: `${a.label} ${a.seconds.toFixed(2)}s`,
-              tip: `${a.label} ran ${Math.round((LEAN_RATIO - 1) * 100)}% or more lean of the target for ${a.seconds.toFixed(2)} s from ${a.at.toFixed(2)} s, at worst ${pct(a.worst - 1)} lean.`,
+              tip: `${sensor(a.label)} went ${Math.round((a.worst - 1) * 100)}% lean of target for ${a.seconds.toFixed(2)} s, starting at ${a.at.toFixed(2)} s.`,
             };
           case "drift":
             return a.group === "lambda"
               ? {
                   text: `${a.label} lean`,
-                  tip: `${a.label} ran ${pct(a.offset)} leaner than the cylinder average. On this vehicle's other passes it sits ${a.usual >= 0 ? `${pct(a.usual)} leaner` : `${pct(-a.usual)} richer`}.`,
+                  tip: `${sensor(a.label)} ran leaner than usual: ${pct(a.offset)} leaner than the other cylinders (normally ${pct(a.usual)}).`,
                 }
               : {
                   text: `${a.label} ${a.offset < a.usual ? "cold" : "hot"}`,
-                  tip: `${a.label} ran ${showGap(Math.abs(a.offset), a.quantitySlug)} ${unitOf(a.quantitySlug)} ${a.offset < 0 ? "below" : "above"} the cylinder average. On this vehicle's other passes it sits ${showGap(Math.abs(a.usual), a.quantitySlug)} ${unitOf(a.quantitySlug)} ${a.usual < 0 ? "below" : "above"}.`,
+                  tip: `${sensor(a.label)} ran ${a.offset < a.usual ? "colder" : "hotter"} than usual: ${showGap(Math.abs(a.offset), a.quantitySlug)} ${unitOf(a.quantitySlug)} ${a.offset < 0 ? "below" : "above"} the other cylinders (normally ${showGap(Math.abs(a.usual), a.quantitySlug)} ${unitOf(a.quantitySlug)} ${a.usual < 0 ? "below" : "above"}).`,
                 };
           case "spread":
             return a.group === "lambda"
-              ? { text: pct(a.spread), tip: `The cylinders spread ${pct(a.spread)} apart; on this vehicle's other passes about ${pct(a.usual)}.` }
+              ? { text: pct(a.spread), tip: `The cylinders spread ${pct(a.spread)} apart (normally ${pct(a.usual)}).` }
               : {
                   text: `${showGap(a.spread, a.quantitySlug)}°`,
-                  tip: `The EGTs spread ${showGap(a.spread, a.quantitySlug)} ${unitOf(a.quantitySlug)} apart; on this vehicle's other passes about ${showGap(a.usual, a.quantitySlug)} ${unitOf(a.quantitySlug)}.`,
+                  tip: `The EGTs spread ${showGap(a.spread, a.quantitySlug)} ${unitOf(a.quantitySlug)} apart (normally ${showGap(a.usual, a.quantitySlug)} ${unitOf(a.quantitySlug)}).`,
                 };
           case "egt-odd":
             return {
               text: `${a.label} ${a.offset < 0 ? "cold" : "hot"}`,
-              tip: `${a.label} ran ${showGap(Math.abs(a.offset), a.quantitySlug)} ${unitOf(a.quantitySlug)} ${a.offset < 0 ? "below" : "above"} the other cylinders${a.offset < 0 ? " — check it is firing" : " — check it is not lean"}.`,
+              tip: `${sensor(a.label)} ran ${showGap(Math.abs(a.offset), a.quantitySlug)} ${unitOf(a.quantitySlug)} ${a.offset < 0 ? "colder" : "hotter"} than the other cylinders${a.offset < 0 ? " — check it's firing." : " — check it isn't lean."}`,
             };
         }
       };
