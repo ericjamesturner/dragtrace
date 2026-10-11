@@ -269,3 +269,8 @@ export function tuneChangeEntry(changes: TuneChange[]): { title: string; items: 
   });
   return { title: `${areas.slice(0, 3).join(", ")}${areas.length > 3 ? " and more" : ""}`, items, details };
 }
+
+/** The round in a file name ("BOISE TOP GUN Q2 4.14" -> "Q2"), else the name before NSP's stamp. */
+export function roundOf(fileName: string): string {
+  return fileName.split(/\s+/).find((w) => /^[A-Z]{1,2}\d{1,2}$/i.test(w))?.toUpperCase() ?? runLabel(fileName);
+}

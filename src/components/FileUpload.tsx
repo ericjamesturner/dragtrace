@@ -51,9 +51,12 @@ function uploadWithProgress(
 export function FileUpload({
   vehicleId,
   eventId,
+  compact = false,
 }: {
   vehicleId: Id<"vehicles">;
   eventId: Id<"events">;
+  /** One slim line, for a page that already has passes on it. */
+  compact?: boolean;
 }) {
   const generateUploadUrl = useMutation(api.files.generateUploadUrl);
   const saveFile = useMutation(api.files.saveFile);
@@ -142,7 +145,9 @@ export function FileUpload({
 
   return (
     <div
-      className={`relative rounded-lg border-2 border-dashed px-6 py-8 text-center transition-colors ${
+      className={`relative rounded-lg border-2 border-dashed text-center transition-colors ${
+        compact ? "px-4 py-2" : "px-6 py-8"
+      } ${
         dragOver
           ? "border-primary bg-primary/5"
           : "border-muted-foreground/25 hover:border-muted-foreground/50"
@@ -168,7 +173,7 @@ export function FileUpload({
         }}
       />
       {progress ? (
-        <div className="flex flex-col items-center gap-2">
+        <div className={`flex items-center gap-2 ${compact ? "justify-center" : "flex-col"}`}>
           <p className="max-w-full truncate text-sm text-muted-foreground">
             {progress.fileCount > 1
               ? `Uploading ${progress.fileIndex + 1} of ${progress.fileCount}: ${progress.fileName}`
@@ -187,12 +192,12 @@ export function FileUpload({
           </p>
         </div>
       ) : (
-        <div className="flex cursor-pointer flex-col items-center gap-2">
-          <UploadIcon className="size-6 text-muted-foreground" />
+        <div className={`flex cursor-pointer items-center gap-2 ${compact ? "justify-center" : "flex-col"}`}>
+          <UploadIcon className={compact ? "size-4 text-muted-foreground" : "size-6 text-muted-foreground"} />
           <p className="text-sm text-muted-foreground">
             Drop files here or click to browse
           </p>
-          <p className="text-xs text-muted-foreground">{SUPPORTED_LOG_DESCRIPTION}</p>
+          <p className="text-xs text-muted-foreground/70">{SUPPORTED_LOG_DESCRIPTION}</p>
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
       )}

@@ -146,6 +146,8 @@ export function slipLift(preview: string | undefined, passLen: number | undefine
   return lift && lift.pedals.length > 0 ? { kind: "pedaled", at: lift.pedals[0] } : null;
 }
 
+export type PreviewStatus = Status;
+
 type Status =
   | { kind: "loading" }
   | { kind: "ready"; payload: PreviewPayload }
@@ -228,7 +230,16 @@ async function computePreview(bytes: ArrayBuffer, fileName: string): Promise<Pre
   };
 }
 
-export function RpmPreview({ file, onRaceTiming, alignWindow, height = 176 }: RpmPreviewProps) {
+/**
+ * A pass's preview: the stored one when it is current, else the raw log is
+ * fetched, parsed and the result saved back. Every pass on the event page runs
+ * this whether or not its trace is on screen — the lift, the launch readings
+ * and the knob positions all come from the stored preview.
+ */
+export function usePassPreview(
+  file: Doc<"files">,
+  onRaceTiming?: (info: RaceTimingInfo | null) => void,
+): Status {
   const stored = useMemo<PreviewPayload | null>(
     () => parsePreviewPayload(file.preview),
     [file.preview]
@@ -237,8 +248,6 @@ export function RpmPreview({ file, onRaceTiming, alignWindow, height = 176 }: Rp
   // Only fetch the raw log when there is no stored preview to reuse.
   const url = useQuery(api.files.getUrl, stored ? "skip" : { fileId: file._id });
   const savePreview = useMutation(api.files.savePreview);
-  const chartRef = useRef<HTMLDivElement>(null);
-  const uplotRef = useRef<uPlot | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "loading" });
   const onRaceTimingRef = useRef(onRaceTiming);
   onRaceTimingRef.current = onRaceTiming;
@@ -288,6 +297,27 @@ export function RpmPreview({ file, onRaceTiming, alignWindow, height = 176 }: Rp
         : null,
     );
   }, [status]);
+
+  return status;
+}
+
+export function RpmPreview({ file, onRaceTiming, alignWindow, height = 176 }: RpmPreviewProps) {
+  const status = usePassPreview(file, onRaceTiming);
+  return <RpmTrace status={status} alignWindow={alignWindow} height={height} />;
+}
+
+/** The RPM, throttle and driveshaft trace of a preview, launch line drawn in. */
+export function RpmTrace({
+  status,
+  alignWindow,
+  height = 176,
+}: {
+  status: Status;
+  alignWindow?: { preRace: number; postRace: number };
+  height?: number;
+}) {
+  const chartRef = useRef<HTMLDivElement>(null);
+  const uplotRef = useRef<uPlot | null>(null);
 
   // Wait for alignment before rendering charts that have race data
   const alignReady = status.kind === "ready" && status.payload.raceStart !== null
