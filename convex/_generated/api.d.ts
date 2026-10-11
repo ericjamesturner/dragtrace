@@ -22,6 +22,7 @@ import type * as files from "../files.js";
 import type * as highlightZones from "../highlightZones.js";
 import type * as http from "../http.js";
 import type * as mathChannels from "../mathChannels.js";
+import type * as notify from "../notify.js";
 import type * as profile from "../profile.js";
 import type * as scatterSuggestions from "../scatterSuggestions.js";
 import type * as sharedLogs from "../sharedLogs.js";
@@ -55,6 +56,7 @@ declare const fullApi: ApiFromModules<{
   highlightZones: typeof highlightZones;
   http: typeof http;
   mathChannels: typeof mathChannels;
+  notify: typeof notify;
   profile: typeof profile;
   scatterSuggestions: typeof scatterSuggestions;
   sharedLogs: typeof sharedLogs;

@@ -1,4 +1,5 @@
 import { query, mutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { detachChangesFromFile } from "./changes";
 import { getEffectiveUserId } from "./authz";
 import { v } from "convex/values";
@@ -40,7 +41,7 @@ export const saveFile = mutation({
     for (const f of existing) {
       await ctx.db.patch(f._id, { order: (f.order ?? 0) + 1 });
     }
-    return await ctx.db.insert("files", {
+    const fileId = await ctx.db.insert("files", {
       userId,
       vehicleId: args.vehicleId,
       eventId: args.eventId,
@@ -51,6 +52,16 @@ export const saveFile = mutation({
       order: 0,
       uploadedAt: Date.now(),
     });
+    // Scheduled from here, so the alert goes out only once the file is saved.
+    const user = await ctx.db.get(userId);
+    await ctx.scheduler.runAfter(0, internal.notify.newLog, {
+      title: `New log from ${user?.email ?? user?.name ?? userId}`,
+      message: [
+        `${vehicle.name} · ${event.name}`,
+        `${args.fileName} (${(args.fileSize / (1024 * 1024)).toFixed(1)} MB)`,
+      ].join("\n"),
+    });
+    return fileId;
   },
 });
 
