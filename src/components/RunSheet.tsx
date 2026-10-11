@@ -1002,7 +1002,7 @@ export function RunSheet({
         caption: true,
         rows: [
           { key: `shift-${k}-when`, label: "When", avg: { num: (c) => at(c)?.at, fmt: (v) => v.toFixed(2), pct: true }, cell: (c) => (at(c) ? <span style={when(at(c)!.at)}>{at(c)!.at.toFixed(2)}</span> : DASH) },
-          { key: `shift-${k}-takes`, label: "Takes", avg: { num: (c) => at(c)?.takes, fmt: (v) => v.toFixed(2), pct: true }, cell: (c) => (at(c) ? <span style={takes(at(c)!.takes)}>{at(c)!.takes.toFixed(2)}</span> : DASH) },
+          { key: `shift-${k}-takes`, label: "Duration", avg: { num: (c) => at(c)?.takes, fmt: (v) => v.toFixed(2), pct: true }, cell: (c) => (at(c) ? <span style={takes(at(c)!.takes)}>{at(c)!.takes.toFixed(2)}</span> : DASH) },
           {
             key: `shift-${k}-drop`,
             label: withUnit("Drop", "rpm"),
