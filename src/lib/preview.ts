@@ -1,6 +1,6 @@
 import type { KnobReading, LaunchReading } from "./launch-readings";
 import type { DriveshaftReading, ShiftReading } from "./pass-readings";
-import type { PassLevel } from "./anomalies";
+import type { CylinderGroup, PassLevel } from "./anomalies";
 
 /**
  * The precomputed shape of a pass, stored on the file when its dashboard
@@ -26,6 +26,8 @@ export interface PreviewPayload {
   shifts?: ShiftReading[] | null;
   /** Supply pressures and battery through the pass (stored from preview version 10). */
   levels?: PassLevel[] | null;
+  /** Per-cylinder widebands and EGTs through the pass (stored from preview version 11). */
+  cylinders?: CylinderGroup[] | null;
 }
 
 export function parsePreview(raw: string | undefined | null): PreviewPayload | null {

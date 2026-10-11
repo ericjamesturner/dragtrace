@@ -42,7 +42,8 @@ function isWatched(name: string, quantitySlug: string | undefined): boolean {
   return quantitySlug === "pressure" && /pressure/i.test(name) && !NOT_SUPPLY.test(name);
 }
 
-export function readLevels(parsed: ParsedLog, session: LogSession, launchAt: number, raceEnd: number | null): PassLevel[] {
+/** Where the wide-open part of the pass ends: the first time the throttle falls under LIFT_FRACTION of its peak. */
+export function wideOpenEnd(parsed: ParsedLog, session: LogSession, launchAt: number, raceEnd: number | null): number {
   const ts = session.timestamps;
   const throttleName = findThrottleChannel(parsed.channelDefs);
   const throttle = throttleName ? session.channels.get(throttleName) : undefined;
@@ -59,7 +60,11 @@ export function readLevels(parsed: ParsedLog, session: LogSession, launchAt: num
       }
     }
   }
+  return passEnd;
+}
 
+export function readLevels(parsed: ParsedLog, session: LogSession, launchAt: number, passEnd: number): PassLevel[] {
+  const ts = session.timestamps;
   const out: PassLevel[] = [];
   for (const def of parsed.channelDefs) {
     if (!isWatched(def.name, def.quantitySlug)) continue;
@@ -102,11 +107,118 @@ export function readLevels(parsed: ParsedLog, session: LogSession, launchAt: num
   return out;
 }
 
-export interface Anomaly {
-  level: PassLevel;
-  /** The vehicle's usual low point for this channel, from its other passes. */
-  usualMin: number;
+/**
+ * One set of per-cylinder (or per-bank) sensors through the pass: each one's
+ * average over the steady wide-open part, and for widebands the worst lean
+ * excursion against the target. Stored with the preview.
+ */
+export interface CylinderGroup {
+  kind: "lambda" | "egt";
+  /** "C5", "B1": the cylinder or bank each sensor reads, in order. */
+  labels: string[];
+  quantitySlug?: string;
+  /** Each sensor's average from STEADY_FROM_S to the end of the wide-open part. */
+  means: number[];
+  /** Widebands with a target: the longest stretch any one ran lean of it by LEAN_RATIO or more. */
+  lean?: { label: string; seconds: number; at: number; worst: number } | null;
 }
+
+/** Widebands and EGTs settle after the hit; the averages start here. */
+const STEADY_FROM_S = 1;
+/** The lean check starts here: the hit is when a fuel supply problem shows. */
+const LEAN_FROM_S = 0.15;
+/** Lean of target by this ratio or more counts toward a lean spike. */
+export const LEAN_RATIO = 1.1;
+
+const WIDEBAND = /wideband|lambda|\bafr\b|\bo2\b/i;
+const EGT = /\begt\b|exhaust gas temp/i;
+/** Parts of a fuel or EGT system that aren't a sensor reading. */
+const NOT_SENSOR = /target|error|correction|trim|overall|average|control|heater|status|voltage|current|table|limit|offset|resistance|pump/i;
+
+/** "Wideband O2 Cylinder 5" -> "C5", "EGT 3" -> "C3", "Wideband O2 2" -> "B2". */
+function sensorLabel(name: string, kind: "lambda" | "egt"): string | null {
+  const cyl = /(?:cylinder|cyl)\s*(\d+)/i.exec(name);
+  if (cyl) return `C${cyl[1]}`;
+  const bank = /bank\s*(\d+)/i.exec(name);
+  if (bank) return `B${bank[1]}`;
+  const tail = /(\d+)\s*$/.exec(name);
+  // A bare number on a wideband is a bank (one per side); on an EGT, a cylinder.
+  return tail ? `${kind === "lambda" ? "B" : "C"}${tail[1]}` : null;
+}
+
+export function readCylinders(parsed: ParsedLog, session: LogSession, launchAt: number, passEnd: number): CylinderGroup[] {
+  const ts = session.timestamps;
+  const out: CylinderGroup[] = [];
+  for (const kind of ["lambda", "egt"] as const) {
+    const members = parsed.channelDefs.flatMap((d) => {
+      if (!(kind === "lambda" ? WIDEBAND : EGT).test(d.name) || NOT_SENSOR.test(d.name)) return [];
+      if (kind === "egt" && d.quantitySlug && d.quantitySlug !== "temperature") return [];
+      const label = sensorLabel(d.name, kind);
+      const vals = session.channels.get(d.name);
+      const status = session.channelStatus.get(d.name);
+      if (!label || !vals || (status && status.samples > status.rowCount / 2)) return [];
+      return [{ label, vals, slug: d.quantitySlug }];
+    });
+    // One family only: per-cylinder sensors win over per-bank ones when a log has both.
+    const cyls = members.filter((m) => m.label.startsWith("C"));
+    const group = (cyls.length >= 2 ? cyls : members.filter((m) => m.label.startsWith("B"))).sort(
+      (a, b) => Number(a.label.slice(1)) - Number(b.label.slice(1)),
+    );
+    if (group.length < 2) continue;
+
+    const means = group.map((m) => meanIn(ts, m.vals, launchAt + STEADY_FROM_S, passEnd));
+    if (means.some((m) => m === null)) continue;
+
+    let lean: CylinderGroup["lean"] = null;
+    const targetDef = kind === "lambda" ? parsed.channelDefs.find((d) => /^target (lambda|afr)$/i.test(d.name.trim())) : undefined;
+    const target = targetDef ? session.channels.get(targetDef.name) : undefined;
+    if (target) {
+      for (const m of group) {
+        let start: number | null = null;
+        let worst = 0;
+        for (let i = lowerBound(ts, launchAt + LEAN_FROM_S); i < ts.length && ts[i] <= passEnd; i++) {
+          const ratio = target[i] > 0 && Number.isFinite(m.vals[i]) ? m.vals[i] / target[i] : NaN;
+          if (ratio >= LEAN_RATIO) {
+            if (start === null) start = ts[i];
+            worst = Math.max(worst, ratio);
+            const seconds = ts[i] - start;
+            if (!lean || seconds > lean.seconds) lean = { label: m.label, seconds, at: start - launchAt, worst };
+          } else {
+            start = null;
+            worst = 0;
+          }
+        }
+      }
+    }
+    out.push({ kind, labels: group.map((m) => m.label), quantitySlug: group[0].slug, means: means as number[], lean });
+  }
+  return out;
+}
+
+function meanIn(ts: Float64Array, vals: Float64Array, from: number, to: number): number | null {
+  let sum = 0;
+  let n = 0;
+  for (let i = lowerBound(ts, from); i < ts.length && ts[i] <= to; i++) {
+    if (Number.isFinite(vals[i])) {
+      sum += vals[i];
+      n++;
+    }
+  }
+  return n ? sum / n : null;
+}
+
+/** Everything the Anomalies section can raise on a pass. */
+export type Anomaly =
+  /** A pressure or the battery fell lower than it usually does. */
+  | { kind: "low"; row: string; level: PassLevel; usualMin: number }
+  /** A wideband ran well lean of the target for a while. */
+  | { kind: "lean"; row: string; label: string; seconds: number; at: number; worst: number }
+  /** A cylinder moved away from where it usually sits against the others. */
+  | { kind: "drift"; row: string; label: string; group: "lambda" | "egt"; offset: number; usual: number; quantitySlug?: string }
+  /** The cylinders spread further apart than they usually do. */
+  | { kind: "spread"; row: string; group: "lambda" | "egt"; spread: number; usual: number; quantitySlug?: string }
+  /** An EGT far off the others with no history to judge by: a dead or a lean cylinder. */
+  | { kind: "egt-odd"; row: string; label: string; offset: number; quantitySlug?: string };
 
 /** Fewer reference passes than this and there's no "usual" to judge by. */
 const MIN_REFS = 3;
@@ -123,21 +235,85 @@ const MIN_BASE_KPA = 70;
  * `refs`, the vehicle's other passes: more than three spreads below their
  * usual low, and at least MIN_FALL_FRACTION of their line level.
  */
-export function findAnomalies(levels: PassLevel[], refs: PassLevel[][]): Anomaly[] {
+export interface PassChecks {
+  levels: PassLevel[];
+  cylinders: CylinderGroup[];
+}
+
+export function findAnomalies(pass: PassChecks, refs: PassChecks[]): Anomaly[] {
   const out: Anomaly[] = [];
-  for (const level of levels) {
+  for (const level of pass.levels) {
     const pressure = level.quantitySlug === "pressure";
     if (pressure && level.base < MIN_BASE_KPA) continue;
-    const same = refs.flatMap((r) => r.filter((l) => l.name === level.name));
+    const same = refs.flatMap((r) => r.levels.filter((l) => l.name === level.name));
     if (same.length < MIN_REFS) continue;
     const usualMin = median(same.map((l) => l.min));
     const usualBase = median(same.map((l) => l.base));
     const spread = 1.4826 * median(same.map((l) => Math.abs(l.min - usualMin)));
     const floor = Math.max(Math.abs(usualBase) * MIN_FALL_FRACTION, pressure ? MIN_FALL_KPA : MIN_FALL_VOLTS);
-    if (usualMin - level.min > Math.max(3 * spread, floor)) out.push({ level, usualMin });
+    if (usualMin - level.min > Math.max(3 * spread, floor)) out.push({ kind: "low", row: level.name, level, usualMin });
+  }
+
+  for (const g of pass.cylinders) {
+    const groupName = g.kind === "lambda" ? "Wideband" : "EGT";
+    // Lean spikes are judged against the target, which is the same on any pass.
+    if (g.lean && g.lean.seconds >= LEAN_MIN_S) out.push({ kind: "lean", row: "Lean spike", ...g.lean });
+
+    const offsets = offsetsOf(g);
+    const same = refs.flatMap((r) => r.cylinders.filter((x) => x.kind === g.kind && x.labels.join() === g.labels.join()));
+    if (same.length >= MIN_REFS) {
+      const refOffsets = same.map(offsetsOf);
+      g.labels.forEach((label, k) => {
+        const usual = median(refOffsets.map((o) => o[k]));
+        const spread = 1.4826 * median(refOffsets.map((o) => Math.abs(o[k] - usual)));
+        const moved = offsets[k] - usual;
+        if (g.kind === "lambda") {
+          // Only a cylinder that went leaner, and is now leaner than the rest:
+          // a rich cylinder coming back toward the others is no worry.
+          if (moved > Math.max(DRIFT_SPREADS * spread, LAMBDA_DRIFT) && offsets[k] > 0) {
+            out.push({ kind: "drift", row: `${groupName} drift`, label, group: g.kind, offset: offsets[k], usual, quantitySlug: g.quantitySlug });
+          }
+        } else if (Math.abs(moved) > Math.max(DRIFT_SPREADS * spread, EGT_DRIFT_C)) {
+          out.push({ kind: "drift", row: `${groupName} drift`, label, group: g.kind, offset: offsets[k], usual, quantitySlug: g.quantitySlug });
+        }
+      });
+      const spreadNow = spreadOf(g);
+      const spreads = same.map(spreadOf);
+      const usualSpread = median(spreads);
+      const spreadSpread = 1.4826 * median(spreads.map((v) => Math.abs(v - usualSpread)));
+      const floor = g.kind === "lambda" ? LAMBDA_SPREAD_WIDER : EGT_SPREAD_WIDER_C;
+      if (spreadNow - usualSpread > Math.max(3 * spreadSpread, floor)) {
+        out.push({ kind: "spread", row: `${groupName} spread`, group: g.kind, spread: spreadNow, usual: usualSpread, quantitySlug: g.quantitySlug });
+      }
+    } else if (g.kind === "egt") {
+      // No history yet: still call out a cylinder far from the others.
+      g.labels.forEach((label, k) => {
+        if (Math.abs(offsets[k]) > EGT_ODD_C) out.push({ kind: "egt-odd", row: "EGT odd one out", label, offset: offsets[k], quantitySlug: g.quantitySlug });
+      });
+    }
   }
   return out;
 }
+
+/** Lean of target by LEAN_RATIO for this long. Calibrated on one truck: a fuel pressure dip held it 0.17 s, nine clean passes 0.024 s at most. */
+const LEAN_MIN_S = 0.1;
+/** Widebands: each cylinder against the average of all of them, as a share of that average, so AFR and lambda read alike. */
+function offsetsOf(g: CylinderGroup): number[] {
+  const avg = g.means.reduce((a, b) => a + b) / g.means.length;
+  return g.kind === "lambda" ? g.means.map((m) => (m - avg) / avg) : g.means.map((m) => m - avg);
+}
+function spreadOf(g: CylinderGroup): number {
+  const o = offsetsOf(g);
+  return Math.max(...o) - Math.min(...o);
+}
+/** A cylinder this much leaner than where it usually sits against the rest (1.7%, about 0.015 lambda): the truck's cylinder 5 on Saturday. */
+const LAMBDA_DRIFT = 0.017;
+const DRIFT_SPREADS = 2;
+const LAMBDA_SPREAD_WIDER = 0.025;
+/** EGTs in °C: a cylinder this far from where it usually sits, a spread this much wider, or with no history this far from the rest. */
+const EGT_DRIFT_C = 50;
+const EGT_SPREAD_WIDER_C = 75;
+const EGT_ODD_C = 150;
 
 function median(nums: number[]): number {
   const s = [...nums].sort((a, b) => a - b);

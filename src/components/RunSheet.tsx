@@ -9,7 +9,7 @@ import { SEGMENTS, segmentTimes, type SegmentKey } from "@/lib/timeslip-segments
 import { estimatePowerFromTimeslip, type WeightPowerEstimates } from "@/lib/drag-performance";
 import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
 import { convertForDisplay, getDisplayPrecision, getDisplayUnit, type UnitOverrides, type UnitSystem } from "@/lib/units";
-import { findAnomalies, type Anomaly, type PassLevel } from "@/lib/anomalies";
+import { findAnomalies, LEAN_RATIO, type Anomaly, type CylinderGroup, type PassChecks, type PassLevel } from "@/lib/anomalies";
 import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel } from "@/lib/changes";
 import { timeFromName } from "@/lib/tune-changes";
@@ -238,7 +238,8 @@ interface Col {
   driveshaft: DriveshaftReading[];
   shifts: ShiftReading[];
   levels: PassLevel[];
-  /** Levels that fell lower than this vehicle's other passes usually do. */
+  cylinders: CylinderGroup[];
+  /** What the pass did that this vehicle's other passes usually don't. */
   anomalies: Anomaly[];
   segs: Partial<Record<SegmentKey, number>>;
   cf?: number;
@@ -464,8 +465,8 @@ export function RunSheet({
   tuneAt: Map<string, TuneTabChange[]>;
   knobMovesAt: Map<string, KnobMoves>;
   slipRefs: CompareSlipRef[];
-  /** Every counted pass of the vehicle's stored pressure and battery levels, by file: what "usual" means. */
-  levelPool: Map<string, PassLevel[]>;
+  /** Every counted pass of the vehicle's stored checks, by file: what "usual" means. */
+  levelPool: Map<string, PassChecks>;
   onOpenViewer: (fileId: Id<"files">) => void;
   onOpenLogs: (fileIds: Id<"files">[]) => void;
   onDelete: (file: Doc<"files">) => void;
@@ -495,9 +496,10 @@ export function RunSheet({
           driveshaft: preview?.driveshaft ?? [],
           shifts: preview?.shifts ?? [],
           levels: preview?.levels ?? [],
+          cylinders: preview?.cylinders ?? [],
           anomalies: findAnomalies(
-            preview?.levels ?? [],
-            [...levelPool].filter(([id]) => id !== file._id).map(([, levels]) => levels),
+            { levels: preview?.levels ?? [], cylinders: preview?.cylinders ?? [] },
+            [...levelPool].filter(([id]) => id !== file._id).map(([, checks]) => checks),
           ),
           segs: slip ? segmentTimes(slip) : {},
           cf: slip ? correctionFactor(slip) ?? undefined : undefined,
@@ -1027,24 +1029,71 @@ export function RunSheet({
       });
     });
 
-    // Anything that fell lower than it does on this vehicle's other passes.
-    // A clean sheet says so: the check ran and found nothing.
-    if (any((c) => c.levels.length || undefined)) {
-      const flagged: string[] = [];
-      for (const c of cols) for (const a of c.anomalies) if (!flagged.includes(a.level.name)) flagged.push(a.level.name);
+    // What a pass did that this vehicle's other passes usually don't: a
+    // pressure falling away, a cylinder going lean or drifting from the rest.
+    // A clean sheet says so: the checks ran and found nothing.
+    if (any((c) => c.levels.length || c.cylinders.length || undefined)) {
+      const rowNames: string[] = [];
+      for (const c of cols) for (const a of c.anomalies) if (!rowNames.includes(a.row)) rowNames.push(a.row);
       // In the vehicle's own units, at each unit's usual precision.
       const show = (v: number, slug: string | undefined) => {
         if (!slug) return v.toFixed(1);
         const shown = convertForDisplay(v, slug, unitSystem, unitOverrides);
         return shown.toFixed(getDisplayPrecision(slug, unitSystem, unitOverrides) ?? 1);
       };
+      // A difference, not a reading: no offset (a 50 °C gap is 90 °F, not 122).
+      const showGap = (v: number, slug: string | undefined) => {
+        if (!slug) return v.toFixed(0);
+        const gap = convertForDisplay(v, slug, unitSystem, unitOverrides) - convertForDisplay(0, slug, unitSystem, unitOverrides);
+        return Math.round(gap).toString();
+      };
       const unitOf = (slug: string | undefined) => (slug ? getDisplayUnit(slug, unitSystem, unitOverrides) ?? "" : "");
+      const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+      const describe = (a: Anomaly): { text: string; tip: string } => {
+        switch (a.kind) {
+          case "low": {
+            const { level } = a;
+            const unit = unitOf(level.quantitySlug);
+            return {
+              text: `↓ ${show(level.min, level.quantitySlug)}`,
+              tip: `Fell to ${show(level.min, level.quantitySlug)} ${unit} at ${level.minAt.toFixed(2)} s, from ${show(level.base, level.quantitySlug)} ${unit} on the line. On this vehicle's other passes it bottoms out near ${show(a.usualMin, level.quantitySlug)} ${unit}.`,
+            };
+          }
+          case "lean":
+            return {
+              text: `${a.label} ${a.seconds.toFixed(2)}s`,
+              tip: `${a.label} ran ${Math.round((LEAN_RATIO - 1) * 100)}% or more lean of the target for ${a.seconds.toFixed(2)} s from ${a.at.toFixed(2)} s, at worst ${pct(a.worst - 1)} lean.`,
+            };
+          case "drift":
+            return a.group === "lambda"
+              ? {
+                  text: `${a.label} lean`,
+                  tip: `${a.label} ran ${pct(a.offset)} leaner than the cylinder average. On this vehicle's other passes it sits ${a.usual >= 0 ? `${pct(a.usual)} leaner` : `${pct(-a.usual)} richer`}.`,
+                }
+              : {
+                  text: `${a.label} ${a.offset < a.usual ? "cold" : "hot"}`,
+                  tip: `${a.label} ran ${showGap(Math.abs(a.offset), a.quantitySlug)} ${unitOf(a.quantitySlug)} ${a.offset < 0 ? "below" : "above"} the cylinder average. On this vehicle's other passes it sits ${showGap(Math.abs(a.usual), a.quantitySlug)} ${unitOf(a.quantitySlug)} ${a.usual < 0 ? "below" : "above"}.`,
+                };
+          case "spread":
+            return a.group === "lambda"
+              ? { text: pct(a.spread), tip: `The cylinders spread ${pct(a.spread)} apart; on this vehicle's other passes about ${pct(a.usual)}.` }
+              : {
+                  text: `${showGap(a.spread, a.quantitySlug)}°`,
+                  tip: `The EGTs spread ${showGap(a.spread, a.quantitySlug)} ${unitOf(a.quantitySlug)} apart; on this vehicle's other passes about ${showGap(a.usual, a.quantitySlug)} ${unitOf(a.quantitySlug)}.`,
+                };
+          case "egt-odd":
+            return {
+              text: `${a.label} ${a.offset < 0 ? "cold" : "hot"}`,
+              tip: `${a.label} ran ${showGap(Math.abs(a.offset), a.quantitySlug)} ${unitOf(a.quantitySlug)} ${a.offset < 0 ? "below" : "above"} the other cylinders${a.offset < 0 ? " — check it is firing" : " — check it is not lean"}.`,
+            };
+        }
+      };
       out.push({
         key: "anomalies",
         title: "Anomalies",
         caption: true,
-        rows: flagged.length
-          ? flagged.map((name) => ({
+        rows: rowNames.length
+          ? rowNames.map((name) => ({
               key: `anomaly-${name}`,
               alert: true,
               label: (
@@ -1053,16 +1102,13 @@ export function RunSheet({
                 </Tip>
               ),
               cell: (c: Col) => {
-                const hit = c.anomalies.find((a) => a.level.name === name);
+                const hits = c.anomalies.filter((a) => a.row === name);
                 // Only the trouble shows; a pass that held up stays blank.
-                if (!hit) return null;
-                const { level } = hit;
-                const unit = unitOf(level.quantitySlug);
+                if (!hits.length) return null;
+                const parts = hits.map(describe);
                 return (
-                  <Tip
-                    content={`Fell to ${show(level.min, level.quantitySlug)} ${unit} at ${level.minAt.toFixed(2)} s, from ${show(level.base, level.quantitySlug)} ${unit} on the line. On this vehicle's other passes it bottoms out near ${show(hit.usualMin, level.quantitySlug)} ${unit}.`}
-                  >
-                    <span className="font-bold text-red-400">↓ {show(level.min, level.quantitySlug)}</span>
+                  <Tip content={<div className="space-y-1">{parts.map((p, i) => <div key={i}>{p.tip}</div>)}</div>}>
+                    <span className="truncate font-bold text-red-400">{parts.map((p) => p.text).join(" ")}</span>
                   </Tip>
                 );
               },
@@ -1072,8 +1118,8 @@ export function RunSheet({
                 key: "anomaly-none",
                 label: "None found",
                 cell: (c: Col) =>
-                  c.levels.length ? (
-                    <Tip content="Pressures and battery held up like they do on this vehicle's other passes">
+                  c.levels.length || c.cylinders.length ? (
+                    <Tip content="Pressures, battery and cylinders held up like they do on this vehicle's other passes">
                       <span className="text-green-400/70">✓</span>
                     </Tip>
                   ) : (

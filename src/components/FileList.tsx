@@ -11,7 +11,7 @@ import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 import { correctionFactor } from "@/lib/weather-correction";
 import { isBigChange } from "@/lib/changes";
 import { parsePreview } from "@/lib/preview";
-import type { PassLevel } from "@/lib/anomalies";
+import type { PassChecks } from "@/lib/anomalies";
 import { bestForAir, type DialPass } from "@/lib/dial-predictor";
 import { Button } from "@/components/ui/button";
 import { ChevronLeftIcon, GaugeIcon } from "lucide-react";
@@ -503,11 +503,11 @@ export function FileList({
   // The vehicle's counted passes' pressure and battery levels: what the
   // anomaly check calls usual. Every event the car has run, not just this one.
   const levelPool = useMemo(() => {
-    const out = new Map<string, PassLevel[]>();
+    const out = new Map<string, PassChecks>();
     for (const f of vehicleFiles ?? []) {
       if (f.excluded) continue;
-      const levels = parsePreview(f.preview)?.levels;
-      if (levels?.length) out.set(f._id, levels);
+      const p = parsePreview(f.preview);
+      if (p?.levels?.length || p?.cylinders?.length) out.set(f._id, { levels: p.levels ?? [], cylinders: p.cylinders ?? [] });
     }
     return out;
   }, [vehicleFiles]);

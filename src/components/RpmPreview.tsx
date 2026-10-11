@@ -7,7 +7,7 @@ import { parseDatalogBytes } from "@/lib/datalog-parser";
 import { lttbDownsample } from "@/lib/downsample";
 import { readKnobs, readLaunch, type KnobReading, type LaunchReading } from "@/lib/launch-readings";
 import { readDriveshaft, readShifts, type DriveshaftReading, type ShiftReading } from "@/lib/pass-readings";
-import { readLevels, type PassLevel } from "@/lib/anomalies";
+import { readCylinders, readLevels, wideOpenEnd, type CylinderGroup, type PassLevel } from "@/lib/anomalies";
 import { parsePreview } from "@/lib/preview";
 import { passSessionIndex } from "@/lib/load-haltech-log";
 import type { PassLift } from "@/lib/lift-estimate";
@@ -15,7 +15,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
 // Bump when the preview computation changes so stored previews recompute.
-const PREVIEW_VERSION = 10;
+const PREVIEW_VERSION = 11;
 
 // Stored window around the race — wider than the rendered window so the
 // dashboard lead-in/tail can be tuned without recomputing stored previews.
@@ -47,6 +47,8 @@ export interface PreviewPayload {
   shifts?: ShiftReading[] | null;
   /** Supply pressures and battery through the pass (preview version 10); null without race data. */
   levels?: PassLevel[] | null;
+  /** Per-cylinder widebands and EGTs through the pass (preview version 11); null without race data. */
+  cylinders?: CylinderGroup[] | null;
 }
 
 /** A file's stored preview, or null when absent or from an older version. */
@@ -237,7 +239,8 @@ async function computePreview(bytes: ArrayBuffer, fileName: string): Promise<Pre
     knobs: raceStart !== null ? readKnobs(session, raceStart) : null,
     driveshaft: raceStart !== null ? readDriveshaft(session, raceStart) : null,
     shifts: raceStart !== null ? readShifts(parsed, session, raceStart, raceEnd) : null,
-    levels: raceStart !== null ? readLevels(parsed, session, raceStart, raceEnd) : null,
+    levels: raceStart !== null ? readLevels(parsed, session, raceStart, wideOpenEnd(parsed, session, raceStart, raceEnd)) : null,
+    cylinders: raceStart !== null ? readCylinders(parsed, session, raceStart, wideOpenEnd(parsed, session, raceStart, raceEnd)) : null,
   };
 }
 
