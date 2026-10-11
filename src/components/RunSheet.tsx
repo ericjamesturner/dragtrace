@@ -13,6 +13,7 @@ import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel } from "@/lib/changes";
 import { timeFromName } from "@/lib/tune-changes";
 import { parsePreview } from "@/lib/preview";
+import { DRIVESHAFT_TIMES, type DriveshaftReading, type ShiftReading } from "@/lib/pass-readings";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -142,6 +143,9 @@ function fadeStyle(gap: number, fadeAt: number): React.CSSProperties {
   return { color: `color-mix(in oklab, ${BEST_GREEN} ${green}%, var(--muted-foreground))` };
 }
 
+/** This much short of the event's most power is fully grey. */
+const HP_FADE_AT = 60;
+
 /** A package this far off the event's best is fully grey. */
 const PACKAGE_FADE_AT = 0.03;
 
@@ -162,6 +166,53 @@ function packageOf(slip: Doc<"timeslips"> | undefined) {
   };
 }
 
+/** Tailwind amber-400 and sky-400, for readings above and below the event's usual. */
+const ABOVE_AMBER = "oklch(82.8% 0.189 84.429)";
+const BELOW_SKY = "oklch(74.6% 0.16 232.661)";
+
+/**
+ * Colours a reading by how far it sits from the event's usual (the median):
+ * amber above, blue below, plain when typical. Readings aren't results, so
+ * there's no best — what's worth seeing is the pass that was different. The
+ * scale is the event's own spread, so a 2 °F wobble on a steady day still
+ * reads as steady. `higherIsBetter` flips the colours where up is good, so in
+ * the air rows amber always means worse air.
+ */
+function spreadStyler(values: (number | undefined)[], higherIsBetter = false) {
+  const nums = values.filter((v): v is number => v !== undefined && Number.isFinite(v));
+  if (nums.length < 3) return () => undefined;
+  const median = medianOf(nums);
+  const mad = medianOf(nums.map((v) => Math.abs(v - median)));
+  const scale = Math.max(mad * 3, Math.abs(median) * 0.005, 1e-9);
+  return (v: number | undefined): React.CSSProperties | undefined => {
+    if (v === undefined || !Number.isFinite(v)) return undefined;
+    const t = Math.min(1, Math.abs(v - median) / scale);
+    if (t < 0.35) return undefined;
+    const up = v > median !== higherIsBetter;
+    return { color: `color-mix(in oklab, ${up ? ABOVE_AMBER : BELOW_SKY} ${Math.round(80 * t)}%, var(--foreground))` };
+  };
+}
+
+function medianOf(nums: number[]): number {
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/** "head 6.5" -> -6.5, "tail 2.5" -> 2.5: positive helps the clocks. */
+function windHelp(dir: string | undefined): number | undefined {
+  const m = dir && /^(head|tail)\s*(-?[\d.]+)/i.exec(dir.trim());
+  if (!m) return undefined;
+  return (m[1].toLowerCase() === "head" ? -1 : 1) * Number(m[2]);
+}
+
+/** Wind on the clocks: a headwind in amber, a tailwind in blue, stronger as it blows harder. */
+function windStyle(help: number | undefined): React.CSSProperties | undefined {
+  if (help === undefined || Math.abs(help) < 1) return undefined;
+  const t = Math.min(1, Math.abs(help) / 10);
+  return { color: `color-mix(in oklab, ${help < 0 ? ABOVE_AMBER : BELOW_SKY} ${Math.round(80 * t)}%, var(--foreground))` };
+}
+
 /** Everything one pass's column shows, worked out once. */
 interface Col {
   file: Doc<"files">;
@@ -171,12 +222,50 @@ interface Col {
   passLen: number | null;
   lift: LiftAnalysis | null;
   launch: LaunchLine[];
+  driveshaft: DriveshaftReading[];
+  shifts: ShiftReading[];
   segs: Partial<Record<SegmentKey, number>>;
   cf?: number;
   power: WeightPowerEstimates | null;
   estimate?: PassEstimate;
   /** The day it ran, as shown: NSP's stamp in the file name, else the upload day. */
   day: string;
+}
+
+/** Shifts this far apart in time, on different passes, are different shifts. */
+const SHIFT_SLOT_GAP_S = 0.4;
+
+/**
+ * The event's shifts lined up by time: each slot is one shift (1-2, 2-3, ...)
+ * holding the pass that made it. Slots form where the passes' shift times
+ * bunch; a pass's shift goes to the nearest one, at most one per pass.
+ */
+function shiftSlots(cols: Col[]): Map<string, ShiftReading>[] {
+  const times = cols.flatMap((c) => c.shifts.map((s) => s.at)).sort((a, b) => a - b);
+  const centers: number[] = [];
+  let group: number[] = [];
+  for (const t of times) {
+    if (group.length && t - group[group.length - 1] > SHIFT_SLOT_GAP_S) {
+      centers.push(group.reduce((a, b) => a + b) / group.length);
+      group = [];
+    }
+    group.push(t);
+  }
+  if (group.length) centers.push(group.reduce((a, b) => a + b) / group.length);
+  const slots = centers.map(() => new Map<string, ShiftReading>());
+  for (const c of cols) {
+    for (const s of c.shifts) {
+      let best = 0;
+      for (let k = 1; k < centers.length; k++) {
+        if (Math.abs(centers[k] - s.at) < Math.abs(centers[best] - s.at)) best = k;
+      }
+      if (!slots[best].has(c.file._id)) slots[best].set(c.file._id, s);
+    }
+  }
+  // A gear change shows on most passes. A dip that only one or two passes
+  // have, where the rest have nothing, is the tires or the converter.
+  const most = Math.max(0, ...slots.map((m) => m.size));
+  return slots.filter((m) => m.size * 2 >= most);
 }
 
 /** "16:25" -> "4:25 pm". Anything that isn't HH:MM shows as typed. */
@@ -188,6 +277,15 @@ function formatRunTime(hhmm: string): string {
 }
 
 const DASH = <span className="text-muted-foreground/30">—</span>;
+
+/** A label with its unit kept lower case: the label column is set in capitals, and "0.1 S" misreads. */
+function withUnit(name: string, unit: string) {
+  return (
+    <>
+      {name} <span className="normal-case">{unit}</span>
+    </>
+  );
+}
 
 /** One row of the sheet: a label once on the left, a value under every pass. */
 interface Row {
@@ -276,13 +374,16 @@ export function RunSheet({
         const passLen = splits.length ? Math.max(...splits) : null;
         // Any stored version that has them, so they don't blink while the
         // preview is rebuilt to the current one.
-        const launch = parsePreview(file.preview)?.launch;
+        const preview = parsePreview(file.preview);
+        const launch = preview?.launch;
         return {
           file,
           slip,
           passLen,
           lift: readLift(file.preview, passLen),
           launch: launch ? formatLaunch(launch, unitSystem, unitOverrides) : [],
+          driveshaft: preview?.driveshaft ?? [],
+          shifts: preview?.shifts ?? [],
           segs: slip ? segmentTimes(slip) : {},
           cf: slip ? correctionFactor(slip) ?? undefined : undefined,
           power:
@@ -449,6 +550,53 @@ export function RunSheet({
       },
     ];
 
+    // Right under the splits, which they are worked out from.
+    if (raceWeightLb !== undefined) {
+      const hpOf = (c: Col, method: "E.T." | "MPH") => (method === "E.T." ? c.power?.etHp : c.power?.mphHp);
+      // Most power in green, fading as it falls short — like the clocks.
+      const bestHp = (method: "E.T." | "MPH") => {
+        const all = cols.flatMap((c) => {
+          const hp = hpOf(c, method);
+          return hp === undefined ? [] : [Math.round(hp)];
+        });
+        return all.length >= 2 ? Math.max(...all) : undefined;
+      };
+      const powerRow = (method: "E.T." | "MPH"): Row => ({
+        key: `power-${method}`,
+        label: <span title={`Estimated from the ${raceWeightLb.toLocaleString()} lb race weight`}>≈ HP from {method}</span>,
+        cell: (c) => {
+          const hp = method === "E.T." ? c.power?.etHp : c.power?.mphHp;
+          const d = c.power?.distance;
+          const observed = d === "1/4" ? (method === "E.T." ? c.slip?.et : c.slip?.mph) : method === "E.T." ? c.slip?.eighthEt : c.slip?.eighthMph;
+          if (hp === undefined || d === undefined || observed === undefined) return DASH;
+          return (
+            <EstimateLine
+              value={(() => {
+                const best = bestHp(method);
+                const text = Math.round(hp).toLocaleString();
+                if (best === undefined) return text;
+                if (Math.round(hp) === best) return <span className="text-green-400">{text}</span>;
+                return <span style={fadeStyle(best - Math.round(hp), HP_FADE_AT)}>{text}</span>;
+              })()}
+            >
+              <WeightPowerExplainer
+                method={method}
+                distance={d}
+                raceWeightLb={raceWeightLb}
+                observed={observed}
+                estimateHp={hp}
+              />
+            </EstimateLine>
+          );
+        },
+      });
+      out.push({
+        key: "power",
+        title: "Power",
+        rows: [powerRow("E.T."), powerRow("MPH")],
+      });
+    }
+
     // How long before the stripe the throttle came out. A clean pass is a
     // non-event, so "none" fades back.
     const liftRows: Row[] = [];
@@ -558,15 +706,34 @@ export function RunSheet({
     if (liftRows.length) out.push({ key: "lift", title: "Lift", rows: liftRows });
 
     // The air, as the slip or the weather station gave it.
+    // Amber is worse air than the event's usual, blue better.
+    const airRow = (
+      key: string,
+      label: string,
+      get: (c: Col) => number | undefined,
+      show: (v: number) => React.ReactNode,
+      higherIsBetter = false,
+    ) => {
+      const style = spreadStyler(cols.map(get), higherIsBetter);
+      return {
+        key,
+        label,
+        has: get,
+        cell: (c: Col) => {
+          const v = get(c);
+          return v === undefined ? DASH : <span style={style(v)}>{show(v)}</span>;
+        },
+      };
+    };
     const air: Row[] = [
       { key: "time", label: "Time", has: (c: Col) => c.slip?.runTime, cell: (c: Col) => c.slip?.runTime ? formatRunTime(c.slip.runTime) : DASH },
       { key: "lane", label: "Lane", has: (c: Col) => c.slip?.lane, cell: (c: Col) => c.slip?.lane ? (c.slip.lane === "left" ? "Left" : "Right") : DASH },
-      { key: "air", label: "Air °F", has: (c: Col) => c.slip?.airTemperatureF, cell: (c: Col) => c.slip?.airTemperatureF ?? DASH },
-      { key: "track", label: "Track °F", has: (c: Col) => c.slip?.trackTemperatureF, cell: (c: Col) => c.slip?.trackTemperatureF ?? DASH },
-      { key: "humidity", label: "Humidity %", has: (c: Col) => c.slip?.humidityPct, cell: (c: Col) => c.slip?.humidityPct ?? DASH },
-      { key: "baro", label: "Baro inHg", has: (c: Col) => c.slip?.barometricPressureInHg, cell: (c: Col) => c.slip?.barometricPressureInHg ?? DASH },
-      { key: "da", label: "D.A. ft", has: (c: Col) => c.slip?.densityAltitudeFt, cell: (c: Col) => c.slip?.densityAltitudeFt?.toLocaleString() ?? DASH },
-      { key: "cf", label: "Corr.", has: (c: Col) => c.cf, cell: (c: Col) => c.cf !== undefined ? c.cf.toFixed(4) : DASH },
+      airRow("air", "Air °F", (c) => c.slip?.airTemperatureF, (v) => v),
+      airRow("track", "Track °F", (c) => c.slip?.trackTemperatureF, (v) => v),
+      airRow("humidity", "Humidity %", (c) => c.slip?.humidityPct, (v) => v),
+      airRow("baro", "Baro inHg", (c) => c.slip?.barometricPressureInHg, (v) => v, true),
+      airRow("da", "D.A. ft", (c) => c.slip?.densityAltitudeFt, (v) => v.toLocaleString()),
+      airRow("cf", "Corr.", (c) => c.cf, (v) => v.toFixed(4)),
       {
         key: "wind",
         label: "Wind mph",
@@ -577,7 +744,10 @@ export function RunSheet({
           if (speed === undefined && !dir) return DASH;
           // The head/tail part is what moves the clocks; the gust speed rides on hover.
           return (
-            <span title={[speed !== undefined ? `${speed} mph` : "", dir].filter(Boolean).join(" · ")}>
+            <span
+              title={[speed !== undefined ? `${speed} mph` : "", dir].filter(Boolean).join(" · ")}
+              style={windStyle(windHelp(dir))}
+            >
               {dir || speed}
             </span>
           );
@@ -603,47 +773,72 @@ export function RunSheet({
           });
           const unit = parts[0]?.unit ?? "";
           const shared = unit !== "" && parts.every((p) => p.unit === unit);
+          const num = (c: Col) => {
+            const v = c.launch.find((l) => l.label === label)?.value;
+            const n = v === undefined ? NaN : Number(v.replace(/[^\d.-]/g, ""));
+            return Number.isFinite(n) ? n : undefined;
+          };
+          // Hotter than usual in amber, cooler in blue.
+          const style = spreadStyler(cols.map(num));
           return {
             key: `launch-${label}`,
             label: shared ? `${label} ${unit}` : label,
             cell: (c: Col) => {
               const v = c.launch.find((l) => l.label === label)?.value;
               if (v === undefined) return DASH;
-              return shared ? v.slice(0, v.length - unit.length).trim() : v;
+              return <span style={style(num(c))}>{shared ? v.slice(0, v.length - unit.length).trim() : v}</span>;
             },
           };
         }),
       });
     }
 
-    if (raceWeightLb !== undefined) {
-      const powerRow = (method: "E.T." | "MPH"): Row => ({
-        key: `power-${method}`,
-        label: <span title={`Estimated from the ${raceWeightLb.toLocaleString()} lb race weight`}>≈ HP from {method}</span>,
-        cell: (c) => {
-          const hp = method === "E.T." ? c.power?.etHp : c.power?.mphHp;
-          const d = c.power?.distance;
-          const observed = d === "1/4" ? (method === "E.T." ? c.slip?.et : c.slip?.mph) : method === "E.T." ? c.slip?.eighthEt : c.slip?.eighthMph;
-          if (hp === undefined || d === undefined || observed === undefined) return DASH;
-          return (
-            <EstimateLine value={Math.round(hp).toLocaleString()}>
-              <WeightPowerExplainer
-                method={method}
-                distance={d}
-                raceWeightLb={raceWeightLb}
-                observed={observed}
-                estimateHp={hp}
-              />
-            </EstimateLine>
-          );
-        },
-      });
+    // Driveshaft speed off the line, from the full-rate log.
+    // Faster than usual in amber — on a pass whose 60' is no better, that's spin — slower in blue.
+    const dsStyles = new Map(
+      DRIVESHAFT_TIMES.map((after) => [after, spreadStyler(cols.map((c) => c.driveshaft.find((d) => d.after === after)?.rpm))]),
+    );
+    if (any((c) => c.driveshaft.length || undefined)) {
       out.push({
-        key: "power",
-        title: "Power",
-        rows: [powerRow("E.T."), powerRow("MPH")],
+        key: "driveshaft",
+        title: "Driveshaft",
+        caption: true,
+        rows: DRIVESHAFT_TIMES.map((after) => ({
+          key: `ds-${after}`,
+          // ".25": the seconds go without saying.
+          label: String(after).replace(/^0(?=\.)/, ""),
+          cell: (c: Col) => {
+            const r = c.driveshaft.find((d) => d.after === after);
+            return r ? <span style={dsStyles.get(after)?.(r.rpm)}>{Math.round(r.rpm).toLocaleString()}</span> : DASH;
+          },
+        })),
       });
     }
+
+    // Each upshift: when the RPM peaked into it, how long the pull-down took,
+    // and how far it fell. A row is one shift across every pass, matched by
+    // when it happened, so a pass that missed one doesn't slide the rest up.
+    const slots = shiftSlots(cols);
+    slots.forEach((slot, k) => {
+      const at = (c: Col) => slot.get(c.file._id);
+      const when = spreadStyler(cols.map((c) => at(c)?.at));
+      const takes = spreadStyler(cols.map((c) => at(c)?.takes));
+      const drop = spreadStyler(cols.map((c) => at(c)?.drop));
+      out.push({
+        key: `shift-${k}`,
+        title: k === 0 ? "Shift" : `Shift ${k + 1}`,
+        caption: true,
+        rows: [
+          { key: `shift-${k}-when`, label: "When", cell: (c) => (at(c) ? <span style={when(at(c)!.at)}>{at(c)!.at.toFixed(2)}</span> : DASH) },
+          { key: `shift-${k}-takes`, label: "Takes", cell: (c) => (at(c) ? <span style={takes(at(c)!.takes)}>{at(c)!.takes.toFixed(2)}</span> : DASH) },
+          {
+            key: `shift-${k}-drop`,
+            label: withUnit("Drop", "rpm"),
+            cell: (c) => (at(c) ? <span style={drop(at(c)!.drop)}>{Math.round(at(c)!.drop).toLocaleString()}</span> : DASH),
+          },
+        ],
+      });
+    });
 
     if (any((c) => changesAt.get(c.file._id) ?? tuneAt.get(c.file._id) ?? knobMovesAt.get(c.file._id))) {
       out.push({
@@ -1276,7 +1471,7 @@ function NotesCell({ file }: { file: Doc<"files"> }) {
 }
 
 /** An estimated value that opens its math lesson on hover or click. */
-function EstimateLine({ value, children }: { value: string; children: React.ReactNode }) {
+function EstimateLine({ value, children }: { value: React.ReactNode; children: React.ReactNode }) {
   return (
     <Popover>
       <PopoverTrigger

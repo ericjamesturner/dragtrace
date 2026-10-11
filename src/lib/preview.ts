@@ -1,4 +1,5 @@
 import type { KnobReading, LaunchReading } from "./launch-readings";
+import type { DriveshaftReading, ShiftReading } from "./pass-readings";
 
 /**
  * The precomputed shape of a pass, stored on the file when its dashboard
@@ -18,6 +19,10 @@ export interface PreviewPayload {
   launch?: LaunchReading[] | null;
   /** Dash knob positions at the launch (stored from preview version 4). */
   knobs?: KnobReading[] | null;
+  /** Driveshaft speed early in the pass (stored from preview version 5). */
+  driveshaft?: DriveshaftReading[] | null;
+  /** Upshifts during the pass (stored from preview version 5). */
+  shifts?: ShiftReading[] | null;
 }
 
 export function parsePreview(raw: string | undefined | null): PreviewPayload | null {

@@ -170,6 +170,8 @@ export function shiftMarkers(
   launch: number,
   gear?: Float64Array,
   throttle?: Float64Array,
+  /** Overrides MIN_DROP_FRACTION, for a reader that would rather catch a soft shift. */
+  minDropFraction = MIN_DROP_FRACTION,
 ): ShiftMarker[] {
   const end = launch + PASS_LENGTH_S;
   const out: ShiftMarker[] = [];
@@ -200,7 +202,7 @@ export function shiftMarkers(
 
   const passPeak = extremeIn(ts, vals, launch, end, "max");
   if (!passPeak || passPeak.v <= 0) return out;
-  const minDrop = passPeak.v * MIN_DROP_FRACTION;
+  const minDrop = passPeak.v * minDropFraction;
   const minRecovery = passPeak.v * MIN_RECOVERY_FRACTION;
   const throttlePeak = throttle ? extremeIn(ts, throttle, launch, end, "max") : null;
   const wideOpen = (from: number, to: number) => {
