@@ -15,7 +15,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
 // Bump when the preview computation changes so stored previews recompute.
-const PREVIEW_VERSION = 16;
+const PREVIEW_VERSION = 17;
 
 // Stored window around the race — wider than the rendered window so the
 // dashboard lead-in/tail can be tuned without recomputing stored previews.

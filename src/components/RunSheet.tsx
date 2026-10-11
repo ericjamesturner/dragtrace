@@ -10,7 +10,7 @@ import { estimatePowerFromTimeslip, type WeightPowerEstimates } from "@/lib/drag
 import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
 import { convertForDisplay, getDisplayPrecision, getDisplayUnit, type UnitOverrides, type UnitSystem } from "@/lib/units";
 import { setHealthFocus, type HealthFocus } from "@/lib/health-focus";
-import { checksCut, findAnomalies, isCheckedLevel, offsetsOf, spreadOf, type Anomaly, type BoostReading, type CylinderGroup, type FaultReading, type LimiterReading, type PassChecks, type PassLevel } from "@/lib/anomalies";
+import { checksCut, findAnomalies, isCheckedLevel, offsetsOf, spreadOf, targetRatios, TARGET_OFF, type Anomaly, type BoostReading, type CylinderGroup, type FaultReading, type LimiterReading, type PassChecks, type PassLevel } from "@/lib/anomalies";
 import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel } from "@/lib/changes";
 import { timeFromName } from "@/lib/tune-changes";
@@ -1109,6 +1109,11 @@ export function RunSheet({
               tip: `${a.level.name} ran ${showGap(sf.gap, a.level.quantitySlug)} ${unit} (${Math.round((sf.gap / sf.expected) * 100)}%) below expected at ${sf.at.toFixed(2)} s: ${show(sf.actual, a.level.quantitySlug)} against ${show(sf.expected, a.level.quantitySlug)} ${unit} expected.`,
             };
           }
+          case "target-lean":
+            return {
+              text: `${a.label} +${pct(a.ratio)}`,
+              tip: `${sensor(a.label)} averaged ${pct(a.ratio)} lean of target from 1 s until the throttle came off.`,
+            };
           case "lean":
             return {
               text: `${a.label} ${a.seconds.toFixed(2)}s`,
@@ -1176,7 +1181,8 @@ export function RunSheet({
         row: string,
         label: string,
         explain: string[],
-        normal: (c: Col) => { text: string; tip: string } | null,
+        /** `tone: "rich"` shows it blue: off, but the safe way. */
+        normal: (c: Col) => { text: string; tip: string; tone?: "rich" } | null,
         /** What the log should show when the value is clicked. */
         focus: (c: Col) => Omit<HealthFocus, "fileId" | "label"> | null,
       ): Row => ({
@@ -1225,7 +1231,9 @@ export function RunSheet({
           return (
             <Tip content={cutNote ? <div className="space-y-1"><div>{n.tip}</div><div>{cutNote}</div></div> : n.tip}>
               <span
-                className={`min-w-0 truncate text-right text-xs ${cutNote ? "italic text-muted-foreground/30" : "text-muted-foreground/60"} ${open ? "cursor-pointer hover:text-foreground hover:underline" : ""}`}
+                className={`min-w-0 truncate text-right text-xs ${
+                  n.tone === "rich" ? `text-sky-400 ${cutNote ? "italic opacity-50" : ""}` : cutNote ? "italic text-muted-foreground/30" : "text-muted-foreground/60"
+                } ${open ? "cursor-pointer hover:text-foreground hover:underline" : ""}`}
                 onClick={open}
               >
                 {n.text}
@@ -1239,8 +1247,17 @@ export function RunSheet({
 
       // Supplies: one row per pressure the checks watch, and the battery.
       // "Device Battery Voltage" -> "Battery", "Transmission Line Pressure" -> "Trans Line Pressure".
-      const shortName = (name: string) =>
-        /battery voltage/i.test(name) ? "Battery" : name.replace(/^Transmission\b/i, "Trans").replace(/^Torque Converter\b/i, "Converter");
+      // Labels that fit the column: "Trans Oil Temperature" -> "Trans temp",
+      // "Transmission Line Pressure" -> "Line press.". The full name is in the tooltip.
+      const shortName = (name: string) => {
+        if (/battery voltage/i.test(name)) return "Battery";
+        return name
+          .replace(/^Transmission (Line|Oil)\b/i, (_m, part: string) => (part.toLowerCase() === "line" ? "Line" : "Trans"))
+          .replace(/^Transmission\b/i, "Trans")
+          .replace(/^Torque Converter\b/i, "Conv.")
+          .replace(/\bTemperature\b/i, "temp")
+          .replace(/\bPressure\b/i, "press.");
+      };
       const levelNames: string[] = [];
       for (const c of cols) {
         for (const l of c.levels) {
@@ -1422,11 +1439,45 @@ export function RunSheet({
           ),
         );
       }
+      if (cols.some((c) => { const g = groupOf(c, "lambda"); return g ? targetRatios(g) : null; })) {
+        rows.push(
+          healthRow(
+            "Wideband vs target",
+            "λ vs target",
+            [
+              "Each wideband's average against Target Lambda's average, from 1 s until the throttle comes off. Shown: the one furthest off — + is lean, − is rich.",
+              `Red when one averages ${pct(TARGET_OFF)} or more lean of target, from the very first pass. Blue when it's that far rich: off, but the safe way. Grey within ${pct(TARGET_OFF)}.`,
+              "Averages hide short spikes — Lean spike catches those.",
+            ],
+            (c) => {
+              const g = groupOf(c, "lambda");
+              const r = g ? targetRatios(g) : null;
+              if (!g || !r) return null;
+              const k = r.reduce((best, v, i) => (Math.abs(v) > Math.abs(r[best]) ? i : best), 0);
+              const sign = r[k] >= 0 ? "+" : "−";
+              return {
+                text: `${g.labels[k]} ${sign}${pct(Math.abs(r[k]))}`,
+                tip: `Furthest off: ${sensor(g.labels[k])}, ${pct(Math.abs(r[k]))} ${r[k] >= 0 ? "lean" : "rich"} of target.`,
+                tone: r[k] <= -TARGET_OFF ? "rich" : undefined,
+              };
+            },
+            (c) => {
+              const hit = c.anomalies.find((a) => a.kind === "target-lean");
+              return groupOf(c, "lambda")
+                ? {
+                    cylinders: { kind: "lambda", labels: hit && hit.kind === "target-lean" ? [hit.label] : "all", withTarget: true },
+                    ...wholeRun(c),
+                  }
+                : null;
+            },
+          ),
+        );
+      }
       if (cols.some((c) => groupOf(c, "lambda"))) {
         rows.push(
           healthRow(
             "Wideband drift",
-            "Wideband drift",
+            "λ drift",
             [
               "Each wideband's average from 1 s until the throttle comes off, against the average of all of them. Shown: the leanest one.",
               "Red when a cylinder runs 1.7% or more leaner against the others than it usually does, and is now leaner than average.",
@@ -1444,7 +1495,7 @@ export function RunSheet({
           ),
           healthRow(
             "Wideband spread",
-            "Wideband spread",
+            "λ spread",
             ["Leanest wideband minus richest, from their averages after 1 s.", "Red when 2.5% or more wider than usual.", usualNote],
             (c) => {
               const g = groupOf(c, "lambda");
@@ -1559,7 +1610,7 @@ export function RunSheet({
     <div className="mt-3 w-fit max-w-full overflow-x-auto rounded-lg border bg-card font-mono">
       <div
         className="grid"
-        style={{ gridTemplateColumns: `8rem repeat(${cols.length}, 6rem) 6rem 6rem` }}
+        style={{ gridTemplateColumns: `8.5rem repeat(${cols.length}, 6.5rem) 6.5rem 6.5rem` }}
         onMouseLeave={() => {
           setHoverCol(null);
           setHoverRow(null);

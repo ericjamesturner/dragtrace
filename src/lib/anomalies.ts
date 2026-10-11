@@ -163,6 +163,8 @@ export interface CylinderGroup {
   means: number[];
   /** Each sensor's highest point from LEAN_FROM_S on, smoothed over PEAK_SMOOTH_S: what a short EGT spike shows in. */
   peaks?: number[];
+  /** Widebands: the target's average over the same stretch as `means` (preview version 17). */
+  targetMean?: number;
   /**
    * Widebands with a target: the longest stretch any one ran lean of it by
    * LEAN_RATIO or more (zero seconds when none did). Null without a target.
@@ -258,7 +260,8 @@ export function readCylinders(parsed: ParsedLog, session: LogSession, launchAt: 
         }
       }
     }
-    out.push({ kind, labels: group.map((m) => m.label), quantitySlug: group[0].slug, means: means as number[], peaks, lean });
+    const targetMean = target ? meanIn(ts, target, launchAt + STEADY_FROM_S, passEnd) ?? undefined : undefined;
+    out.push({ kind, labels: group.map((m) => m.label), quantitySlug: group[0].slug, means: means as number[], peaks, lean, targetMean });
   }
   return out;
 }
@@ -321,6 +324,8 @@ export type Anomaly =
   | { kind: "fault"; row: string; fault: FaultReading }
   /** A wideband ran well lean of the target for a while. */
   | { kind: "lean"; row: string; label: string; seconds: number; at: number; worst: number }
+  /** A wideband averaged lean of the target over the pass — judged without any history. */
+  | { kind: "target-lean"; row: string; label: string; ratio: number }
   /** A cylinder moved away from where it usually sits against the others. */
   | { kind: "drift"; row: string; label: string; group: "lambda" | "egt"; offset: number; usual: number; quantitySlug?: string }
   /** The cylinders spread further apart than they usually do. */
@@ -563,6 +568,11 @@ export function findAnomalies(pass: PassChecks, refs: PassChecks[]): Anomaly[] {
     const groupName = g.kind === "lambda" ? "Wideband" : "EGT";
     // Lean spikes are judged against the target, which is the same on any pass.
     if (g.lean && g.lean.seconds >= LEAN_MIN_S) out.push({ kind: "lean", row: "Lean spike", ...g.lean });
+    // Off target all pass, not just in a spike: all the cylinders going lean
+    // together (a fuel supply) is something drift against the others can't see.
+    targetRatios(g)?.forEach((ratio, k) => {
+      if (ratio >= TARGET_OFF) out.push({ kind: "target-lean", row: "Wideband vs target", label: g.labels[k], ratio });
+    });
     if (g.kind === "egt" && g.peaks) {
       const peakRefs = refs.flatMap((r) =>
         r.cylinders.filter((x) => x.kind === "egt" && x.labels.join() === g.labels.join() && x.peaks).map((x) => x.peaks!),
@@ -660,6 +670,14 @@ export function offsetsOf(g: CylinderGroup): number[] {
   const avg = g.means.reduce((a, b) => a + b) / g.means.length;
   return g.kind === "lambda" ? g.means.map((m) => (m - avg) / avg) : g.means.map((m) => m - avg);
 }
+/** Each wideband's average against the target's: +0.05 is 5% lean, −0.05 is 5% rich. Null without a target. */
+export function targetRatios(g: CylinderGroup): number[] | null {
+  if (g.kind !== "lambda" || !g.targetMean) return null;
+  return g.means.map((m) => m / g.targetMean! - 1);
+}
+/** Averaging this far (5%) lean of target is red; this far rich is shown, but isn't a fault. */
+export const TARGET_OFF = 0.05;
+
 export function spreadOf(g: CylinderGroup): number {
   const o = offsetsOf(g);
   return Math.max(...o) - Math.min(...o);

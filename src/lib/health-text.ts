@@ -35,6 +35,8 @@ export function healthLines(pass: PassChecks, refs: PassChecks[], system: UnitSy
         return `${a.level.name} hot: ${show(a.level.max!, a.level.quantitySlug)}`;
       case "lean":
         return `${sensor(a.label)} lean of target for ${a.seconds.toFixed(2)} s`;
+      case "target-lean":
+        return `${sensor(a.label)} averaging ${pct(a.ratio)} lean of target`;
       case "drift":
         return a.group === "lambda"
           ? `${sensor(a.label)} running ${pct(a.offset)} lean of the others (usually ${pct(a.usual)})`
