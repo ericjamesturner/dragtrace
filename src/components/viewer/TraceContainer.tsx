@@ -150,6 +150,10 @@ function SignalFilterSlider({
   );
 }
 
+/** Legend names open their tip to the left; this clears the 18px switch and
+ *  the 6px gap in front of the name, so the tip never covers the switch. */
+const LEGEND_TIP_OFFSET = 28;
+
 // Race line defaults to dashed when unset, so "Solid" is an explicit [] (empty)
 // to distinguish it from "use default".
 /** Shared start of the long channel names below it, e.g. "Torque Management". */
@@ -173,7 +177,7 @@ function LegendHeading({
           title={toggle.checked ? `Hide all of ${text}` : `Show all of ${text}`}
         />
       )}
-      <Tip content={title ?? text} delay={HOVER_TIP_DELAY} side="left">
+      <Tip content={title ?? text} delay={HOVER_TIP_DELAY} side="left" sideOffset={LEGEND_TIP_OFFSET}>
         <div className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wider text-white/40">
           {text}
         </div>
@@ -1918,7 +1922,7 @@ export function TraceContainer({
                               color={rows[0]?.color}
                               opacity={rows[0]?.opacity ?? 1}
                             />
-                            <Tip content={name} delay={HOVER_TIP_DELAY} side="left">
+                            <Tip content={name} delay={HOVER_TIP_DELAY} side="left" sideOffset={LEGEND_TIP_OFFSET}>
                               <span className="min-w-0 flex-1 truncate text-white/70">{label}</span>
                             </Tip>
                             {/* One run: its numbers sit on the name row. */}
@@ -1972,7 +1976,7 @@ export function TraceContainer({
                               onChange={() => onSetChannelsHidden?.(keys, !allHidden)}
                               title={allHidden ? `Show ${name}` : `Hide ${name}`}
                             />
-                            <Tip content={name} delay={HOVER_TIP_DELAY} side="left">
+                            <Tip content={name} delay={HOVER_TIP_DELAY} side="left" sideOffset={LEGEND_TIP_OFFSET}>
                               <span className="min-w-0 flex-1 truncate text-white/70">
                                 {label}
                               </span>
@@ -2144,6 +2148,7 @@ export function TraceContainer({
                                 content={`${shownName} — click to style, drag to reorder or to another trace`}
                                 delay={HOVER_TIP_DELAY}
                                 side="left"
+                                sideOffset={LEGEND_TIP_OFFSET}
                               >
                                 <span className="min-w-0 flex-1 truncate text-white/70">
                                   {label}

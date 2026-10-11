@@ -78,18 +78,21 @@ function Tip({
   children,
   content,
   side,
+  sideOffset,
   delay,
 }: {
   children: React.ReactElement
   content: React.ReactNode
   side?: "top" | "bottom" | "left" | "right"
+  /** Gap from the trigger, to clear controls that sit beside it. */
+  sideOffset?: number
   delay?: number
 }) {
   if (content == null || content === false || content === "") return children
   return (
     <Tooltip>
       <TooltipTrigger render={children} delay={delay} />
-      <TooltipContent side={side}>{content}</TooltipContent>
+      <TooltipContent side={side} sideOffset={sideOffset}>{content}</TooltipContent>
     </Tooltip>
   )
 }

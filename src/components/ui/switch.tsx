@@ -41,7 +41,9 @@ export function Switch({
   const lit = on || mixed;
   const form = appearance === "form";
   return (
-    <Tip content={title} delay={HOVER_TIP_DELAY}>
+    // A channel switch sits in a stack of them; a tip above would cover the
+    // next one up, so it opens to the left, over the chart.
+    <Tip content={title} delay={HOVER_TIP_DELAY} side={form ? undefined : "left"}>
     <button
       type="button"
       role="switch"
