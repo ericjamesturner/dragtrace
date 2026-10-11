@@ -220,6 +220,14 @@ function windHelp(dir: string | undefined): number | undefined {
   return (m[1].toLowerCase() === "head" ? -1 : 1) * Number(m[2]);
 }
 
+/** "head 3" -> "head 3.0"; a still day reads "0.0". Free text that isn't head/tail stays as typed. */
+function windText(dir: string | undefined): string | undefined {
+  if (!dir) return undefined;
+  const help = windHelp(dir);
+  if (help === undefined) return dir;
+  return help === 0 ? "0.0" : `${help < 0 ? "head" : "tail"} ${Math.abs(help).toFixed(1)}`;
+}
+
 /** Wind on the clocks: a headwind in amber, a tailwind in blue, stronger as it blows harder. */
 function windStyle(help: number | undefined): React.CSSProperties | undefined {
   if (help === undefined || Math.abs(help) < 1) return undefined;
@@ -963,10 +971,11 @@ export function RunSheet({
     const air: Row[] = [
       { key: "time", label: "Time", has: (c: Col) => c.slip?.runTime, cell: (c: Col) => c.slip?.runTime ? formatRunTime(c.slip.runTime) : DASH },
       { key: "lane", label: "Lane", has: (c: Col) => c.slip?.lane, cell: (c: Col) => c.slip?.lane ? (c.slip.lane === "left" ? "Left" : "Right") : DASH },
-      airRow("air", "Air °F", (c) => c.slip?.airTemperatureF, (v) => String(Math.round(v * 10) / 10)),
-      airRow("track", "Track °F", (c) => c.slip?.trackTemperatureF, (v) => String(Math.round(v * 10) / 10), false, false),
-      airRow("humidity", "Humidity %", (c) => c.slip?.humidityPct, (v) => String(Math.round(v * 10) / 10)),
-      airRow("baro", "Baro inHg", (c) => c.slip?.barometricPressureInHg, (v) => String(Math.round(v * 1000) / 1000), true, true, true),
+      // Fixed places, as the weather station prints them, so the digits line up: 30.0, not 30.
+      airRow("air", "Air °F", (c) => c.slip?.airTemperatureF, (v) => v.toFixed(1)),
+      airRow("track", "Track °F", (c) => c.slip?.trackTemperatureF, (v) => v.toFixed(1), false, false),
+      airRow("humidity", "Humidity %", (c) => c.slip?.humidityPct, (v) => v.toFixed(1)),
+      airRow("baro", "Baro inHg", (c) => c.slip?.barometricPressureInHg, (v) => v.toFixed(3), true, true, true),
       airRow("da", "D.A. ft", (c) => c.slip?.densityAltitudeFt, (v) => Math.round(v).toLocaleString(), false, true, true),
       airRow("cf", "Corr.", (c) => c.cf, (v) => v.toFixed(4), false, true, true),
       {
@@ -975,7 +984,7 @@ export function RunSheet({
         has: (c: Col) => c.slip?.windSpeedMph ?? c.slip?.windDirection,
         avg: {
           num: (c: Col) => windHelp(c.slip?.windDirection),
-          fmt: (v: number) => (Math.abs(v) < 0.05 ? "0" : `${v < 0 ? "head" : "tail"} ${Math.abs(v).toFixed(1)}`),
+          fmt: (v: number) => (Math.abs(v) < 0.05 ? "0.0" : `${v < 0 ? "head" : "tail"} ${Math.abs(v).toFixed(1)}`),
           better: "high" as const,
         },
         cell: (c: Col) => {
@@ -985,7 +994,7 @@ export function RunSheet({
           // The head/tail part is what moves the clocks; the gust speed rides on hover.
           return (
             <Tip content={[speed !== undefined ? `${speed} mph` : "", dir].filter(Boolean).join(" · ")}>
-              <span style={windStyle(windHelp(dir))}>{dir || speed}</span>
+              <span style={windStyle(windHelp(dir))}>{windText(dir) ?? speed?.toFixed(1)}</span>
             </Tip>
           );
         },
