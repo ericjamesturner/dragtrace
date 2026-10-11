@@ -1190,7 +1190,7 @@ export function RunSheet({
         alert: true,
         label: (
           <Tip content={<div className="max-w-xs space-y-1">{explain.map((l, i) => <div key={i}>{l}</div>)}</div>}>
-            <span className="block max-w-[6.5rem] truncate">{label}</span>
+            <span className="block max-w-[7.25rem] truncate">{label}</span>
           </Tip>
         ),
         cell: (c: Col) => {
@@ -1260,10 +1260,15 @@ export function RunSheet({
               : /oil/i.test(name)
                 ? "Oil"
                 : "Fuel";
-      // "Coolant temp" under Coolant -> "Temp"; "Line press." under Trans stays.
-      const inGroup = (label: string, g: Group) => {
-        const rest = label.replace(new RegExp(`^${g}\\s+`, "i"), "");
-        return rest === label ? label : rest.charAt(0).toUpperCase() + rest.slice(1);
+      // The channel's name without its group, written out now the group
+      // says the rest: Coolant > "Temperature", Trans > "Line pressure".
+      const inGroup = (name: string, g: Group) => {
+        if (/battery voltage/i.test(name)) return "Battery voltage";
+        const rest =
+          g === "Trans"
+            ? name.replace(/^Transmission\s+(Oil\s+)?/i, "").replace(/^Torque Converter\b/i, "Conv.")
+            : name.replace(new RegExp(`^${g}\\s+`, "i"), "");
+        return rest.charAt(0).toUpperCase() + rest.slice(1).toLowerCase();
       };
 
       // Supplies: one row per pressure the checks watch, and the battery.
@@ -1291,7 +1296,7 @@ export function RunSheet({
           groupOfLevel(name),
           healthRow(
             name,
-            inGroup(shortName(name), groupOfLevel(name)),
+            inGroup(name, groupOfLevel(name)),
             isTemp
               ? [
                   `${name}: the highest it got, from the line until the throttle comes off.`,
