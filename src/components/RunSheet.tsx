@@ -279,9 +279,12 @@ export function RunSheet({
   // Crosshair: the column under the pointer lights up with its row.
   const [hoverCol, setHoverCol] = useState<number | null>(null);
 
-  const colClass = (i: number) =>
+  // Every other row carries a faint band so a row reads across the whole sheet.
+  // Solid, so the pinned label column can wear it too.
+  const STRIPE = "bg-[color-mix(in_oklab,var(--muted)_65%,var(--card))]";
+  const colClass = (i: number, striped = false) =>
     [
-      hoverCol === i ? "bg-muted/40" : bestFileId === cols[i].file._id ? "bg-green-500/[0.04]" : "",
+      hoverCol === i ? "bg-muted/60" : striped ? STRIPE : "",
       showDrop && dropIdx === i ? "shadow-[inset_2px_0_0_0_var(--color-primary)]" : "",
       showDrop && dropIdx === cols.length && i === cols.length - 1
         ? "shadow-[inset_-2px_0_0_0_var(--color-primary)]"
@@ -594,7 +597,7 @@ export function RunSheet({
   }, [cols, eighthOnly, eventBests, eventRanges, estScope, onEstScopeChange, raceWeightLb, changesAt, tuneAt, knobMovesAt]);
 
   const labelCell =
-    "sticky left-0 z-10 flex items-center justify-end gap-1 border-r bg-card px-2.5 text-right text-[10px] font-medium uppercase tracking-wider text-muted-foreground group-hover:bg-muted";
+    "sticky left-0 z-10 flex items-center justify-end gap-1 border-r px-2.5 text-right text-[10px] font-medium uppercase tracking-wider text-muted-foreground group-hover:bg-muted";
   const valueCell =
     "flex h-5 items-center justify-end whitespace-nowrap px-2 text-right font-mono text-[13px] tabular-nums group-hover:bg-muted/40";
 
@@ -619,7 +622,7 @@ export function RunSheet({
         }}
       >
         {/* Column heads */}
-        <div className={`${labelCell} border-b group-hover:bg-card`} />
+        <div className={`${labelCell} border-b bg-card`} />
         {cols.map((c, i) => (
           <PassHead
             key={c.file._id}
@@ -651,26 +654,29 @@ export function RunSheet({
         ))}
 
         {/* Groups part with a rule; only a group whose labels need it gets a caption. */}
-        {sections.map((s) => (
+        {(() => {
+          let stripe = 0;
+          return sections.map((s) => (
           <div key={s.key} className="contents">
             {s.caption && (
               <>
-                <div className={`${labelCell} h-5 border-t pt-1 text-[9px] text-muted-foreground/50`}>{s.title}</div>
+                <div className={`${labelCell} h-5 border-t bg-card pt-1 text-[9px] text-muted-foreground/50`}>{s.title}</div>
                 <div className="border-t" style={{ gridColumn: `span ${cols.length}` }} />
               </>
             )}
             {s.rows.map((r, ri) => {
               const rule = ri === 0 && !s.caption ? "border-t" : "";
+              const striped = stripe++ % 2 === 1;
               return (
                 <div key={r.key} className="group contents">
-                  <div className={`${labelCell} ${rule}`}>
+                  <div className={`${labelCell} ${rule} ${striped ? STRIPE : "bg-card"}`}>
                     {r.extra && <span className="mr-auto">{r.extra}</span>}
                     {r.label}
                   </div>
                   {cols.map((c, i) => (
                     <div
                       key={c.file._id}
-                      className={`${valueCell} ${rule} ${r.bold ? "font-bold" : ""} ${colClass(i)}`}
+                      className={`${valueCell} ${rule} ${r.bold ? "font-bold" : ""} ${colClass(i, striped)}`}
                       onMouseEnter={() => setHoverCol(i)}
                     >
                       {r.cell(c)}
@@ -680,9 +686,10 @@ export function RunSheet({
               );
             })}
           </div>
-        ))}
+          ));
+        })()}
 
-        <div className={`${labelCell} border-t py-1`}>Notes</div>
+        <div className={`${labelCell} border-t bg-card py-1`}>Notes</div>
         {cols.map((c, i) => (
           <div key={c.file._id} className={`min-w-0 border-t px-2 py-1 ${colClass(i)}`} onMouseEnter={() => setHoverCol(i)}>
             <NotesCell file={c.file} />
