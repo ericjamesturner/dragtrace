@@ -1070,7 +1070,7 @@ export function RunSheet({
           case "drift":
             return a.group === "lambda"
               ? {
-                  text: `${a.label} lean`,
+                  text: `${a.label} ${pct(a.offset)} lean`,
                   tip: `${sensor(a.label)} ran leaner than usual: ${pct(a.offset)} leaner than the other cylinders (normally ${pct(a.usual)}).`,
                 }
               : {
@@ -1111,7 +1111,7 @@ export function RunSheet({
                 const parts = hits.map(describe);
                 return (
                   <Tip content={<div className="space-y-1">{parts.map((p, i) => <div key={i}>{p.tip}</div>)}</div>}>
-                    <span className="truncate font-bold text-red-400">{parts.map((p) => p.text).join(" ")}</span>
+                    <span className="min-w-0 truncate text-right text-xs font-bold text-red-400">{parts.map((p) => p.text).join(" ")}</span>
                   </Tip>
                 );
               },
@@ -1169,7 +1169,7 @@ export function RunSheet({
     <div className="mt-3 w-fit max-w-full overflow-x-auto rounded-lg border bg-card font-mono">
       <div
         className="grid"
-        style={{ gridTemplateColumns: `8rem repeat(${cols.length}, 5.5rem) 5.5rem 5.5rem` }}
+        style={{ gridTemplateColumns: `8rem repeat(${cols.length}, 6rem) 6rem 6rem` }}
         onMouseLeave={() => {
           setHoverCol(null);
           setHoverRow(null);
