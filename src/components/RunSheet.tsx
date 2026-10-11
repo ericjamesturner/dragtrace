@@ -1244,7 +1244,7 @@ export function RunSheet({
       });
 
       const rows: Row[] = [];
-      // The O2 sensors and the EGTs get their own groups under Health.
+      // The widebands and the EGTs get their own groups under Health.
       const o2Rows: Row[] = [];
       const egtRows: Row[] = [];
 
@@ -1575,7 +1575,7 @@ export function RunSheet({
       }
 
       if (rows.length) out.push({ key: "health", title: "Health", caption: true, rows });
-      if (o2Rows.length) out.push({ key: "health-o2", title: "O2", caption: true, rows: o2Rows });
+      if (o2Rows.length) out.push({ key: "health-o2", title: "Wideband", caption: true, rows: o2Rows });
       if (egtRows.length) out.push({ key: "health-egt", title: "EGT", caption: true, rows: egtRows });
     }
 
