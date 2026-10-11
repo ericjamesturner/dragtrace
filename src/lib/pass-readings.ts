@@ -32,6 +32,8 @@ export interface DriveshaftReading {
 }
 
 export interface ShiftReading {
+  /** The RPM it shifted at: the peak going into the shift (preview version 14). */
+  rpm?: number;
   /** Seconds after the launch the RPM peaked going into the shift. */
   at: number;
   /** Seconds from that peak to the low point the shift pulled it to. */
@@ -89,7 +91,7 @@ export function readShifts(
   );
   return shifts
     .filter((s) => passEnd === null || s.peakT <= passEnd)
-    .map((s) => ({ at: s.peakT - launchAt, takes: s.troughT - s.peakT, drop: s.peak - s.trough }));
+    .map((s) => ({ rpm: s.peak, at: s.peakT - launchAt, takes: s.troughT - s.peakT, drop: s.peak - s.trough }));
 }
 
 function lowerBound(ts: Float64Array, t: number): number {

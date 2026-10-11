@@ -1016,6 +1016,7 @@ export function RunSheet({
     const slots = shiftSlots(cols);
     slots.forEach((slot, k) => {
       const at = (c: Col) => slot.get(c.file._id);
+      const rpm = spreadStyler(inc.map((c) => at(c)?.rpm));
       const when = spreadStyler(inc.map((c) => at(c)?.at));
       const takes = spreadStyler(inc.map((c) => at(c)?.takes));
       const drop = spreadStyler(inc.map((c) => at(c)?.drop));
@@ -1024,6 +1025,15 @@ export function RunSheet({
         title: k === 0 ? "Shift" : `Shift ${k + 1}`,
         caption: true,
         rows: [
+          {
+            key: `shift-${k}-rpm`,
+            label: "RPM",
+            avg: { num: (c) => at(c)?.rpm, fmt: (v) => String(Math.round(v)), pct: true },
+            cell: (c) => {
+              const v = at(c)?.rpm;
+              return v === undefined ? DASH : <span style={rpm(v)}>{Math.round(v)}</span>;
+            },
+          },
           { key: `shift-${k}-when`, label: "When", avg: { num: (c) => at(c)?.at, fmt: (v) => v.toFixed(2), pct: true }, cell: (c) => (at(c) ? <span style={when(at(c)!.at)}>{at(c)!.at.toFixed(2)}</span> : DASH) },
           { key: `shift-${k}-takes`, label: "Duration", avg: { num: (c) => at(c)?.takes, fmt: (v) => v.toFixed(2), pct: true }, cell: (c) => (at(c) ? <span style={takes(at(c)!.takes)}>{at(c)!.takes.toFixed(2)}</span> : DASH) },
           {
