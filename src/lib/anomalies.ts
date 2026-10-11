@@ -119,7 +119,12 @@ export interface CylinderGroup {
   quantitySlug?: string;
   /** Each sensor's average from STEADY_FROM_S to the end of the wide-open part. */
   means: number[];
-  /** Widebands with a target: the longest stretch any one ran lean of it by LEAN_RATIO or more. */
+  /** Each sensor's highest point from LEAN_FROM_S on, smoothed over PEAK_SMOOTH_S: what a short EGT spike shows in. */
+  peaks?: number[];
+  /**
+   * Widebands with a target: the longest stretch any one ran lean of it by
+   * LEAN_RATIO or more (zero seconds when none did). Null without a target.
+   */
   lean?: { label: string; seconds: number; at: number; worst: number } | null;
 }
 
@@ -168,11 +173,13 @@ export function readCylinders(parsed: ParsedLog, session: LogSession, launchAt: 
 
     const means = group.map((m) => meanIn(ts, m.vals, launchAt + STEADY_FROM_S, passEnd));
     if (means.some((m) => m === null)) continue;
+    const peaks = group.map((m) => peakIn(ts, m.vals, launchAt + LEAN_FROM_S, passEnd));
 
     let lean: CylinderGroup["lean"] = null;
     const targetDef = kind === "lambda" ? parsed.channelDefs.find((d) => /^target (lambda|afr)$/i.test(d.name.trim())) : undefined;
     const target = targetDef ? session.channels.get(targetDef.name) : undefined;
     if (target) {
+      lean = { label: "", seconds: 0, at: 0, worst: 1 };
       for (const m of group) {
         let start: number | null = null;
         let worst = 0;
@@ -182,7 +189,7 @@ export function readCylinders(parsed: ParsedLog, session: LogSession, launchAt: 
             if (start === null) start = ts[i];
             worst = Math.max(worst, ratio);
             const seconds = ts[i] - start;
-            if (!lean || seconds > lean.seconds) lean = { label: m.label, seconds, at: start - launchAt, worst };
+            if (!lean.label || seconds > lean.seconds) lean = { label: m.label, seconds, at: start - launchAt, worst };
           } else {
             start = null;
             worst = 0;
@@ -190,9 +197,35 @@ export function readCylinders(parsed: ParsedLog, session: LogSession, launchAt: 
         }
       }
     }
-    out.push({ kind, labels: group.map((m) => m.label), quantitySlug: group[0].slug, means: means as number[], lean });
+    out.push({ kind, labels: group.map((m) => m.label), quantitySlug: group[0].slug, means: means as number[], peaks, lean });
   }
   return out;
+}
+
+/** An EGT spike has to hold this long to count; one hot sample is noise. */
+const PEAK_SMOOTH_S = 0.05;
+
+/** The highest PEAK_SMOOTH_S-long average between `from` and `to`. */
+function peakIn(ts: Float64Array, vals: Float64Array, from: number, to: number): number {
+  let best = -Infinity;
+  let lo = lowerBound(ts, from);
+  let sum = 0;
+  let n = 0;
+  for (let hi = lo; hi < ts.length && ts[hi] <= to; hi++) {
+    if (Number.isFinite(vals[hi])) {
+      sum += vals[hi];
+      n++;
+    }
+    while (ts[hi] - ts[lo] > PEAK_SMOOTH_S) {
+      if (Number.isFinite(vals[lo])) {
+        sum -= vals[lo];
+        n--;
+      }
+      lo++;
+    }
+    if (n > 0 && ts[hi] - from >= PEAK_SMOOTH_S) best = Math.max(best, sum / n);
+  }
+  return Number.isFinite(best) ? best : NaN;
 }
 
 function meanIn(ts: Float64Array, vals: Float64Array, from: number, to: number): number | null {
@@ -218,7 +251,9 @@ export type Anomaly =
   /** The cylinders spread further apart than they usually do. */
   | { kind: "spread"; row: string; group: "lambda" | "egt"; spread: number; usual: number; quantitySlug?: string }
   /** An EGT far off the others with no history to judge by: a dead or a lean cylinder. */
-  | { kind: "egt-odd"; row: string; label: string; offset: number; quantitySlug?: string };
+  | { kind: "egt-odd"; row: string; label: string; offset: number; quantitySlug?: string }
+  /** An EGT peaked well above where that cylinder usually peaks. */
+  | { kind: "egt-spike"; row: string; label: string; peak: number; usual: number; quantitySlug?: string };
 
 /** Fewer reference passes than this and there's no "usual" to judge by. */
 const MIN_REFS = 3;
@@ -258,6 +293,28 @@ export function findAnomalies(pass: PassChecks, refs: PassChecks[]): Anomaly[] {
     const groupName = g.kind === "lambda" ? "Wideband" : "EGT";
     // Lean spikes are judged against the target, which is the same on any pass.
     if (g.lean && g.lean.seconds >= LEAN_MIN_S) out.push({ kind: "lean", row: "Lean spike", ...g.lean });
+    if (g.kind === "egt" && g.peaks) {
+      const peakRefs = refs.flatMap((r) =>
+        r.cylinders.filter((x) => x.kind === "egt" && x.labels.join() === g.labels.join() && x.peaks).map((x) => x.peaks!),
+      );
+      g.labels.forEach((label, k) => {
+        const peak = g.peaks![k];
+        if (!Number.isFinite(peak)) return;
+        if (peakRefs.length >= MIN_REFS) {
+          const usual = median(peakRefs.map((p) => p[k]));
+          const spread = 1.4826 * median(peakRefs.map((p) => Math.abs(p[k] - usual)));
+          if (peak - usual > Math.max(3 * spread, EGT_SPIKE_C)) {
+            out.push({ kind: "egt-spike", row: "EGT spike", label, peak, usual, quantitySlug: g.quantitySlug });
+          }
+        } else {
+          // No history: a peak far above the other cylinders' peaks.
+          const others = median(g.peaks!.filter((_, j) => j !== k && Number.isFinite(g.peaks![j])));
+          if (peak - others > EGT_SPIKE_ODD_C) {
+            out.push({ kind: "egt-spike", row: "EGT spike", label, peak, usual: others, quantitySlug: g.quantitySlug });
+          }
+        }
+      });
+    }
 
     const offsets = offsetsOf(g);
     const same = refs.flatMap((r) => r.cylinders.filter((x) => x.kind === g.kind && x.labels.join() === g.labels.join()));
@@ -298,11 +355,11 @@ export function findAnomalies(pass: PassChecks, refs: PassChecks[]): Anomaly[] {
 /** Lean of target by LEAN_RATIO for this long. Calibrated on one truck: a fuel pressure dip held it 0.17 s, nine clean passes 0.024 s at most. */
 const LEAN_MIN_S = 0.1;
 /** Widebands: each cylinder against the average of all of them, as a share of that average, so AFR and lambda read alike. */
-function offsetsOf(g: CylinderGroup): number[] {
+export function offsetsOf(g: CylinderGroup): number[] {
   const avg = g.means.reduce((a, b) => a + b) / g.means.length;
   return g.kind === "lambda" ? g.means.map((m) => (m - avg) / avg) : g.means.map((m) => m - avg);
 }
-function spreadOf(g: CylinderGroup): number {
+export function spreadOf(g: CylinderGroup): number {
   const o = offsetsOf(g);
   return Math.max(...o) - Math.min(...o);
 }
@@ -314,6 +371,9 @@ const LAMBDA_SPREAD_WIDER = 0.025;
 const EGT_DRIFT_C = 50;
 const EGT_SPREAD_WIDER_C = 75;
 const EGT_ODD_C = 150;
+/** An EGT peaking this far above its usual peak (or, with no history, above the other cylinders' peaks). */
+const EGT_SPIKE_C = 100;
+const EGT_SPIKE_ODD_C = 200;
 
 function median(nums: number[]): number {
   const s = [...nums].sort((a, b) => a - b);

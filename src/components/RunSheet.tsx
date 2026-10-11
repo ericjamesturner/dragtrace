@@ -9,7 +9,7 @@ import { SEGMENTS, segmentTimes, type SegmentKey } from "@/lib/timeslip-segments
 import { estimatePowerFromTimeslip, type WeightPowerEstimates } from "@/lib/drag-performance";
 import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
 import { convertForDisplay, getDisplayPrecision, getDisplayUnit, type UnitOverrides, type UnitSystem } from "@/lib/units";
-import { findAnomalies, type Anomaly, type CylinderGroup, type PassChecks, type PassLevel } from "@/lib/anomalies";
+import { findAnomalies, offsetsOf, spreadOf, type Anomaly, type CylinderGroup, type PassChecks, type PassLevel } from "@/lib/anomalies";
 import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel } from "@/lib/changes";
 import { timeFromName } from "@/lib/tune-changes";
@@ -1029,12 +1029,10 @@ export function RunSheet({
       });
     });
 
-    // What a pass did that this vehicle's other passes usually don't: a
-    // pressure falling away, a cylinder going lean or drifting from the rest.
-    // A clean sheet says so: the checks ran and found nothing.
+    // The pass's health against this vehicle's usual: every check's number on
+    // every pass in grey, and in red where the pass did what it usually doesn't
+    // — a pressure falling away, a cylinder going lean, an EGT out of line.
     if (any((c) => c.levels.length || c.cylinders.length || undefined)) {
-      const rowNames: string[] = [];
-      for (const c of cols) for (const a of c.anomalies) if (!rowNames.includes(a.row)) rowNames.push(a.row);
       // In the vehicle's own units, at each unit's usual precision.
       const show = (v: number, slug: string | undefined) => {
         if (!slug) return v.toFixed(1);
@@ -1049,9 +1047,12 @@ export function RunSheet({
       };
       const unitOf = (slug: string | undefined) => (slug ? getDisplayUnit(slug, unitSystem, unitOverrides) ?? "" : "");
       const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+      const tempGap = (c: number) => `${showGap(c, "temperature")} ${unitOf("temperature")}`;
       // "C5" -> "Cylinder 5", "B2" -> "Bank 2", for the sentences.
       const sensor = (label: string) => `${label.startsWith("B") ? "Bank" : "Cylinder"} ${label.slice(1)}`;
-      // One plain sentence each: what happened, then what's normal in brackets.
+      const usualNote = "“Usual” means this vehicle's other passes that are switched on — at least 3 of them.";
+
+      // One plain sentence for a flag: what happened, then what's normal in brackets.
       const describe = (a: Anomaly): { text: string; tip: string } => {
         switch (a.kind) {
           case "low": {
@@ -1089,95 +1090,197 @@ export function RunSheet({
               text: `${a.label} ${a.offset < 0 ? "cold" : "hot"}`,
               tip: `${sensor(a.label)} ran ${showGap(Math.abs(a.offset), a.quantitySlug)} ${unitOf(a.quantitySlug)} ${a.offset < 0 ? "colder" : "hotter"} than the other cylinders${a.offset < 0 ? " — check it's firing." : " — check it isn't lean."}`,
             };
+          case "egt-spike":
+            return {
+              text: `${a.label} ${show(a.peak, a.quantitySlug)}`,
+              tip: `${sensor(a.label)} peaked at ${show(a.peak, a.quantitySlug)} ${unitOf(a.quantitySlug)} (normally about ${show(a.usual, a.quantitySlug)} ${unitOf(a.quantitySlug)}).`,
+            };
         }
       };
-      // How each check is worked out, on its row label. "Usual" is always
-      // this vehicle's other switched-on passes; it takes three of them.
-      const tempGap = (c: number) => `${showGap(c, "temperature")} ${unitOf("temperature")}`;
-      const usualNote = "“Usual” means this vehicle's other passes that are switched on — at least 3 of them.";
-      const explainRow = (name: string | null): React.ReactNode[] => {
-        const kind = name === null ? null : cols.flatMap((c) => c.anomalies).find((a) => a.row === name)?.kind;
-        const lines: Record<string, string[]> = {
-          low: [
-            `${name}: the lowest point while the throttle is wide open, smoothed over 25 ms so one bad sample can't set it off.`,
-            "Flagged when it falls well below its usual low: more than 3 times its normal variation, and at least 10% of its level on the line.",
-            usualNote,
-          ],
-          lean: [
-            "The longest time any one wideband stays 10% or more lean of target, from 0.15 s until the throttle comes off.",
-            "Flagged at 0.1 s or longer, so a spike anywhere in the pass shows.",
-          ],
-          drift: name?.startsWith("EGT")
-            ? [
-                "Each EGT's average from 1 s until the throttle comes off, against the average of all of them.",
-                `Flagged when a cylinder sits ${tempGap(50)} or more hotter or colder against the others than it usually does.`,
-                "Averages hide short spikes.",
-                usualNote,
-              ]
-            : [
-                "Each wideband's average from 1 s until the throttle comes off, against the average of all of them.",
-                "Flagged when a cylinder runs 1.7% or more leaner against the others than it usually does, and is now leaner than average.",
-                "Averages hide short spikes — Lean spike catches those.",
-                usualNote,
-              ],
-          spread: name?.startsWith("EGT")
-            ? [`Hottest EGT minus coldest, from their averages after 1 s. Flagged when ${tempGap(75)} or more wider than usual.`, usualNote]
-            : ["Leanest wideband minus richest, from their averages after 1 s. Flagged when 2.5% or more wider than usual.", usualNote],
-          "egt-odd": [
-            `With fewer than 3 earlier passes to compare against: a cylinder whose EGT averages ${tempGap(150)} or more off the others.`,
-            "Cold can mean it isn't firing; hot can mean it's lean.",
-          ],
-          none: [
-            "Checked: supply pressures and battery for lows, widebands for lean spikes, drift and spread, and EGTs when the log has them.",
-            "Nothing on these passes was out of line with this vehicle's usual.",
-          ],
-        };
-        return (lines[kind ?? "none"] ?? lines.none).map((l, i) => <div key={i}>{l}</div>);
-      };
-      out.push({
-        key: "anomalies",
-        title: "Anomalies",
-        caption: true,
-        rows: rowNames.length
-          ? rowNames.map((name) => ({
-              key: `anomaly-${name}`,
-              alert: true,
-              label: (
-                <Tip content={<div className="max-w-xs space-y-1">{explainRow(name)}</div>}>
-                  <span className="block max-w-[6.5rem] truncate">{name}</span>
-                </Tip>
-              ),
-              cell: (c: Col) => {
-                const hits = c.anomalies.filter((a) => a.row === name);
-                // Only the trouble shows; a pass that held up stays blank.
-                if (!hits.length) return null;
-                const parts = hits.map(describe);
-                return (
-                  <Tip content={<div className="space-y-1">{parts.map((p, i) => <div key={i}>{p.tip}</div>)}</div>}>
-                    <span className="min-w-0 truncate text-right text-xs font-bold text-red-400">{parts.map((p) => p.text).join(" ")}</span>
-                  </Tip>
-                );
-              },
-            }))
-          : [
-              {
-                key: "anomaly-none",
-                label: (
-                  <Tip content={<div className="max-w-xs space-y-1">{explainRow(null)}</div>}>
-                    <span>None found</span>
-                  </Tip>
-                ),
-                cell: (c: Col) =>
-                  c.levels.length || c.cylinders.length ? (
-                    <Tip content="Pressures, battery and cylinders held up like they do on this vehicle's other passes">
-                      <span className="text-green-400/70">✓</span>
-                    </Tip>
-                  ) : (
-                    DASH
-                  ),
-              },
-            ],
+
+      /** A health row: the pass's number in grey, or its flag in red. */
+      const healthRow = (
+        row: string,
+        label: string,
+        explain: string[],
+        normal: (c: Col) => { text: string; tip: string } | null,
+      ): Row => ({
+        key: `health-${row}`,
+        alert: true,
+        label: (
+          <Tip content={<div className="max-w-xs space-y-1">{explain.map((l, i) => <div key={i}>{l}</div>)}</div>}>
+            <span className="block max-w-[6.5rem] truncate">{label}</span>
+          </Tip>
+        ),
+        cell: (c: Col) => {
+          const hits = c.anomalies.filter((a) => a.row === row);
+          if (hits.length) {
+            const parts = hits.map(describe);
+            return (
+              <Tip content={<div className="space-y-1">{parts.map((p, i) => <div key={i}>{p.tip}</div>)}</div>}>
+                <span className="min-w-0 truncate text-right text-xs font-bold text-red-400">{parts.map((p) => p.text).join(" ")}</span>
+              </Tip>
+            );
+          }
+          const n = normal(c);
+          if (!n) return DASH;
+          return (
+            <Tip content={n.tip}>
+              <span className="min-w-0 truncate text-right text-xs text-muted-foreground/60">{n.text}</span>
+            </Tip>
+          );
+        },
       });
+
+      const rows: Row[] = [];
+
+      // Supplies: one row per pressure the checks watch, and the battery.
+      // "Device Battery Voltage" -> "Battery", "Transmission Line Pressure" -> "Trans Line Pressure".
+      const shortName = (name: string) =>
+        /battery voltage/i.test(name) ? "Battery" : name.replace(/^Transmission\b/i, "Trans").replace(/^Torque Converter\b/i, "Converter");
+      const levelNames: string[] = [];
+      for (const c of cols) {
+        for (const l of c.levels) {
+          const watched = l.quantitySlug !== "pressure" || l.base >= 70;
+          if (watched && !levelNames.includes(l.name)) levelNames.push(l.name);
+        }
+      }
+      for (const name of levelNames) {
+        rows.push(
+          healthRow(
+            name,
+            shortName(name),
+            [
+              `${name}: the lowest point while the throttle is wide open, smoothed over 25 ms so one bad sample can't set it off.`,
+              "Red when it falls well below its usual low: more than 3 times its normal variation, and at least 10% of its level on the line.",
+              usualNote,
+            ],
+            (c) => {
+              const l = c.levels.find((x) => x.name === name);
+              if (!l) return null;
+              const unit = unitOf(l.quantitySlug);
+              return {
+                text: show(l.min, l.quantitySlug),
+                tip: `Lowest ${show(l.min, l.quantitySlug)} ${unit} at ${l.minAt.toFixed(2)} s, from ${show(l.base, l.quantitySlug)} ${unit} on the line.`,
+              };
+            },
+          ),
+        );
+      }
+
+      const groupOf = (c: Col, kind: "lambda" | "egt") => c.cylinders.find((g) => g.kind === kind);
+      if (cols.some((c) => groupOf(c, "lambda")?.lean)) {
+        rows.push(
+          healthRow(
+            "Lean spike",
+            "Lean spike",
+            [
+              "The longest time any one wideband stays 10% or more lean of target, from 0.15 s until the throttle comes off.",
+              "Red at 0.1 s or longer, so a spike anywhere in the pass shows.",
+            ],
+            (c) => {
+              const lean = groupOf(c, "lambda")?.lean;
+              if (!lean) return null;
+              return lean.label
+                ? { text: `${lean.label} ${lean.seconds.toFixed(2)}s`, tip: `Longest: ${sensor(lean.label)}, ${lean.seconds.toFixed(2)} s from ${lean.at.toFixed(2)} s.` }
+                : { text: "0.00s", tip: "No wideband went 10% lean of target." };
+            },
+          ),
+        );
+      }
+      if (cols.some((c) => groupOf(c, "lambda"))) {
+        rows.push(
+          healthRow(
+            "Wideband drift",
+            "Wideband drift",
+            [
+              "Each wideband's average from 1 s until the throttle comes off, against the average of all of them. Shown: the leanest one.",
+              "Red when a cylinder runs 1.7% or more leaner against the others than it usually does, and is now leaner than average.",
+              "Averages hide short spikes — Lean spike catches those.",
+              usualNote,
+            ],
+            (c) => {
+              const g = groupOf(c, "lambda");
+              if (!g) return null;
+              const o = offsetsOf(g);
+              const k = o.indexOf(Math.max(...o));
+              return { text: `${g.labels[k]} ${pct(o[k])}`, tip: `Leanest: ${sensor(g.labels[k])}, ${pct(o[k])} leaner than the average.` };
+            },
+          ),
+          healthRow(
+            "Wideband spread",
+            "Wideband spread",
+            ["Leanest wideband minus richest, from their averages after 1 s.", "Red when 2.5% or more wider than usual.", usualNote],
+            (c) => {
+              const g = groupOf(c, "lambda");
+              return g ? { text: pct(spreadOf(g)), tip: `Leanest to richest: ${pct(spreadOf(g))}.` } : null;
+            },
+          ),
+        );
+      }
+      if (cols.some((c) => groupOf(c, "egt"))) {
+        rows.push(
+          healthRow(
+            "EGT spike",
+            "EGT spike",
+            [
+              "Each EGT's highest point from 0.15 s until the throttle comes off, held at least 50 ms. Shown: the hottest.",
+              `Red when a cylinder peaks ${tempGap(100)} or more above its usual peak — or, with no history yet, ${tempGap(200)} above the other cylinders.`,
+              usualNote,
+            ],
+            (c) => {
+              const g = groupOf(c, "egt");
+              if (!g?.peaks) return null;
+              const k = g.peaks.indexOf(Math.max(...g.peaks));
+              return { text: `${g.labels[k]} ${show(g.peaks[k], g.quantitySlug)}`, tip: `Hottest peak: ${sensor(g.labels[k])}, ${show(g.peaks[k], g.quantitySlug)} ${unitOf(g.quantitySlug)}.` };
+            },
+          ),
+          healthRow(
+            "EGT drift",
+            "EGT drift",
+            [
+              "Each EGT's average from 1 s until the throttle comes off, against the average of all of them. Shown: the one furthest off.",
+              `Red when a cylinder sits ${tempGap(50)} or more hotter or colder against the others than it usually does.`,
+              usualNote,
+            ],
+            (c) => {
+              const g = groupOf(c, "egt");
+              if (!g) return null;
+              const o = offsetsOf(g);
+              const k = o.reduce((best, v, i) => (Math.abs(v) > Math.abs(o[best]) ? i : best), 0);
+              return {
+                text: `${g.labels[k]} ${o[k] < 0 ? "−" : "+"}${showGap(Math.abs(o[k]), g.quantitySlug)}`,
+                tip: `Furthest off: ${sensor(g.labels[k])}, ${showGap(Math.abs(o[k]), g.quantitySlug)} ${unitOf(g.quantitySlug)} ${o[k] < 0 ? "below" : "above"} the average.`,
+              };
+            },
+          ),
+          healthRow(
+            "EGT spread",
+            "EGT spread",
+            [`Hottest EGT minus coldest, from their averages after 1 s. Red when ${tempGap(75)} or more wider than usual.`, usualNote],
+            (c) => {
+              const g = groupOf(c, "egt");
+              return g ? { text: `${showGap(spreadOf(g), g.quantitySlug)}°`, tip: `Hottest to coldest: ${showGap(spreadOf(g), g.quantitySlug)} ${unitOf(g.quantitySlug)}.` } : null;
+            },
+          ),
+        );
+        // Only with no history to judge drift by; shown when it fires.
+        if (cols.some((c) => c.anomalies.some((a) => a.kind === "egt-odd"))) {
+          rows.push(
+            healthRow(
+              "EGT odd one out",
+              "EGT odd one out",
+              [
+                `With fewer than 3 earlier passes to compare against: a cylinder whose EGT averages ${tempGap(150)} or more off the others.`,
+                "Cold can mean it isn't firing; hot can mean it's lean.",
+              ],
+              () => null,
+            ),
+          );
+        }
+      }
+
+      if (rows.length) out.push({ key: "health", title: "Health", caption: true, rows });
     }
 
     if (any((c) => changesAt.get(c.file._id) ?? tuneAt.get(c.file._id) ?? knobMovesAt.get(c.file._id))) {
