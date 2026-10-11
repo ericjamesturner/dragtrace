@@ -11,6 +11,7 @@ import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 import { correctionFactor } from "@/lib/weather-correction";
 import { isBigChange } from "@/lib/changes";
 import { parsePreview } from "@/lib/preview";
+import type { PassLevel } from "@/lib/anomalies";
 import { bestForAir, type DialPass } from "@/lib/dial-predictor";
 import { Button } from "@/components/ui/button";
 import { ChevronLeftIcon, GaugeIcon } from "lucide-react";
@@ -499,6 +500,18 @@ export function FileList({
     }));
   }, [vehicleSlips, vehicleFiles, vehicleEvents, estimates]);
 
+  // The vehicle's counted passes' pressure and battery levels: what the
+  // anomaly check calls usual. Every event the car has run, not just this one.
+  const levelPool = useMemo(() => {
+    const out = new Map<string, PassLevel[]>();
+    for (const f of vehicleFiles ?? []) {
+      if (f.excluded) continue;
+      const levels = parsePreview(f.preview)?.levels;
+      if (levels?.length) out.set(f._id, levels);
+    }
+    return out;
+  }, [vehicleFiles]);
+
   // The event's best value per metric, drawn in green on whichever card
   // holds it. With a single slip in the event everything would be "best",
   // which says nothing — so it needs at least two.
@@ -624,6 +637,7 @@ export function FileList({
           changesAt={changesAt}
           tuneAt={tuneAt}
           knobMovesAt={knobMovesAt}
+          levelPool={levelPool}
           slipRefs={slipRefs}
           onOpenViewer={handleOpenViewer}
           onOpenLogs={handleOpenLogs}

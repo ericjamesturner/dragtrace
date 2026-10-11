@@ -8,7 +8,8 @@ import { TuneChangeList } from "./TuneChangeList";
 import { SEGMENTS, segmentTimes, type SegmentKey } from "@/lib/timeslip-segments";
 import { estimatePowerFromTimeslip, type WeightPowerEstimates } from "@/lib/drag-performance";
 import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
-import type { UnitOverrides, UnitSystem } from "@/lib/units";
+import { convertForDisplay, getDisplayPrecision, getDisplayUnit, type UnitOverrides, type UnitSystem } from "@/lib/units";
+import { findAnomalies, type Anomaly, type PassLevel } from "@/lib/anomalies";
 import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel } from "@/lib/changes";
 import { timeFromName } from "@/lib/tune-changes";
@@ -236,6 +237,9 @@ interface Col {
   launch: LaunchLine[];
   driveshaft: DriveshaftReading[];
   shifts: ShiftReading[];
+  levels: PassLevel[];
+  /** Levels that fell lower than this vehicle's other passes usually do. */
+  anomalies: Anomaly[];
   segs: Partial<Record<SegmentKey, number>>;
   cf?: number;
   power: WeightPowerEstimates | null;
@@ -383,6 +387,8 @@ interface Row {
   bold?: boolean;
   /** Sits beside the label, at the right of the label column. */
   extra?: React.ReactNode;
+  /** A warning: stays in full colour on a pass that's switched off — it still needs seeing. */
+  alert?: boolean;
   /** The row's number per pass, for the average column. Rows without one leave it blank. */
   avg?: {
     num: (c: Col) => number | undefined;
@@ -431,6 +437,7 @@ export function RunSheet({
   tuneAt,
   knobMovesAt,
   slipRefs,
+  levelPool,
   onOpenViewer,
   onOpenLogs,
   onDelete,
@@ -457,6 +464,8 @@ export function RunSheet({
   tuneAt: Map<string, TuneTabChange[]>;
   knobMovesAt: Map<string, KnobMoves>;
   slipRefs: CompareSlipRef[];
+  /** Every counted pass of the vehicle's stored pressure and battery levels, by file: what "usual" means. */
+  levelPool: Map<string, PassLevel[]>;
   onOpenViewer: (fileId: Id<"files">) => void;
   onOpenLogs: (fileIds: Id<"files">[]) => void;
   onDelete: (file: Doc<"files">) => void;
@@ -485,6 +494,11 @@ export function RunSheet({
           launch: launch ? formatLaunch(launch, unitSystem, unitOverrides) : [],
           driveshaft: preview?.driveshaft ?? [],
           shifts: preview?.shifts ?? [],
+          levels: preview?.levels ?? [],
+          anomalies: findAnomalies(
+            preview?.levels ?? [],
+            [...levelPool].filter(([id]) => id !== file._id).map(([, levels]) => levels),
+          ),
           segs: slip ? segmentTimes(slip) : {},
           cf: slip ? correctionFactor(slip) ?? undefined : undefined,
           power:
@@ -506,7 +520,7 @@ export function RunSheet({
           }),
         };
       }),
-    [files, slipsByFile, unitSystem, unitOverrides, raceWeightLb, estimates]
+    [files, slipsByFile, unitSystem, unitOverrides, raceWeightLb, estimates, levelPool]
   );
 
   // Column reordering: the drag only starts from a column's grip, so text in
@@ -1013,6 +1027,63 @@ export function RunSheet({
       });
     });
 
+    // Anything that fell lower than it does on this vehicle's other passes.
+    // A clean sheet says so: the check ran and found nothing.
+    if (any((c) => c.levels.length || undefined)) {
+      const flagged: string[] = [];
+      for (const c of cols) for (const a of c.anomalies) if (!flagged.includes(a.level.name)) flagged.push(a.level.name);
+      // In the vehicle's own units, at each unit's usual precision.
+      const show = (v: number, slug: string | undefined) => {
+        if (!slug) return v.toFixed(1);
+        const shown = convertForDisplay(v, slug, unitSystem, unitOverrides);
+        return shown.toFixed(getDisplayPrecision(slug, unitSystem, unitOverrides) ?? 1);
+      };
+      const unitOf = (slug: string | undefined) => (slug ? getDisplayUnit(slug, unitSystem, unitOverrides) ?? "" : "");
+      out.push({
+        key: "anomalies",
+        title: "Anomalies",
+        caption: true,
+        rows: flagged.length
+          ? flagged.map((name) => ({
+              key: `anomaly-${name}`,
+              alert: true,
+              label: (
+                <Tip content={name}>
+                  <span className="block max-w-[6.5rem] truncate">{name}</span>
+                </Tip>
+              ),
+              cell: (c: Col) => {
+                const hit = c.anomalies.find((a) => a.level.name === name);
+                // Only the trouble shows; a pass that held up stays blank.
+                if (!hit) return null;
+                const { level } = hit;
+                const unit = unitOf(level.quantitySlug);
+                return (
+                  <Tip
+                    content={`Fell to ${show(level.min, level.quantitySlug)} ${unit} at ${level.minAt.toFixed(2)} s, from ${show(level.base, level.quantitySlug)} ${unit} on the line. On this vehicle's other passes it bottoms out near ${show(hit.usualMin, level.quantitySlug)} ${unit}.`}
+                  >
+                    <span className="font-bold text-red-400">↓ {show(level.min, level.quantitySlug)}</span>
+                  </Tip>
+                );
+              },
+            }))
+          : [
+              {
+                key: "anomaly-none",
+                label: "None found",
+                cell: (c: Col) =>
+                  c.levels.length ? (
+                    <Tip content="Pressures and battery held up like they do on this vehicle's other passes">
+                      <span className="text-green-400/70">✓</span>
+                    </Tip>
+                  ) : (
+                    DASH
+                  ),
+              },
+            ],
+      });
+    }
+
     if (any((c) => changesAt.get(c.file._id) ?? tuneAt.get(c.file._id) ?? knobMovesAt.get(c.file._id))) {
       out.push({
         key: "changes",
@@ -1033,7 +1104,7 @@ export function RunSheet({
       });
     }
     return out;
-  }, [cols, eighthOnly, eventBests, eventRanges, estScope, onEstScopeChange, raceWeightLb, changesAt, tuneAt, knobMovesAt]);
+  }, [cols, eighthOnly, eventBests, eventRanges, estScope, onEstScopeChange, raceWeightLb, changesAt, tuneAt, knobMovesAt, unitSystem, unitOverrides]);
 
   const means = useMemo(
     () => new Map(sections.flatMap((s) => s.rows.map((r) => [r.key, meanOf(r, cols)] as const))),
@@ -1214,7 +1285,7 @@ export function RunSheet({
                     >
                       {hoverCol === i && <AvgArrow r={r} c={c} mean={means.get(r.key)} />}
                       <span className={`transition-opacity ${dimmed(r.key)}`}>
-                        {c.excluded ? <span className={EXCLUDED}>{r.cell(c)}</span> : r.cell(c)}
+                        {c.excluded && !r.alert ? <span className={EXCLUDED}>{r.cell(c)}</span> : r.cell(c)}
                       </span>
                     </div>
                   ))}

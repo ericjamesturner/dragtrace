@@ -1,5 +1,6 @@
 import type { KnobReading, LaunchReading } from "./launch-readings";
 import type { DriveshaftReading, ShiftReading } from "./pass-readings";
+import type { PassLevel } from "./anomalies";
 
 /**
  * The precomputed shape of a pass, stored on the file when its dashboard
@@ -23,6 +24,8 @@ export interface PreviewPayload {
   driveshaft?: DriveshaftReading[] | null;
   /** Upshifts during the pass (stored from preview version 5). */
   shifts?: ShiftReading[] | null;
+  /** Supply pressures and battery through the pass (stored from preview version 10). */
+  levels?: PassLevel[] | null;
 }
 
 export function parsePreview(raw: string | undefined | null): PreviewPayload | null {
