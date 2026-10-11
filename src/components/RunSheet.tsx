@@ -1060,7 +1060,8 @@ export function RunSheet({
       const showGap = (v: number, slug: string | undefined) => {
         if (!slug) return v.toFixed(0);
         const gap = convertForDisplay(v, slug, unitSystem, unitOverrides) - convertForDisplay(0, slug, unitSystem, unitOverrides);
-        return Math.round(gap).toString();
+        // Temperatures in whole degrees; pressures at their usual precision.
+        return slug === "temperature" ? Math.round(gap).toString() : gap.toFixed(getDisplayPrecision(slug, unitSystem, unitOverrides) ?? 1);
       };
       const unitOf = (slug: string | undefined) => (slug ? getDisplayUnit(slug, unitSystem, unitOverrides) ?? "" : "");
       const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
@@ -1086,6 +1087,14 @@ export function RunSheet({
             return {
               text: `↑ ${show(level.max!, level.quantitySlug)}`,
               tip: `${level.name} rose to ${show(level.max!, level.quantitySlug)} ${unit} at ${(level.maxAt ?? 0).toFixed(2)} s (normally peaks at ${show(a.usualMax, level.quantitySlug)} ${unit}).`,
+            };
+          }
+          case "short": {
+            const sf = a.level.shortfall!;
+            const unit = unitOf(a.level.quantitySlug);
+            return {
+              text: `−${showGap(sf.gap, a.level.quantitySlug)}`,
+              tip: `${a.level.name} ran ${showGap(sf.gap, a.level.quantitySlug)} ${unit} (${Math.round((sf.gap / sf.expected) * 100)}%) below expected at ${sf.at.toFixed(2)} s: ${show(sf.actual, a.level.quantitySlug)} against ${show(sf.expected, a.level.quantitySlug)} ${unit} expected.`,
             };
           }
           case "lean":
@@ -1208,6 +1217,9 @@ export function RunSheet({
             [
               `${name}: the lowest point while the throttle is wide open, smoothed over 25 ms so one bad sample can't set it off.`,
               "Red when it falls well below its usual low, or rises well above its usual high: more than 3 times its normal variation, and at least 10% of its level on the line.",
+              ...(cols.some((c) => c.levels.some((l) => l.name === name && l.shortfall))
+                ? [`Also red, from the very first pass, when it runs 10% or more below ${name} Expected.`]
+                : []),
               "Italics: the throttle came off early, so only part of that pass was checked.",
               usualNote,
             ],
@@ -1219,7 +1231,9 @@ export function RunSheet({
                 text: show(l.min, l.quantitySlug),
                 tip: `Lowest ${show(l.min, l.quantitySlug)} ${unit} at ${l.minAt.toFixed(2)} s${
                   l.max !== undefined ? `, highest ${show(l.max, l.quantitySlug)} ${unit} at ${(l.maxAt ?? 0).toFixed(2)} s` : ""
-                }, from ${show(l.base, l.quantitySlug)} ${unit} on the line.`,
+                }, from ${show(l.base, l.quantitySlug)} ${unit} on the line.${
+                  l.shortfall ? ` At most ${showGap(Math.max(0, l.shortfall.gap), l.quantitySlug)} ${unit} below expected.` : ""
+                }`,
               };
             },
             // A second either side of the moment that matters: the high when
@@ -1227,9 +1241,15 @@ export function RunSheet({
             (c) => {
               const l = c.levels.find((x) => x.name === name);
               if (!l) return null;
-              const high = c.anomalies.some((a) => a.kind === "high" && a.row === name) && !c.anomalies.some((a) => a.kind === "low" && a.row === name);
-              const at = high ? l.maxAt ?? l.minAt : l.minAt;
-              return { channels: [name], from: Math.max(-0.5, at - 1), to: at + 1, at };
+              const flagged = (kind: string) => c.anomalies.some((a) => a.kind === kind && a.row === name);
+              // With an expected channel, show it beside the actual.
+              const channels = l.shortfall ? [name, l.shortfall.expectedName] : [name];
+              const at = flagged("short") && !flagged("low")
+                ? l.shortfall!.at
+                : flagged("high") && !flagged("low")
+                  ? l.maxAt ?? l.minAt
+                  : l.minAt;
+              return { channels, from: Math.max(-0.5, at - 1), to: at + 1, at };
             },
           ),
         );

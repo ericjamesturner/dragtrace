@@ -97,6 +97,7 @@ export function buildHealthPage(logs: HealthLog[]): PageConfig | null {
         const battery = l.quantitySlug !== "pressure";
         if (!battery && l.base < 70) continue;
         byTrace[battery ? "battery" : "pressure"].push({ logFileId: log.fileId, channelName: l.name });
+        if (l.shortfall) byTrace.pressure.push({ logFileId: log.fileId, channelName: l.shortfall.expectedName });
       }
     }
     const defs = log.parsed.channelDefs;

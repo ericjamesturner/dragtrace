@@ -23,6 +23,11 @@ export interface PassLevel {
   /** Highest point during the pass, smoothed the same way (preview version 13). */
   max?: number;
   maxAt?: number;
+  /**
+   * Where the ECU logs what this pressure should be ("Fuel Pressure Expected"):
+   * the furthest it fell below that, smoothed the same way (preview version 15).
+   */
+  shortfall?: { expectedName: string; gap: number; at: number; actual: number; expected: number };
 }
 
 /** Pressures that are commanded, atmospheric or follow the boost — not a supply that can fail. */
@@ -91,16 +96,29 @@ export function readLevels(parsed: ParsedLog, session: LogSession, launchAt: num
     let minAt = 0;
     let max = -Infinity;
     let maxAt = 0;
+    // What the ECU says this pressure should be, when it logs that.
+    const expectedDef = parsed.channelDefs.find((d) => d.name.toLowerCase() === `${def.name} expected`.toLowerCase());
+    const expected = expectedDef ? session.channels.get(expectedDef.name) : undefined;
+    let shortfall: PassLevel["shortfall"];
     const start = lowerBound(ts, launchAt + 0.05);
     for (let i = start; i < ts.length && ts[i] <= passEnd; i++) {
       // Median of the samples in the next SMOOTH_S: a dip has to last to count.
       const window: number[] = [];
+      const expWindow: number[] = [];
       for (let j = i; j < ts.length && ts[j] <= ts[i] + SMOOTH_S; j++) {
         if (Number.isFinite(vals[j])) window.push(vals[j]);
+        if (expected && Number.isFinite(expected[j])) expWindow.push(expected[j]);
       }
       if (window.length === 0) continue;
       window.sort((a, b) => a - b);
       const m = window[window.length >> 1];
+      if (expWindow.length) {
+        expWindow.sort((a, b) => a - b);
+        const e = expWindow[expWindow.length >> 1];
+        if (!shortfall || e - m > shortfall.gap) {
+          shortfall = { expectedName: expectedDef!.name, gap: e - m, at: ts[i] - launchAt, actual: m, expected: e };
+        }
+      }
       if (m < min) {
         min = m;
         minAt = ts[i] - launchAt;
@@ -111,7 +129,7 @@ export function readLevels(parsed: ParsedLog, session: LogSession, launchAt: num
       }
     }
     if (!Number.isFinite(min)) continue;
-    out.push({ name: def.name, quantitySlug: def.quantitySlug, base: sum / n, min, minAt, max, maxAt });
+    out.push({ name: def.name, quantitySlug: def.quantitySlug, base: sum / n, min, minAt, max, maxAt, shortfall });
   }
   return out;
 }
@@ -274,6 +292,8 @@ export type Anomaly =
   | { kind: "low"; row: string; level: PassLevel; usualMin: number }
   /** ...or rose higher than it usually does. */
   | { kind: "high"; row: string; level: PassLevel; usualMax: number }
+  /** ...or ran well below what the ECU expected it to be — judged without any history. */
+  | { kind: "short"; row: string; level: PassLevel }
   /** A wideband ran well lean of the target for a while. */
   | { kind: "lean"; row: string; label: string; seconds: number; at: number; worst: number }
   /** A cylinder moved away from where it usually sits against the others. */
@@ -292,6 +312,12 @@ const MIN_FALL_FRACTION = 0.1;
 /** ...and in canonical units: 20 kPa (3 psi) of pressure, half a volt of battery. */
 const MIN_FALL_KPA = 20;
 const MIN_FALL_VOLTS = 0.5;
+/**
+ * Below expected by this share and at least this much (2 psi). One truck: a
+ * fuel pressure dip fell 18% short of expected, its clean passes 1–3%.
+ */
+const SHORT_FRACTION = 0.1;
+const SHORT_MIN_KPA = 14;
 /** A supply this low on the line is a sensor on an unused system, not a supply. */
 const MIN_BASE_KPA = 70;
 
@@ -324,6 +350,11 @@ export function findAnomalies(pass: PassChecks, refs: PassChecks[]): Anomaly[] {
   for (const level of pass.levels) {
     const pressure = level.quantitySlug === "pressure";
     if (pressure && level.base < MIN_BASE_KPA) continue;
+    // Against the ECU's own expected value: needs no other passes.
+    const sf = level.shortfall;
+    if (sf && sf.expected > 0 && sf.gap >= Math.max(sf.expected * SHORT_FRACTION, SHORT_MIN_KPA)) {
+      out.push({ kind: "short", row: level.name, level });
+    }
     const same = refs.flatMap((r) => r.levels.filter((l) => l.name === level.name));
     if (same.length < MIN_REFS) continue;
     const usualMin = median(same.map((l) => l.min));
