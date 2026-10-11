@@ -98,11 +98,30 @@ export interface TuneTabChange {
 const BEST_GREEN = "oklch(79.2% 0.209 151.711)";
 
 /**
- * Shades a result toward the event's best: the best keeps its solid green,
- * near-ties stay almost as bright, and the slowest fade to grey. Gaps are
- * measured against the real spread, but a spread of a few thousandths never
- * stretches across the whole scale — 1.017 vs 1.028 is not a wide range.
- * Needs three passes; with two, best vs not-best already says it all.
+ * How far off the event best a result must be to fade all the way to grey,
+ * in the metric's own units. Set by what each gap means at the track: a
+ * thousandth on the 60' is real, a tenth on the quarter is a lot.
+ */
+const FADE_AT: Record<MetricKey | SegmentKey, number> = {
+  rt: 0.04,
+  sixtyFt: 0.03,
+  threeThirty: 0.05,
+  eighthEt: 0.06,
+  thousandFt: 0.08,
+  et: 0.1,
+  eighthMph: 3,
+  mph: 4,
+  seg60_330: 0.03,
+  seg330_660: 0.03,
+  seg660_1000: 0.03,
+  seg1000_1320: 0.03,
+};
+
+/**
+ * Shades a result toward the event's best: the best keeps its solid green
+ * and every other result fades toward grey by how far off it is, on a fixed
+ * racing scale per metric. The square root spreads the small gaps apart, so
+ * one thousandth already reads as a step down from the best.
  */
 function shadeStyle(
   k: MetricKey | SegmentKey,
@@ -110,14 +129,11 @@ function shadeStyle(
   ranges: MetricRanges,
 ): React.CSSProperties | undefined {
   const r = ranges[k];
-  if (!r || v === undefined || r.count < 3 || v === r.best) return undefined;
+  if (!r || v === undefined || r.count < 2 || v === r.best) return undefined;
   if (k === "rt" && v < 0) return undefined;
-  const tie = k === "eighthMph" || k === "mph" ? 0.3 : 0.005;
-  const gap = Math.abs(v - r.best);
-  const span = Math.max(Math.abs(r.worst - r.best) - tie, 3 * tie);
-  const t = Math.min(1, Math.max(0, gap - tie) / span);
+  const t = Math.min(1, Math.sqrt(Math.abs(v - r.best) / FADE_AT[k]));
   // Only the best is solid green; everything else tops out a step below it.
-  const green = Math.round(55 * (1 - t));
+  const green = Math.round(80 * (1 - t));
   return { color: `color-mix(in oklab, ${BEST_GREEN} ${green}%, var(--muted-foreground))` };
 }
 
