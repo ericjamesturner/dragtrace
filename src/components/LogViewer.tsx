@@ -35,6 +35,8 @@ import { ViewerBreadcrumb } from "./viewer/ViewerBreadcrumb";
 import { TracePanel } from "./viewer/TracePanel";
 import { RecordingPicker } from "./viewer/RecordingPicker";
 import { Share2Icon } from "lucide-react";
+import { fitPassWindow, inferPassWindow } from "@/lib/pass-window";
+import { HEALTH_PAGE_ID, clearHealthFocus, healthPage, readHealthFocus, type HealthFocus } from "@/lib/health-focus";
 
 interface Props {
   vehicleId: Id<"vehicles">;
@@ -314,8 +316,24 @@ export function LogViewerReady({
   }, [fileIds, logs]);
 
   // Compute effective traces
-  const effectiveTraces = useMemo(() => getEffectiveTraces(config), [config]);
-  const pinnedFromOtherIds = useMemo(() => getPinnedFromOtherIds(config), [config]);
+  // A Health value clicked on the run sheet opens here as a temporary page:
+  // shown on top of the saved layout, never written into it. Switching or
+  // closing the tab drops it.
+  const [healthFocus, setHealthFocus] = useState<HealthFocus | null>(() =>
+    publicMode ? null : readHealthFocus(fileIds as string[]),
+  );
+  useEffect(() => clearHealthFocus(), []);
+  const healthLog = healthFocus ? logs.find((l) => l.fileId === healthFocus.fileId) : undefined;
+  const healthTab = useMemo(
+    () => (healthFocus && healthLog ? healthPage(healthFocus, healthLog) : null),
+    [healthFocus, healthLog],
+  );
+  const viewConfig = useMemo(
+    () => (healthTab ? { ...config, pages: [...config.pages, healthTab], activePageId: HEALTH_PAGE_ID } : config),
+    [config, healthTab],
+  );
+  const effectiveTraces = useMemo(() => getEffectiveTraces(viewConfig), [viewConfig]);
+  const pinnedFromOtherIds = useMemo(() => getPinnedFromOtherIds(viewConfig), [viewConfig]);
 
   // Background-fetch AI scatter suggestions for the current channel set and
   // persist them into the config (rides the existing debounced Convex save).
@@ -501,6 +519,25 @@ export function LogViewerReady({
     [logs, recordingTimeslips, alignment.offsets, showTimeslip],
   );
 
+  // The Health page's window, on the viewer's clock: the log's launch plus
+  // its alignment offset, then the focus's seconds either side. Panning it
+  // stays in this page and is never saved.
+  const [healthZoomMoved, setHealthZoomMoved] = useState<[number, number] | null>(null);
+  // Opens on the whole pass, as "Fit to pass" frames it, with the marker
+  // showing the moment; the stretch the focus names is the fallback.
+  const healthZoom = useMemo<[number, number] | null>(() => {
+    if (!healthTab || !healthFocus || !healthLog) return null;
+    const pass = fitPassWindow(timeslipZones, alignment.globalRange, inferPassWindow(logs, alignment.offsets, alignment.globalRange));
+    if (pass) return pass;
+    if (healthLog.raceStartTime == null) return null;
+    const launch = healthLog.raceStartTime + (alignment.offsets.get(healthLog.fileId) ?? 0);
+    return [launch + healthFocus.from, launch + healthFocus.to];
+  }, [healthTab, healthFocus, healthLog, timeslipZones, logs, alignment]);
+  const closeHealth = useCallback(() => {
+    setHealthFocus(null);
+    setHealthZoomMoved(null);
+  }, []);
+
   const handleBack = useCallback(() => {
     if (onBack) onBack();
     else if (goToFiles && vehicleId && eventId) goToFiles(vehicleId, eventId);
@@ -673,17 +710,21 @@ export function LogViewerReady({
           unitSystem={unitSystem}
           traces={effectiveTraces}
           pinnedFromOtherIds={pinnedFromOtherIds}
-          pages={config.pages}
-          activePageId={config.activePageId}
+          pages={viewConfig.pages}
+          activePageId={viewConfig.activePageId}
           onAddPage={() => dispatch({ type: "addPage" })}
-          onRemovePage={(pageId) => dispatch({ type: "removePage", pageId })}
+          onRemovePage={(pageId) => (pageId === HEALTH_PAGE_ID ? closeHealth() : dispatch({ type: "removePage", pageId }))}
           onRenamePage={(pageId, label) => dispatch({ type: "renamePage", pageId, label })}
-          onSwitchPage={(pageId) => dispatch({ type: "switchPage", pageId })}
+          onSwitchPage={(pageId) => {
+            if (pageId === HEALTH_PAGE_ID) return;
+            if (healthTab) closeHealth();
+            dispatch({ type: "switchPage", pageId });
+          }}
           onToggleTracePin={(traceId) => dispatch({ type: "toggleTracePin", traceId })}
             syncKey={sync.key}
           offsets={alignment.offsets}
           globalRange={alignment.globalRange}
-          autoFitPass={autoFitPass}
+          autoFitPass={autoFitPass && !healthTab}
           activeTraceId={activeTraceId}
           hiddenLogIds={config.hiddenLogIds ?? []}
           mirroredLogIds={config.mirroredLogIds ?? []}
@@ -773,8 +814,8 @@ export function LogViewerReady({
           }
             persistedSelection={config.selection ?? null}
           onPersistSelection={(sel) => dispatch({ type: "setSelection", selection: sel })}
-          persistedZoom={config.zoom ?? null}
-          onPersistZoom={(zoom) => dispatch({ type: "setZoom", zoom })}
+          persistedZoom={healthTab ? healthZoomMoved ?? healthZoom : config.zoom ?? null}
+          onPersistZoom={(zoom) => (healthTab ? setHealthZoomMoved(zoom) : dispatch({ type: "setZoom", zoom }))}
           timeslipZones={timeslipZones}
           expandedTimeslipIds={config.expandedTimeslipIds ?? []}
           onToggleTimeslipExpand={(id) => dispatch({ type: "toggleTimeslipExpand", id })}

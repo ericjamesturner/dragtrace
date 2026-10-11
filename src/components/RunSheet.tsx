@@ -9,6 +9,7 @@ import { SEGMENTS, segmentTimes, type SegmentKey } from "@/lib/timeslip-segments
 import { estimatePowerFromTimeslip, type WeightPowerEstimates } from "@/lib/drag-performance";
 import { formatLaunch, type LaunchLine } from "@/lib/launch-readings";
 import { convertForDisplay, getDisplayPrecision, getDisplayUnit, type UnitOverrides, type UnitSystem } from "@/lib/units";
+import { setHealthFocus, type HealthFocus } from "@/lib/health-focus";
 import { checksCut, findAnomalies, offsetsOf, spreadOf, type Anomaly, type CylinderGroup, type PassChecks, type PassLevel } from "@/lib/anomalies";
 import { correctionFactor } from "@/lib/weather-correction";
 import { categoryLabel } from "@/lib/changes";
@@ -241,6 +242,8 @@ interface Col {
   cylinders: CylinderGroup[];
   /** The health checks stopped short of the finish: the throttle came off early. */
   checksCut: number | null;
+  /** Seconds after the launch the health checks ran to. */
+  checksTo: number | null;
   /** What the pass did that this vehicle's other passes usually don't. */
   anomalies: Anomaly[];
   segs: Partial<Record<SegmentKey, number>>;
@@ -500,6 +503,7 @@ export function RunSheet({
           levels: preview?.levels ?? [],
           cylinders: preview?.cylinders ?? [],
           checksCut: checksCut(preview?.checksTo ?? undefined, passLen) ? preview!.checksTo! : null,
+          checksTo: preview?.checksTo ?? null,
           anomalies: findAnomalies(
             { levels: preview?.levels ?? [], cylinders: preview?.cylinders ?? [] },
             [...levelPool].filter(([id]) => id !== file._id).map(([, checks]) => checks),
@@ -1115,6 +1119,8 @@ export function RunSheet({
         label: string,
         explain: string[],
         normal: (c: Col) => { text: string; tip: string } | null,
+        /** What the log should show when the value is clicked. */
+        focus: (c: Col) => Omit<HealthFocus, "fileId" | "label"> | null,
       ): Row => ({
         key: `health-${row}`,
         alert: true,
@@ -1124,6 +1130,14 @@ export function RunSheet({
           </Tip>
         ),
         cell: (c: Col) => {
+          // Clicking a value opens the log on the moment it's about.
+          const f = focus(c);
+          const open = f
+            ? () => {
+                setHealthFocus({ ...f, label, fileId: c.file._id });
+                onOpenViewer(c.file._id);
+              }
+            : undefined;
           // A pass whose throttle came off early was only checked that far:
           // its numbers fade to italics, and say so.
           const cutNote = c.checksCut !== null ? `Only checked to ${c.checksCut.toFixed(2)} s — the throttle came off early.` : null;
@@ -1139,7 +1153,10 @@ export function RunSheet({
                   </div>
                 }
               >
-                <span className={`min-w-0 truncate text-right text-xs font-bold text-red-400 ${cutNote ? "italic" : ""}`}>
+                <span
+                  className={`min-w-0 truncate text-right text-xs font-bold text-red-400 ${cutNote ? "italic" : ""} ${open ? "cursor-pointer hover:underline" : ""}`}
+                  onClick={open}
+                >
                   {parts.map((p) => p.text).join(" ")}
                 </span>
               </Tip>
@@ -1149,7 +1166,12 @@ export function RunSheet({
           if (!n) return DASH;
           return (
             <Tip content={cutNote ? <div className="space-y-1"><div>{n.tip}</div><div>{cutNote}</div></div> : n.tip}>
-              <span className={`min-w-0 truncate text-right text-xs ${cutNote ? "italic text-muted-foreground/30" : "text-muted-foreground/60"}`}>{n.text}</span>
+              <span
+                className={`min-w-0 truncate text-right text-xs ${cutNote ? "italic text-muted-foreground/30" : "text-muted-foreground/60"} ${open ? "cursor-pointer hover:text-foreground hover:underline" : ""}`}
+                onClick={open}
+              >
+                {n.text}
+              </span>
             </Tip>
           );
         },
@@ -1190,11 +1212,22 @@ export function RunSheet({
                 }, from ${show(l.base, l.quantitySlug)} ${unit} on the line.`,
               };
             },
+            // A second either side of the moment that matters: the high when
+            // that's what was flagged, otherwise the low.
+            (c) => {
+              const l = c.levels.find((x) => x.name === name);
+              if (!l) return null;
+              const high = c.anomalies.some((a) => a.kind === "high" && a.row === name) && !c.anomalies.some((a) => a.kind === "low" && a.row === name);
+              const at = high ? l.maxAt ?? l.minAt : l.minAt;
+              return { channels: [name], from: Math.max(-0.5, at - 1), to: at + 1, at };
+            },
           ),
         );
       }
 
       const groupOf = (c: Col, kind: "lambda" | "egt") => c.cylinders.find((g) => g.kind === kind);
+      // The whole checked stretch of the pass, for rows about averages.
+      const wholeRun = (c: Col) => ({ from: 0, to: c.checksTo ?? 5 });
       if (cols.some((c) => groupOf(c, "lambda")?.lean)) {
         rows.push(
           healthRow(
@@ -1210,6 +1243,13 @@ export function RunSheet({
               return lean.label
                 ? { text: `${lean.label} ${lean.seconds.toFixed(2)}s`, tip: `Longest: ${sensor(lean.label)}, ${lean.seconds.toFixed(2)} s from ${lean.at.toFixed(2)} s.` }
                 : { text: "0.00s", tip: "No wideband went 10% lean of target." };
+            },
+            (c) => {
+              const lean = groupOf(c, "lambda")?.lean;
+              if (!lean) return null;
+              return lean.label
+                ? { cylinders: { kind: "lambda", labels: [lean.label], withTarget: true }, from: Math.max(-0.5, lean.at - 0.5), to: lean.at + lean.seconds + 0.5, at: lean.at }
+                : { cylinders: { kind: "lambda", labels: "all", withTarget: true }, ...wholeRun(c) };
             },
           ),
         );
@@ -1232,6 +1272,7 @@ export function RunSheet({
               const k = o.indexOf(Math.max(...o));
               return { text: `${g.labels[k]} ${pct(o[k])}`, tip: `Leanest: ${sensor(g.labels[k])}, ${pct(o[k])} leaner than the average.` };
             },
+            (c) => (groupOf(c, "lambda") ? { cylinders: { kind: "lambda", labels: "all" }, ...wholeRun(c) } : null),
           ),
           healthRow(
             "Wideband spread",
@@ -1241,6 +1282,7 @@ export function RunSheet({
               const g = groupOf(c, "lambda");
               return g ? { text: pct(spreadOf(g)), tip: `Leanest to richest: ${pct(spreadOf(g))}.` } : null;
             },
+            (c) => (groupOf(c, "lambda") ? { cylinders: { kind: "lambda", labels: "all" }, ...wholeRun(c) } : null),
           ),
         );
       }
@@ -1260,6 +1302,7 @@ export function RunSheet({
               const k = g.peaks.indexOf(Math.max(...g.peaks));
               return { text: `${g.labels[k]} ${show(g.peaks[k], g.quantitySlug)}`, tip: `Hottest peak: ${sensor(g.labels[k])}, ${show(g.peaks[k], g.quantitySlug)} ${unitOf(g.quantitySlug)}.` };
             },
+            (c) => (groupOf(c, "egt") ? { cylinders: { kind: "egt", labels: "all" }, ...wholeRun(c) } : null),
           ),
           healthRow(
             "EGT drift",
@@ -1279,6 +1322,7 @@ export function RunSheet({
                 tip: `Furthest off: ${sensor(g.labels[k])}, ${showGap(Math.abs(o[k]), g.quantitySlug)} ${unitOf(g.quantitySlug)} ${o[k] < 0 ? "below" : "above"} the average.`,
               };
             },
+            (c) => (groupOf(c, "egt") ? { cylinders: { kind: "egt", labels: "all" }, ...wholeRun(c) } : null),
           ),
           healthRow(
             "EGT spread",
@@ -1288,6 +1332,7 @@ export function RunSheet({
               const g = groupOf(c, "egt");
               return g ? { text: `${showGap(spreadOf(g), g.quantitySlug)}°`, tip: `Hottest to coldest: ${showGap(spreadOf(g), g.quantitySlug)} ${unitOf(g.quantitySlug)}.` } : null;
             },
+            (c) => (groupOf(c, "egt") ? { cylinders: { kind: "egt", labels: "all" }, ...wholeRun(c) } : null),
           ),
         );
         // Only with no history to judge drift by; shown when it fires.
@@ -1301,6 +1346,7 @@ export function RunSheet({
                 "Cold can mean it isn't firing; hot can mean it's lean.",
               ],
               () => null,
+              (c) => (groupOf(c, "egt") ? { cylinders: { kind: "egt", labels: "all" }, ...wholeRun(c) } : null),
             ),
           );
         }

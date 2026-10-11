@@ -157,3 +157,31 @@ export function inferPassWindow(
   ];
   return clamped[1] - clamped[0] >= MIN_PASS_S ? clamped : null;
 }
+
+/** Half a second either side of the run, as the trace header's "Fit to pass" frames it. */
+const FIT_PASS_PAD_S = 0.5;
+
+/**
+ * The pass itself — the launch through the finish line, taken from the
+ * timeslip band when available and otherwise inferred from the log. The
+ * stage and the shutdown are most of a log and none of the run. What the
+ * trace header's "Fit to pass" zooms to.
+ */
+export function fitPassWindow(
+  timeslipZones: { regions: { start: number; end: number }[] }[] | undefined,
+  globalRange: TimeWindow,
+  inferred: TimeWindow | null,
+): TimeWindow | null {
+  let start = Infinity;
+  let end = -Infinity;
+  for (const zone of timeslipZones ?? []) {
+    for (const region of zone.regions) {
+      if (region.start < start) start = region.start;
+      if (region.end > end) end = region.end;
+    }
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return inferred ?? null;
+  // Clamped to the log: a run that ends near the end of the recording would
+  // otherwise buy two seconds of blank chart.
+  return [Math.max(globalRange[0], start - FIT_PASS_PAD_S), Math.min(globalRange[1], end + FIT_PASS_PAD_S)];
+}

@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useMemo, useRef, useState, useEffect } from "react";
+import { fitPassWindow } from "@/lib/pass-window";
 import type { LoadedLog, ChannelOnTrace, TraceConfig, HighlightZoneConfig } from "@/lib/viewer-types";
 import { resolveChannelStyle, CHART_COLORS, MIN_TRACE_HEIGHT } from "@/lib/viewer-types";
 import type { Id, Doc } from "../../../convex/_generated/dataModel";
@@ -60,7 +61,6 @@ const LEGEND_MIN_W = 120;
 const LEGEND_STATS_W = 380;
 
 /** Seconds kept either side of the run when zooming to the pass. */
-const PASS_WINDOW_PAD_S = 0.5;
 
 /** Trace-header switch: an icon and its name, lit when the overlay is drawn. */
 const HDR_PILL =
@@ -1200,28 +1200,11 @@ export function TraceContainer({
   // needs the roomy overlay — so a range selection temporarily brings it back.
   const legendInHeader = compactLegend && !avgRange && trace.channels.length > 0;
 
-  // The pass itself — the launch through the finish line, taken from the
-  // timeslip band when available and otherwise inferred from the log. The
-  // stage and the shutdown are most of a log and none of the run.
-  const passWindow = useMemo<[number, number] | null>(() => {
-    let start = Infinity;
-    let end = -Infinity;
-    for (const zone of timeslipZones ?? []) {
-      for (const region of zone.regions) {
-        if (region.start < start) start = region.start;
-        if (region.end > end) end = region.end;
-      }
-    }
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-      return inferredPassWindow ?? null;
-    }
-    // Clamped to the log: a run that ends near the end of the recording would
-    // otherwise buy two seconds of blank chart.
-    return [
-      Math.max(globalRange[0], start - PASS_WINDOW_PAD_S),
-      Math.min(globalRange[1], end + PASS_WINDOW_PAD_S),
-    ];
-  }, [timeslipZones, globalRange, inferredPassWindow]);
+  // The pass itself: what "Fit to pass" zooms to.
+  const passWindow = useMemo<[number, number] | null>(
+    () => fitPassWindow(timeslipZones, globalRange, inferredPassWindow ?? null),
+    [timeslipZones, globalRange, inferredPassWindow],
+  );
 
   // For the header strip, collapse the per-log rows into one entry per channel
   // NAME, with that channel's value from each log side by side. Comparing two

@@ -160,24 +160,43 @@ function sensorLabel(name: string, kind: "lambda" | "egt"): string | null {
   return tail ? `${kind === "lambda" ? "B" : "C"}${tail[1]}` : null;
 }
 
+/**
+ * The log's per-cylinder (or, failing that, per-bank) widebands or EGTs, by
+ * label, in order. Shared with the viewer, which finds a flagged cylinder's
+ * channel from its label.
+ */
+export function cylinderChannels(
+  defs: { name: string; quantitySlug?: string }[],
+  kind: "lambda" | "egt",
+): { label: string; name: string; quantitySlug?: string }[] {
+  const members = defs.flatMap((d) => {
+    if (!(kind === "lambda" ? WIDEBAND : EGT).test(d.name) || NOT_SENSOR.test(d.name)) return [];
+    if (kind === "egt" && d.quantitySlug && d.quantitySlug !== "temperature") return [];
+    const label = sensorLabel(d.name, kind);
+    return label ? [{ label, name: d.name, quantitySlug: d.quantitySlug }] : [];
+  });
+  // One family only: per-cylinder sensors win over per-bank ones when a log has both.
+  const cyls = members.filter((m) => m.label.startsWith("C"));
+  return (cyls.length >= 2 ? cyls : members.filter((m) => m.label.startsWith("B"))).sort(
+    (a, b) => Number(a.label.slice(1)) - Number(b.label.slice(1)),
+  );
+}
+
+/** The target channel the widebands are judged against. */
+export function targetChannel(defs: { name: string }[]): string | undefined {
+  return defs.find((d) => /^target (lambda|afr)$/i.test(d.name.trim()))?.name;
+}
+
 export function readCylinders(parsed: ParsedLog, session: LogSession, launchAt: number, passEnd: number): CylinderGroup[] {
   const ts = session.timestamps;
   const out: CylinderGroup[] = [];
   for (const kind of ["lambda", "egt"] as const) {
-    const members = parsed.channelDefs.flatMap((d) => {
-      if (!(kind === "lambda" ? WIDEBAND : EGT).test(d.name) || NOT_SENSOR.test(d.name)) return [];
-      if (kind === "egt" && d.quantitySlug && d.quantitySlug !== "temperature") return [];
-      const label = sensorLabel(d.name, kind);
-      const vals = session.channels.get(d.name);
-      const status = session.channelStatus.get(d.name);
-      if (!label || !vals || (status && status.samples > status.rowCount / 2)) return [];
-      return [{ label, vals, slug: d.quantitySlug }];
+    const group = cylinderChannels(parsed.channelDefs, kind).flatMap((m) => {
+      const vals = session.channels.get(m.name);
+      const status = session.channelStatus.get(m.name);
+      if (!vals || (status && status.samples > status.rowCount / 2)) return [];
+      return [{ label: m.label, vals, slug: m.quantitySlug }];
     });
-    // One family only: per-cylinder sensors win over per-bank ones when a log has both.
-    const cyls = members.filter((m) => m.label.startsWith("C"));
-    const group = (cyls.length >= 2 ? cyls : members.filter((m) => m.label.startsWith("B"))).sort(
-      (a, b) => Number(a.label.slice(1)) - Number(b.label.slice(1)),
-    );
     if (group.length < 2) continue;
 
     const means = group.map((m) => meanIn(ts, m.vals, launchAt + STEADY_FROM_S, passEnd));
@@ -185,8 +204,8 @@ export function readCylinders(parsed: ParsedLog, session: LogSession, launchAt: 
     const peaks = group.map((m) => peakIn(ts, m.vals, launchAt + LEAN_FROM_S, passEnd));
 
     let lean: CylinderGroup["lean"] = null;
-    const targetDef = kind === "lambda" ? parsed.channelDefs.find((d) => /^target (lambda|afr)$/i.test(d.name.trim())) : undefined;
-    const target = targetDef ? session.channels.get(targetDef.name) : undefined;
+    const targetName = kind === "lambda" ? targetChannel(parsed.channelDefs) : undefined;
+    const target = targetName ? session.channels.get(targetName) : undefined;
     if (target) {
       lean = { label: "", seconds: 0, at: 0, worst: 1 };
       for (const m of group) {
