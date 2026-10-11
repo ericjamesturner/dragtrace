@@ -657,6 +657,28 @@ export function RunSheet({
           </div>
         ))}
 
+        {/* A plain way into each pass's log. */}
+        <div className="sticky left-0 z-10 bg-card" />
+        {cols.map((c, i) => (
+          <div
+            key={c.file._id}
+            className={`px-1.5 pt-1 ${colClass(i)}`}
+            onMouseEnter={() => {
+              setHoverCol(i);
+              setHoverRow(null);
+            }}
+          >
+            <Button
+              variant="outline"
+              size="xs"
+              className="h-5 w-full text-[10px]"
+              onClick={() => onOpenViewer(c.file._id)}
+            >
+              Open
+            </Button>
+          </div>
+        ))}
+
         {/* Column heads */}
         <div className={`${labelCell} border-b bg-card`} />
         {cols.map((c, i) => (
