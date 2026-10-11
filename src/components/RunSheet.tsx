@@ -1260,15 +1260,12 @@ export function RunSheet({
               : /oil/i.test(name)
                 ? "Oil"
                 : "Fuel";
-      // The channel's name without its group, written out now the group
-      // says the rest: Coolant > "Temperature", Trans > "Line pressure".
+      // Short and alike, one row each: "Oil Press", "Trans Temp", "Conv Press".
       const inGroup = (name: string, g: Group) => {
-        if (/battery voltage/i.test(name)) return "Battery voltage";
-        const rest =
-          g === "Trans"
-            ? name.replace(/^Transmission\s+(Oil\s+)?/i, "").replace(/^Torque Converter\b/i, "Conv.")
-            : name.replace(new RegExp(`^${g}\\s+`, "i"), "");
-        return rest.charAt(0).toUpperCase() + rest.slice(1).toLowerCase();
+        if (/battery/i.test(name)) return "Battery";
+        if (/converter/i.test(name)) return "Conv Press";
+        const kind = /temp/i.test(name) ? "Temp" : "Press";
+        return g === "Fuel" && !/fuel/i.test(name) ? shortName(name) : `${g} ${kind}`;
       };
 
       // Supplies: one row per pressure the checks watch, and the battery.
@@ -1356,7 +1353,7 @@ export function RunSheet({
           "Boost",
           healthRow(
             "Boost",
-            "Peak",
+            "Boost",
             [
               "The highest boost while the throttle is wide open, smoothed over 50 ms.",
               `Red when it peaks well away from its usual peak, either way: more than 3 times its normal variation and at least ${showGap(14, "pressure")} ${unitOf("pressure")}.`,
@@ -1383,7 +1380,7 @@ export function RunSheet({
           "Boost",
           healthRow(
             "Boost vs target",
-            "vs target",
+            "Boost Vs Target",
             [
               "How far boost fell short of its commanded target, from 1 s until the throttle comes off, held 50 ms.",
               `Red at ${showGap(21, "pressure")} ${unitOf("pressure")} or more short, from the very first pass — a leak, a wastegate, or turbos out of map.`,
@@ -1427,7 +1424,7 @@ export function RunSheet({
           "Engine",
           healthRow(
             "Sensor faults",
-            "Sensor faults",
+            "Sensor Faults",
             [
               "Any sensor that read fine for the 2 s before the launch, then reported a fault during the pass for 0.02 s or more.",
               "Always red — a sensor dropping out mid-pass is worth a look.",
@@ -1448,7 +1445,7 @@ export function RunSheet({
         put("Wideband", 
           healthRow(
             "Lean spike",
-            "Lean spike",
+            "O2 Lean",
             [
               "The longest time any one wideband stays 10% or more lean of target, from 0.15 s until the throttle comes off.",
               "Red at 0.1 s or longer, so a spike anywhere in the pass shows.",
@@ -1474,7 +1471,7 @@ export function RunSheet({
         put("Wideband", 
           healthRow(
             "Wideband vs target",
-            "vs target",
+            "O2 Vs Target",
             [
               "Each wideband's average against Target Lambda's average, from 1 s until the throttle comes off. Shown: the one furthest off — + is lean, − is rich.",
               `Red when one averages ${pct(TARGET_OFF)} or more lean of target, from the very first pass. Blue when it's that far rich: off, but the safe way. Grey within ${pct(TARGET_OFF)}.`,
@@ -1508,7 +1505,7 @@ export function RunSheet({
         put("Wideband", 
           healthRow(
             "Wideband drift",
-            "Drift",
+            "O2 Drift",
             [
               "Each wideband's average from 1 s until the throttle comes off, against the average of all of them. Shown: the leanest one.",
               "Red when a cylinder runs 1.7% or more leaner against the others than it usually does, and is now leaner than average.",
@@ -1526,7 +1523,7 @@ export function RunSheet({
           ),
           healthRow(
             "Wideband spread",
-            "Spread",
+            "O2 Spread",
             ["Leanest wideband minus richest, from their averages after 1 s.", "Red when 2.5% or more wider than usual.", usualNote],
             (c) => {
               const g = groupOf(c, "lambda");
@@ -1540,7 +1537,7 @@ export function RunSheet({
         put("EGT", 
           healthRow(
             "EGT spike",
-            "Spike",
+            "EGT Spike",
             [
               "Each EGT's highest point from 0.15 s until the throttle comes off, held at least 50 ms. Shown: the hottest.",
               `Red when a cylinder peaks ${tempGap(100)} or more above its usual peak — or, with no history yet, ${tempGap(200)} above the other cylinders.`,
@@ -1556,7 +1553,7 @@ export function RunSheet({
           ),
           healthRow(
             "EGT drift",
-            "Drift",
+            "EGT Drift",
             [
               "Each EGT's average from 1 s until the throttle comes off, against the average of all of them. Shown: the one furthest off.",
               `Red when a cylinder sits ${tempGap(50)} or more hotter or colder against the others than it usually does.`,
@@ -1576,7 +1573,7 @@ export function RunSheet({
           ),
           healthRow(
             "EGT spread",
-            "Spread",
+            "EGT Spread",
             [`Hottest EGT minus coldest, from their averages after 1 s. Red when ${tempGap(75)} or more wider than usual.`, usualNote],
             (c) => {
               const g = groupOf(c, "egt");
@@ -1590,7 +1587,7 @@ export function RunSheet({
           put("EGT", 
             healthRow(
               "EGT odd one out",
-              "Odd one out",
+              "EGT Odd",
               [
                 `With fewer than 3 earlier passes to compare against: a cylinder whose EGT averages ${tempGap(150)} or more off the others.`,
                 "Cold can mean it isn't firing; hot can mean it's lean.",
@@ -1602,12 +1599,14 @@ export function RunSheet({
         }
       }
 
-      const filled = GROUPS.filter((g) => grouped.get(g)!.length);
-      if (filled.length) {
-        // The heading for the lot, then a caption per group.
-        out.push({ key: "health", title: "Health", caption: true, rows: [] });
-        for (const g of filled) out.push({ key: `health-${g}`, title: g, caption: true, rows: grouped.get(g)! });
-      }
+      // One list, in system order; the labels say which system. Inside a
+      // system, pressure before temperature — except coolant, temperature first.
+      const kindOrder = (g: Group, r: Row) => {
+        const temp = /temp/i.test(r.key);
+        return g === "Coolant" ? (temp ? 0 : 1) : temp ? 1 : 0;
+      };
+      const rows = GROUPS.flatMap((g) => [...grouped.get(g)!].sort((a, b) => kindOrder(g, a) - kindOrder(g, b)));
+      if (rows.length) out.push({ key: "health", title: "Health", caption: true, rows });
     }
 
     if (any((c) => changesAt.get(c.file._id) ?? tuneAt.get(c.file._id) ?? knobMovesAt.get(c.file._id))) {
