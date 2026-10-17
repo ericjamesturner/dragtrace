@@ -12,6 +12,12 @@ export const BINARY_LOG_EXTENSIONS = new Set([
 export const SUPPORTED_LOG_EXTENSIONS = new Set([...TEXT_LOG_EXTENSIONS, "dl", "hlg", "hlgzip"]);
 export const SUPPORTED_LOG_ACCEPT = [...SUPPORTED_LOG_EXTENSIONS].map((extension) => `.${extension}`).join(",");
 export const SUPPORTED_LOG_DESCRIPTION = "Haltech .hlgzip/.hlg · Holley V6 .dl · CSV/text exports";
+// The ECU's own log files carry more than a CSV export, so uploads offer these first.
+export const NATIVE_LOG_ACCEPT = [...SUPPORTED_LOG_EXTENSIONS]
+  .filter((extension) => !TEXT_LOG_EXTENSIONS.has(extension))
+  .map((extension) => `.${extension}`)
+  .join(",");
+export const NATIVE_LOG_DESCRIPTION = "Haltech .hlgzip/.hlg · Holley V6 .dl";
 
 export function fileExtension(fileName: string): string {
   const dot = fileName.lastIndexOf(".");

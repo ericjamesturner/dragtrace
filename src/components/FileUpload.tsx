@@ -3,7 +3,16 @@ import { useConvex, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { UploadIcon } from "lucide-react";
-import { fileExtension, isSupportedLogFile, SUPPORTED_LOG_ACCEPT, SUPPORTED_LOG_DESCRIPTION } from "@/lib/datalog-parser";
+import {
+  fileExtension,
+  isSupportedLogFile,
+  NATIVE_LOG_ACCEPT,
+  NATIVE_LOG_DESCRIPTION,
+  SUPPORTED_LOG_ACCEPT,
+  SUPPORTED_LOG_DESCRIPTION,
+  TEXT_LOG_EXTENSIONS,
+} from "@/lib/datalog-parser";
+import { Switch } from "@/components/ui/switch";
 import { syncTuneChanges } from "@/lib/tune-change-sync";
 import { useUnitPreferences } from "@/hooks/useUnitPreferences";
 
@@ -65,18 +74,31 @@ export function FileUpload({
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  // CSV exports carry less than the ECU's own log, so they stay hidden until asked for.
+  const [allowCsv, setAllowCsv] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const uploadFiles = useCallback(
     async (fileList: FileList) => {
       if (progress) return;
       // Guard drag-and-drop too, since it ignores the input's `accept` value.
-      const files = Array.from(fileList).filter((file) => isSupportedLogFile(file.name));
+      const supported = Array.from(fileList).filter((file) => isSupportedLogFile(file.name));
+      const files = allowCsv
+        ? supported
+        : supported.filter((file) => !TEXT_LOG_EXTENSIONS.has(fileExtension(file.name)));
+      const skippedCsv = supported.length - files.length;
+      const csvOffMessage = "CSV files are off. Turn on CSV to upload them.";
       if (files.length === 0) {
-        setError("Choose a Haltech .hlgzip/.hlg log, Holley V6 .dl file, or supported CSV/text export.");
+        setError(
+          skippedCsv > 0
+            ? csvOffMessage
+            : allowCsv
+              ? "Choose a Haltech .hlgzip/.hlg log, Holley V6 .dl file, or supported CSV/text export."
+              : "Choose a Haltech .hlgzip/.hlg log or Holley V6 .dl file."
+        );
         return;
       }
-      setError(null);
+      setError(skippedCsv > 0 ? csvOffMessage : null);
       const total = files.reduce((sum, f) => sum + f.size, 0);
       let doneBytes = 0;
       try {
@@ -127,7 +149,7 @@ export function FileUpload({
         if (inputRef.current) inputRef.current.value = "";
       }
     },
-    [progress, generateUploadUrl, saveFile, eventId, vehicleId, convex, unitSystem, resolved]
+    [progress, allowCsv, generateUploadUrl, saveFile, eventId, vehicleId, convex, unitSystem, resolved]
   );
 
   const handleDrop = useCallback(
@@ -166,7 +188,7 @@ export function FileUpload({
         ref={inputRef}
         type="file"
         multiple
-        accept={SUPPORTED_LOG_ACCEPT}
+        accept={allowCsv ? SUPPORTED_LOG_ACCEPT : NATIVE_LOG_ACCEPT}
         className="hidden"
         onChange={(e) => {
           if (e.target.files) void uploadFiles(e.target.files);
@@ -197,7 +219,21 @@ export function FileUpload({
           <p className="text-sm text-muted-foreground">
             Drop files here or click to browse
           </p>
-          <p className="text-xs text-muted-foreground/70">{SUPPORTED_LOG_DESCRIPTION}</p>
+          <p className="text-xs text-muted-foreground/70">
+            {allowCsv ? SUPPORTED_LOG_DESCRIPTION : NATIVE_LOG_DESCRIPTION}
+          </p>
+          <label
+            className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Switch
+              appearance="form"
+              checked={allowCsv}
+              title={allowCsv ? "Hide CSV files" : "Show CSV files too"}
+              onChange={setAllowCsv}
+            />
+            CSV
+          </label>
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
       )}
