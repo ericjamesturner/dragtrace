@@ -1443,6 +1443,160 @@ export function TraceContainer({
 
   const multiLogTrace = traceLogs.length > 1;
 
+  const showHeader = collapsed || legendInHeader || !!legendCollapsed || trace.channels.length === 0;
+  /** Reorder and collapse: the trace's own handles, wherever its controls sit. */
+  const traceHandles = (
+    <>
+      {onReorderTrace && (
+        <Tip content="Drag to reorder">
+          <span
+            draggable
+            onDragStart={(e) => {
+              e.stopPropagation();
+              e.dataTransfer.setData("text/plain", JSON.stringify({ dragTraceId: trace.id }));
+              e.dataTransfer.effectAllowed = "move";
+            }}
+            className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-foreground shrink-0"
+          >
+            <GripVerticalIcon className="size-4" />
+          </span>
+        </Tip>
+      )}
+      <Tip content={collapsed ? "Expand trace" : "Collapse trace"}>
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleCollapsed?.(); }}
+          className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+        >
+          {collapsed ? <ChevronRightIcon className="size-4" /> : <ChevronDownIcon className="size-4" />}
+        </button>
+      </Tip>
+    </>
+  );
+
+  /**
+   * What a trace can do, left to right: act on the view, switch an overlay on
+   * or off, act on the trace itself. The pin sits with the ✕ because both are
+   * about the trace's place in the workspace, not about what it draws. Icons
+   * only where they sit in the narrow channels panel; spelled out in the
+   * header strip.
+   */
+  const traceActions = (iconOnly: boolean) => {
+    const pill = iconOnly ? HDR_ICON : HDR_PILL;
+    return (
+          <div className={`flex shrink-0 items-center ${iconOnly ? "gap-0.5" : "gap-2"}`}>
+          {passWindow && onZoom && (
+            <>
+              <Tip content="Zoom to the pass — half a second either side of the run">
+                <button
+                  onClick={(e) => { e.stopPropagation(); onZoom(passWindow[0], passWindow[1]); }}
+                  className={`${pill} ${HDR_PILL_OFF}`}
+                >
+                  <MoveHorizontalIcon className="size-3.5 shrink-0" />
+                  {!iconOnly && "Fit to pass"}
+                </button>
+              </Tip>
+              <span className="h-4 w-px shrink-0 bg-border" />
+            </>
+          )}
+
+          {onToggleTimeslip && (timeslipZones?.length ?? 0) > 0 && (
+            <Tip content={trace.showTimeslip ? "Stop drawing the timeslip band under this trace" : "Draw the timeslip band under this trace"}>
+              <button
+                onClick={(e) => { e.stopPropagation(); onToggleTimeslip(); }}
+                className={`${pill} ${trace.showTimeslip ? HDR_PILL_ON : HDR_PILL_OFF}`}
+                aria-pressed={!!trace.showTimeslip}
+              >
+                <TimerIcon className="size-3.5 shrink-0" />
+                {!iconOnly && "Timeslip"}
+              </button>
+            </Tip>
+          )}
+
+          {/* Only on traces carrying shock-travel channels — the data the
+              3D card animates lives right here. */}
+          {suspensionOpen !== undefined && onToggleSuspension && (
+            <Tip content={suspensionOpen ? "Hide the 3D suspension view" : "Show the 3D suspension view — the corners ride these shock channels"}>
+              <button
+                onClick={(e) => { e.stopPropagation(); onToggleSuspension(); }}
+                className={`${pill} ${suspensionOpen ? HDR_PILL_ON : HDR_PILL_OFF}`}
+                aria-pressed={suspensionOpen}
+              >
+                <BoxIcon className="size-3.5 shrink-0" />
+                {!iconOnly && "Suspension"}
+              </button>
+            </Tip>
+          )}
+
+          {/* Only offered once there is something to draw, the same rule the
+              timeslip switch follows. The gear beside it is how you get the
+              first one. */}
+          {onToggleZones && allZones.length > 0 && (
+            <Tip
+              content={
+                (firingZoneCount > 0
+                  ? `${firingZoneCount} zone${firingZoneCount === 1 ? "" : "s"} caught something on this run. `
+                  : "No zone caught anything on this run. ") +
+                (showZones ? "Stop drawing them." : "Draw them.")
+              }
+            >
+              <button
+                onClick={(e) => { e.stopPropagation(); onToggleZones(); }}
+                className={`${iconOnly ? `${HDR_PILL} px-1` : HDR_PILL} ${showZones ? HDR_PILL_ON : HDR_PILL_OFF}`}
+                aria-pressed={showZones}
+              >
+                <HighlighterIcon className="size-3.5 shrink-0" />
+                {!iconOnly && "Zones"}
+                {/* The count stays red with the drawing switched off. Switching
+                    the paint off does not make the problem go away, and losing
+                    the warning is the last thing you want. */}
+                {firingZoneCount > 0 && (
+                  <span className="ml-0.5 rounded-full bg-destructive/25 px-1.5 font-mono text-[10px] font-semibold text-destructive">
+                    {firingZoneCount}
+                  </span>
+                )}
+              </button>
+            </Tip>
+          )}
+
+          {onAddZone && (
+            <Tip content={allZones.length > 0 ? "Edit the highlight zones" : "Add a highlight zone"}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setSettingsOpen(true); }}
+                className={`${HDR_ICON} cursor-pointer text-muted-foreground hover:bg-foreground/10 hover:text-foreground`}
+              >
+                <SlidersHorizontalIcon className="size-3.5" />
+              </button>
+            </Tip>
+          )}
+
+          <span className="h-4 w-px shrink-0 bg-border" />
+
+          <Tip content={pinned ? "Unpin from all pages" : "Pin across all pages"}>
+            <button
+              onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
+              aria-pressed={pinned}
+              className={`${HDR_ICON} cursor-pointer ${pinned ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-foreground/10 hover:text-foreground"}`}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill={pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.5">
+                <path d="M6 1h4v5l2 2v2H9v5H7v-5H4V8l2-2V1z" />
+              </svg>
+            </button>
+          </Tip>
+          {/* Removing a trace removes it from every page, so a pinned one takes
+              itself off the page that owns it as well — unpin first. */}
+          <Tip content={pinned ? "Pinned to every page — unpin it to remove" : "Remove trace"}>
+            <button
+              onClick={onRemoveTrace}
+              disabled={pinned}
+              className={`${HDR_ICON} text-muted-foreground enabled:cursor-pointer enabled:hover:bg-destructive/15 enabled:hover:text-destructive disabled:opacity-30`}
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          </Tip>
+        </div>
+    );
+  };
+
   return (
     <div
       data-trace-id={trace.id}
@@ -1463,31 +1617,13 @@ export function TraceContainer({
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
     >
-      {/* Header — collapse toggle, channel summary, action buttons */}
+      {/* Header strip — only where the channels panel can't carry the trace's
+          controls: collapsed, empty, the panel hidden, or the legend living
+          up here. Otherwise they sit at the top of the panel and the chart
+          gets the height. */}
+      {showHeader && (
       <div className="sticky top-0 z-20 flex items-center gap-1.5 px-2 py-1 border-b bg-muted rounded-t-lg shrink-0">
-        {onReorderTrace && (
-          <Tip content="Drag to reorder">
-            <span
-              draggable
-              onDragStart={(e) => {
-                e.stopPropagation();
-                e.dataTransfer.setData("text/plain", JSON.stringify({ dragTraceId: trace.id }));
-                e.dataTransfer.effectAllowed = "move";
-              }}
-              className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-foreground shrink-0"
-            >
-              <GripVerticalIcon className="size-4" />
-            </span>
-          </Tip>
-        )}
-        <Tip content={collapsed ? "Expand trace" : "Collapse trace"}>
-          <button
-            onClick={(e) => { e.stopPropagation(); onToggleCollapsed?.(); }}
-            className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
-          >
-            {collapsed ? <ChevronRightIcon className="size-4" /> : <ChevronDownIcon className="size-4" />}
-          </button>
-        </Tip>
+        {traceHandles}
         {trace.channels.length === 0 ? (
           <span className="text-xs text-muted-foreground flex-1 truncate">
             Empty — pick channels from the panel, or drag one in
@@ -1604,124 +1740,11 @@ export function TraceContainer({
           <span className="flex-1" />
         )}
         {/* Three groups, left to right: act on the view, switch an overlay on
-            or off, act on the trace itself. The header is nearly all empty
-            space, so the overlay switches are spelled out — an unlabelled row
-            of five icons made you learn them.
-
-            The pin sits with the ✕ because both are about the trace's place in
-            the workspace, not about what it draws. */}
-        <div className="flex shrink-0 items-center gap-2">
-          {passWindow && onZoom && (
-            <>
-              <Tip content="Zoom to the pass — half a second either side of the run">
-                <button
-                  onClick={(e) => { e.stopPropagation(); onZoom(passWindow[0], passWindow[1]); }}
-                  className={`${HDR_PILL} ${HDR_PILL_OFF}`}
-                >
-                  <MoveHorizontalIcon className="size-3.5 shrink-0" />
-                  Fit to pass
-                </button>
-              </Tip>
-              <span className="h-4 w-px shrink-0 bg-border" />
-            </>
-          )}
-
-          {onToggleTimeslip && (timeslipZones?.length ?? 0) > 0 && (
-            <Tip content={trace.showTimeslip ? "Stop drawing the timeslip band under this trace" : "Draw the timeslip band under this trace"}>
-              <button
-                onClick={(e) => { e.stopPropagation(); onToggleTimeslip(); }}
-                className={`${HDR_PILL} ${trace.showTimeslip ? HDR_PILL_ON : HDR_PILL_OFF}`}
-                aria-pressed={!!trace.showTimeslip}
-              >
-                <TimerIcon className="size-3.5 shrink-0" />
-                Timeslip
-              </button>
-            </Tip>
-          )}
-
-          {/* Only on traces carrying shock-travel channels — the data the
-              3D card animates lives right here. */}
-          {suspensionOpen !== undefined && onToggleSuspension && (
-            <Tip content={suspensionOpen ? "Hide the 3D suspension view" : "Show the 3D suspension view — the corners ride these shock channels"}>
-              <button
-                onClick={(e) => { e.stopPropagation(); onToggleSuspension(); }}
-                className={`${HDR_PILL} ${suspensionOpen ? HDR_PILL_ON : HDR_PILL_OFF}`}
-                aria-pressed={suspensionOpen}
-              >
-                <BoxIcon className="size-3.5 shrink-0" />
-                Suspension
-              </button>
-            </Tip>
-          )}
-
-          {/* Only offered once there is something to draw, the same rule the
-              timeslip switch follows. The gear beside it is how you get the
-              first one. */}
-          {onToggleZones && allZones.length > 0 && (
-            <Tip
-              content={
-                (firingZoneCount > 0
-                  ? `${firingZoneCount} zone${firingZoneCount === 1 ? "" : "s"} caught something on this run. `
-                  : "No zone caught anything on this run. ") +
-                (showZones ? "Stop drawing them." : "Draw them.")
-              }
-            >
-              <button
-                onClick={(e) => { e.stopPropagation(); onToggleZones(); }}
-                className={`${HDR_PILL} ${showZones ? HDR_PILL_ON : HDR_PILL_OFF}`}
-                aria-pressed={showZones}
-              >
-                <HighlighterIcon className="size-3.5 shrink-0" />
-                Zones
-                {/* The count stays red with the drawing switched off. Switching
-                    the paint off does not make the problem go away, and losing
-                    the warning is the last thing you want. */}
-                {firingZoneCount > 0 && (
-                  <span className="ml-0.5 rounded-full bg-destructive/25 px-1.5 font-mono text-[10px] font-semibold text-destructive">
-                    {firingZoneCount}
-                  </span>
-                )}
-              </button>
-            </Tip>
-          )}
-
-          {onAddZone && (
-            <Tip content={allZones.length > 0 ? "Edit the highlight zones" : "Add a highlight zone"}>
-              <button
-                onClick={(e) => { e.stopPropagation(); setSettingsOpen(true); }}
-                className={`${HDR_ICON} cursor-pointer text-muted-foreground hover:bg-foreground/10 hover:text-foreground`}
-              >
-                <SlidersHorizontalIcon className="size-3.5" />
-              </button>
-            </Tip>
-          )}
-
-          <span className="h-4 w-px shrink-0 bg-border" />
-
-          <Tip content={pinned ? "Unpin from all pages" : "Pin across all pages"}>
-            <button
-              onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
-              aria-pressed={pinned}
-              className={`${HDR_ICON} cursor-pointer ${pinned ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-foreground/10 hover:text-foreground"}`}
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill={pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.5">
-                <path d="M6 1h4v5l2 2v2H9v5H7v-5H4V8l2-2V1z" />
-              </svg>
-            </button>
-          </Tip>
-          {/* Removing a trace removes it from every page, so a pinned one takes
-              itself off the page that owns it as well — unpin first. */}
-          <Tip content={pinned ? "Pinned to every page — unpin it to remove" : "Remove trace"}>
-            <button
-              onClick={onRemoveTrace}
-              disabled={pinned}
-              className={`${HDR_ICON} text-muted-foreground enabled:cursor-pointer enabled:hover:bg-destructive/15 enabled:hover:text-destructive disabled:opacity-30`}
-            >
-              <XIcon className="size-3.5" />
-            </button>
-          </Tip>
-        </div>
+            or off, act on the trace itself. Spelled out here, where the header
+            is nearly all empty space; icons in the narrow channels panel. */}
+        {traceActions(false)}
       </div>
+      )}
 
       {/* Chart area, with the channels panel docked to its right */}
       {!collapsed && (
@@ -1789,6 +1812,14 @@ export function TraceContainer({
           >
             {!legendCollapsed && onSetLegendWidth && (
               <PanelResizeHandle width={legendPanelWidth} onSetWidth={onSetLegendWidth} />
+            )}
+            {/* The trace's controls, where the header used to hold them. */}
+            {!showHeader && (
+              <div className="flex shrink-0 items-center gap-1 border-b border-white/10 px-1 py-0.5">
+                {traceHandles}
+                <span className="flex-1" />
+                {traceActions(true)}
+              </div>
             )}
             {/* The header is also the door channels come in through. Building a
                 trace is a different job from reading one, so it gets a door of
