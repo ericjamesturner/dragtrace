@@ -94,6 +94,8 @@ export interface LoadedLog {
 export interface ChannelOnTrace {
   logFileId: Id<"files">;
   channelName: string;
+  /** Short name to show for the channel on this trace, where the full one won't fit. A rename still wins. */
+  label?: string;
   color?: string;
   opacity?: number;
   width?: number;
@@ -212,6 +214,8 @@ export interface PageConfig {
   traces: TraceConfig[];
   scatters?: ScatterConfig[];
   heatmaps?: HeatmapConfig[];
+  /** The Timed tab's chosen strip, by its table's name: what its one trace shows. */
+  timedFocus?: string;
   /** @deprecated Lifted to the viewer; kept so old workspaces can be migrated. */
   selection?: [number, number];
   /** @deprecated Lifted to the viewer; kept so old workspaces can be migrated. */
@@ -308,13 +312,15 @@ export type ViewerAction =
   | { type: "removePage"; pageId: string }
   | { type: "renamePage"; pageId: string; label: string }
   | { type: "switchPage"; pageId: string }
-  /** Add the Health tab, or top up its traces with channels from newly loaded logs. Never removes anything. */
+  /** Add an automatic tab (Health, Timed), or top up its traces with channels from newly loaded logs. Never removes anything. */
   | { type: "upsertHealthPage"; page: PageConfig }
   /**
    * Go to the Health tab with only `show` (`${logFileId}:${channelName}`) switched
    * on: every other channel there off, and traces with nothing left showing collapsed.
    */
   | { type: "focusHealth"; pageId: string; show: string[] }
+  /** Show another strip in the Timed tab's trace: its channels replace what the trace had. */
+  | { type: "setTimedFocus"; pageId: string; focus: string; traceId: string; channels: ChannelOnTrace[] }
   | { type: "toggleTracePin"; traceId: string }
   | { type: "setUnitSystem"; system: UnitSystem }
   | { type: "cycleUnit"; quantitySlug: string }
@@ -444,6 +450,21 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
         }),
       };
     }
+    case "setTimedFocus":
+      return {
+        ...state,
+        pages: state.pages.map((p) =>
+          p.id !== action.pageId
+            ? p
+            : {
+                ...p,
+                timedFocus: action.focus,
+                traces: p.traces.map((t) =>
+                  t.id === action.traceId ? { ...t, channels: action.channels, hiddenChannels: undefined } : t,
+                ),
+              },
+        ),
+      };
     case "focusHealth": {
       const show = new Set(action.show);
       return {

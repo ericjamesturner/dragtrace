@@ -7,6 +7,7 @@ import { parseDatalogBytes } from "@/lib/datalog-parser";
 import { lttbDownsample } from "@/lib/downsample";
 import { readKnobs, readLaunch, type KnobReading, type LaunchReading } from "@/lib/launch-readings";
 import { readBox, readDriveshaft, readShifts, type BoxReading, type DriveshaftReading, type ShiftReading } from "@/lib/pass-readings";
+import { readTorque, type TorquePart } from "@/lib/torque-readings";
 import { readBoost, readCylinders, readFaults, readInjectors, readLevels, readLimiter, readSlip, wideOpenEnd, type BoostReading, type CylinderGroup, type FaultReading, type InjectorReading, type LimiterReading, type PassLevel, type SlipReading } from "@/lib/anomalies";
 import { parsePreview } from "@/lib/preview";
 import { passSessionIndex } from "@/lib/load-haltech-log";
@@ -15,7 +16,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
 // Bump when the preview computation changes so stored previews recompute.
-const PREVIEW_VERSION = 18;
+const PREVIEW_VERSION = 19;
 
 // Stored window around the race — wider than the rendered window so the
 // dashboard lead-in/tail can be tuned without recomputing stored previews.
@@ -63,6 +64,8 @@ export interface PreviewPayload {
   injectors?: InjectorReading[] | null;
   /** The delay box as the log measured it (preview version 18). */
   box?: BoxReading | null;
+  /** What each torque management part did (preview version 19). */
+  torque?: TorquePart[] | null;
 }
 
 /** A file's stored preview, or null when absent or from an older version. */
@@ -266,6 +269,7 @@ async function computePreview(bytes: ArrayBuffer, fileName: string): Promise<Pre
         : null,
     injectors: raceStart !== null ? readInjectors(parsed, session, raceStart, wideOpenEnd(parsed, session, raceStart, raceEnd)) : null,
     box: raceStart !== null ? readBox(parsed, session, raceStart) : null,
+    torque: raceStart !== null ? readTorque(parsed, session, raceStart, wideOpenEnd(parsed, session, raceStart, raceEnd)) : null,
   };
 }
 

@@ -16,6 +16,7 @@ import { categoryLabel } from "@/lib/changes";
 import { timeFromName } from "@/lib/tune-changes";
 import { parsePreview } from "@/lib/preview";
 import { DRIVESHAFT_TIMES, type BoxReading, type DriveshaftReading, type ShiftReading } from "@/lib/pass-readings";
+import type { TorquePart } from "@/lib/torque-readings";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -256,6 +257,10 @@ interface Col {
   injectors: InjectorReading[] | null;
   /** The delay box as the log measured it. */
   box: BoxReading | null;
+  /** What each torque management part did; null when the log has none of its channels. */
+  torque: TorquePart[] | null;
+  /** The torque management knob's position at the launch. */
+  tmKnob: number | null;
   /** The health checks stopped short of the finish: the throttle came off early. */
   checksCut: number | null;
   /** Seconds after the launch the health checks ran to. */
@@ -401,6 +406,22 @@ function formatRunTime(hhmm: string): string {
 const DASH = <span className="text-muted-foreground/30">—</span>;
 
 /** A label with its unit kept lower case: the label column is set in capitals, and "0.1 S" misreads. */
+/** What a racer calls each torque management part, by the part's name inside its channel. */
+const TORQUE_SHORT: Record<string, string> = {
+  timed: "Timed",
+  "engine rpm target error": "RPM err",
+  "driveshaft rpm target error": "DS err",
+  "engine rpm": "RPM err",
+  "driveshaft rpm": "DS err",
+  combined: "Total",
+};
+
+/** Timing first with the timed table leading and the total last, then the cuts. */
+function torqueOrder(x: { part: string; kind: TorquePart["kind"] }): number {
+  if (x.kind === "cut") return 3;
+  return /^timed$/i.test(x.part) ? 0 : /^combined$/i.test(x.part) ? 2 : 1;
+}
+
 function withUnit(name: string, unit: string) {
   return (
     <>
@@ -534,6 +555,8 @@ export function RunSheet({
           convSlip: preview?.slip ?? null,
           injectors: preview?.injectors ?? null,
           box: preview?.box ?? null,
+          torque: preview?.torque ?? null,
+          tmKnob: preview?.knobs?.find((k) => k.name === "Torque Management knob")?.value ?? null,
           anomalies: findAnomalies(
             {
               levels: preview?.levels ?? [],
@@ -1071,6 +1094,68 @@ export function RunSheet({
             return r ? <span style={dsStyles.get(after)?.(r.rpm)}>{Math.round(r.rpm)}</span> : DASH;
           },
         })),
+      });
+    }
+
+    // Torque management, part by part: how far each correction pulled or
+    // added timing and for how long, and how much power it cut. A row only
+    // appears when some pass here used it.
+    if (any((c) => c.torque ?? undefined)) {
+      type Side = "below" | "above";
+      const specs: { channel: string; part: string; kind: TorquePart["kind"]; side: Side }[] = [];
+      for (const c of cols) {
+        for (const t of c.torque ?? []) {
+          for (const side of ["below", "above"] as const) {
+            if (t[side] && !specs.some((x) => x.channel === t.channel && x.side === side)) {
+              specs.push({ channel: t.channel, part: t.part, kind: t.kind, side });
+            }
+          }
+        }
+      }
+      specs.sort((a, b) => torqueOrder(a) - torqueOrder(b) || a.part.localeCompare(b.part) || (a.side === "below" ? -1 : 1));
+      const sideOf = (c: Col, x: (typeof specs)[number]) => c.torque?.find((t) => t.channel === x.channel)?.[x.side] ?? undefined;
+      const knobStyle = spreadStyler(inc.map((c) => c.tmKnob ?? undefined));
+      out.push({
+        key: "torque",
+        title: "Torque Mgmt",
+        caption: true,
+        rows: [
+          ...(any((c) => c.tmKnob ?? undefined)
+            ? [
+                {
+                  key: "tm-knob",
+                  label: "Knob",
+                  cell: (c: Col) => (c.tmKnob === null ? DASH : <span style={knobStyle(c.tmKnob)}>{c.tmKnob}</span>),
+                },
+              ]
+            : []),
+          ...specs.map((x): Row => {
+            // More of it — a deeper pull, a bigger add, a harder cut — in amber.
+            const style = spreadStyler(inc.map((c) => (sideOf(c, x) ? Math.abs(sideOf(c, x)!.most) : undefined)));
+            const short = TORQUE_SHORT[x.part.toLowerCase()] ?? x.part;
+            const verb = x.kind === "cut" ? "cut" : x.side === "below" ? "pull" : "add";
+            const amount = (v: number) => (x.kind === "cut" ? `${v.toFixed(1)}%` : `${v > 0 ? "+" : ""}${v.toFixed(1)}°`);
+            const size = (v: number) => (x.kind === "cut" ? `${v.toFixed(1)}%` : `${Math.abs(v).toFixed(1)}°`);
+            const did = x.kind === "cut" ? ["Cut", "cutting"] : x.side === "below" ? ["Pulled", "pulling"] : ["Added", "adding"];
+            return {
+              key: `tm-${x.channel}-${x.side}`,
+              label: `${short} ${verb}`,
+              avg: { num: (c) => sideOf(c, x)?.most, fmt: amount },
+              cell: (c) => {
+                const v = sideOf(c, x);
+                if (!v) return DASH;
+                return (
+                  <Tip content={`${did[0]} up to ${size(v.most)} at ${v.at.toFixed(2)} s; ${did[1]} for ${v.for.toFixed(2)} s in all.`}>
+                    <span className="whitespace-nowrap">
+                      <span style={style(Math.abs(v.most))}>{amount(v.most)}</span>{" "}
+                      <span className="text-muted-foreground">{v.for.toFixed(2)}s</span>
+                    </span>
+                  </Tip>
+                );
+              },
+            };
+          }),
+        ],
       });
     }
 

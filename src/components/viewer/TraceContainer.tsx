@@ -26,7 +26,7 @@ import { api } from "../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { categoryLabels, legendLabels } from "@/lib/legend-labels";
+import { categoryLabels, legendLabels, rowLabel, rowLabels } from "@/lib/legend-labels";
 import { runLabels } from "@/lib/run-tags";
 import {
   DEFAULT_MARKER_TIMES,
@@ -53,6 +53,66 @@ export const TRACE_CHROME_PX = 40;
 
 /** Width of the docked channels panel once collapsed to its toggle. */
 const LEGEND_COLLAPSED_W = 22;
+
+/**
+ * Width of the channels panel docked beside a chart: as dragged, or sized to
+ * the value columns it shows. Shared so a panel that sits among the traces
+ * lines its plot up with theirs.
+ */
+export function dockedPanelWidth({
+  legendCollapsed,
+  legendWidth,
+  columns,
+}: {
+  legendCollapsed?: boolean;
+  legendWidth?: number;
+  columns: number;
+}): number {
+  if (legendCollapsed) return LEGEND_COLLAPSED_W;
+  if (legendWidth !== undefined) return legendWidth;
+  return Math.min(440, Math.max(200, 170 + columns * 56 + 28));
+}
+
+/**
+ * The grip on a channels panel's left edge. Every panel reads the same width,
+ * so dragging one moves the whole column together. The grip shows all the
+ * time: a hairline that only lit on hover went unfound.
+ */
+export function PanelResizeHandle({ width, onSetWidth }: { width: number; onSetWidth: (width: number) => void }) {
+  const onPointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const target = e.currentTarget;
+    // Capture keeps the drag alive past the handle's own bounds.
+    try { target.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      onSetWidth(Math.min(600, Math.max(LEGEND_MIN_W, width - (ev.clientX - startX))));
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      target.removeEventListener("pointermove", onMove);
+      target.removeEventListener("pointerup", onUp);
+      target.removeEventListener("pointercancel", onUp);
+    };
+    target.addEventListener("pointermove", onMove);
+    target.addEventListener("pointerup", onUp);
+    target.addEventListener("pointercancel", onUp);
+  };
+  return (
+    <Tip content="Drag to resize every channels panel" side="left">
+      <div
+        className="group absolute left-0 top-0 z-10 flex h-full w-2 cursor-col-resize items-center"
+        onPointerDown={onPointerDown}
+        style={{ touchAction: "none" }}
+      >
+        <div className="h-full w-px bg-transparent group-hover:bg-primary/40 group-active:bg-primary/60" />
+        <div className="absolute left-0.5 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-white/25 group-hover:bg-primary/70 group-active:bg-primary" />
+      </div>
+    </Tip>
+  );
+}
 
 /** Narrowest the panel can be dragged before the values stop fitting. */
 const LEGEND_MIN_W = 120;
@@ -816,10 +876,14 @@ export function TraceContainer({
     () =>
       Array.from(
         new Set(
-          trace.channels.map((c) => channelDisplayNames.get(c.channelName) ?? c.channelName),
+          trace.channels.map((c) => {
+            const shown = channelDisplayNames.get(c.channelName) ?? c.label;
+            const def = logs.find((l) => l.fileId === c.logFileId)?.parsed.channelDefs.find((d) => d.name === c.channelName);
+            return rowLabel({ label: shown ?? c.channelName, name: c.channelName, shortName: def?.shortName, own: shown !== undefined });
+          }),
         ),
       ).join(" · "),
-    [trace.channels, channelDisplayNames],
+    [trace.channels, channelDisplayNames, logs],
   );
 
   // Evaluate highlight zones
@@ -1181,6 +1245,7 @@ export function TraceContainer({
         return {
           chKey, ch, indent: multiLog, isLogHidden, isChHidden,
           group: def?.group,
+          shortName: def?.shortName,
           logName: log ? log.fileName.replace(/\.[^.]+$/, "") : "",
           logColor: log?.logColor ?? "#3b82f6",
           logIndex: log?.logIndex ?? 0,
@@ -1223,7 +1288,10 @@ export function TraceContainer({
     const channels = [...byName.entries()].map(([name, rows]) => ({
       // Grouped by the logged name; shown under the display name when the
       // channel has been renamed.
-      name: channelDisplayNames.get(name) ?? name,
+      name: channelDisplayNames.get(name) ?? rows[0].ch.label ?? name,
+      rawName: name,
+      own: channelDisplayNames.has(name) || rows[0].ch.label !== undefined,
+      shortName: rows.find((r) => r.shortName)?.shortName,
       // Stable log order, so a value sits in the same position in every group
       // even when one log is missing that channel.
       rows: [...rows].sort((a, b) => a.logIndex - b.logIndex),
@@ -1233,10 +1301,12 @@ export function TraceContainer({
     const groups = channels.map((c) => c.rows.find((r) => r.group)?.group);
     if (trace.groupByCategory) {
       const { order, labels } = categoryLabels(names, groups);
-      return order.map((idx, pos) => ({ ...channels[idx], ...labels[pos] }));
+      const shown = rowLabels(order.map((idx, pos) => ({ ...channels[idx], name: channels[idx].rawName, label: labels[pos].label })));
+      return order.map((idx, pos) => ({ ...channels[idx], ...labels[pos], label: shown[pos] }));
     }
     const labels = legendLabels(names, groups);
-    return channels.map((c, i) => ({ ...c, ...labels[i] }));
+    const shown = rowLabels(channels.map((c, i) => ({ ...c, name: c.rawName, label: labels[i].label })));
+    return channels.map((c, i) => ({ ...c, ...labels[i], label: shown[i] }));
   }, [legendGroups, channelDisplayNames, trace.groupByCategory]);
 
   /** The switch on a legend heading: every channel under it, on or off together. */
@@ -1286,13 +1356,10 @@ export function TraceContainer({
   // it, so the plot has to give up its width. Sized to the columns it actually
   // has to show: one value per run normally, four stats when a range is
   // selected. uPlot needs a number, so this is computed rather than measured.
-  const legendPanelWidth = (() => {
-    if (trace.channels.length === 0 || legendInHeader) return 0;
-    if (legendCollapsed) return LEGEND_COLLAPSED_W;
-    if (legendWidth !== undefined) return legendWidth;
-    const columns = avgRange ? 4 : Math.max(1, traceLogs.length);
-    return Math.min(440, Math.max(200, 170 + columns * 56 + 28));
-  })();
+  const legendPanelWidth =
+    trace.channels.length === 0 || legendInHeader
+      ? 0
+      : dockedPanelWidth({ legendCollapsed, legendWidth, columns: avgRange ? 4 : Math.max(1, traceLogs.length) });
 
   // Drag the panel's left edge. Every trace reads the same width, so the drag
   // reports live rather than on release and the whole column moves together.
@@ -1359,33 +1426,6 @@ export function TraceContainer({
     },
   });
 
-  const handleLegendResize = useCallback(
-    (e: React.PointerEvent<HTMLElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const startX = e.clientX;
-      const startW = legendPanelWidth;
-      const target = e.currentTarget;
-      // Capture keeps the drag alive past the handle's own bounds.
-      try { target.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
-      const onMove = (ev: PointerEvent) => {
-        if (ev.pointerId !== e.pointerId) return;
-        onSetLegendWidth?.(
-          Math.min(600, Math.max(LEGEND_MIN_W, startW - (ev.clientX - startX))),
-        );
-      };
-      const onUp = (ev: PointerEvent) => {
-        if (ev.pointerId !== e.pointerId) return;
-        target.removeEventListener("pointermove", onMove);
-        target.removeEventListener("pointerup", onUp);
-        target.removeEventListener("pointercancel", onUp);
-      };
-      target.addEventListener("pointermove", onMove);
-      target.addEventListener("pointerup", onUp);
-      target.addEventListener("pointercancel", onUp);
-    },
-    [legendPanelWidth, onSetLegendWidth],
-  );
   const chartWidth = Math.max(100, width - 8 - legendPanelWidth);
 
   const multiLogTrace = traceLogs.length > 1;
@@ -1735,13 +1775,7 @@ export function TraceContainer({
             onClick={(e) => e.stopPropagation()}
           >
             {!legendCollapsed && onSetLegendWidth && (
-              <Tip content="Drag to resize every channels panel" side="left">
-                <div
-                  className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize hover:bg-primary/40 active:bg-primary/60"
-                  onPointerDown={handleLegendResize}
-                  style={{ touchAction: "none" }}
-                />
-              </Tip>
+              <PanelResizeHandle width={legendPanelWidth} onSetWidth={onSetLegendWidth} />
             )}
             {/* The header is also the door channels come in through. Building a
                 trace is a different job from reading one, so it gets a door of
@@ -2062,18 +2096,27 @@ export function TraceContainer({
                           </div>
                         )}
                         {(() => {
-                          const names = rows.map(({ ch }) => channelDisplayNames.get(ch.channelName) ?? ch.channelName);
+                          const names = rows.map(({ ch }) => channelDisplayNames.get(ch.channelName) ?? ch.label ?? ch.channelName);
                           const groups = rows.map(({ group }) => group);
                           const { order, labels } = trace.groupByCategory
                             ? categoryLabels(names, groups)
                             : { order: rows.map((_, i) => i), labels: legendLabels(names, groups) };
                           const shown = order.map((i) => rows[i]);
+                          const rowText = rowLabels(
+                            shown.map((r, pos) => ({
+                              label: labels[pos].label,
+                              name: r.ch.channelName,
+                              shortName: r.shortName,
+                              own: channelDisplayNames.has(r.ch.channelName) || r.ch.label !== undefined,
+                            })),
+                          );
                           return shown.map(({ chKey, ch, indent, isChHidden, color, opacity, valueStr, unitLabel }, ri) => {
                           const isHovered = hoveredChannel === chKey;
                           const isDimmed = hoveredChannel !== null && !isHovered;
                           const shownName =
-                            channelDisplayNames.get(ch.channelName) ?? ch.channelName;
-                          const { heading, headingTitle, run, label, grouped } = labels[ri];
+                            channelDisplayNames.get(ch.channelName) ?? ch.label ?? ch.channelName;
+                          const { heading, headingTitle, run, grouped } = labels[ri];
+                          const label = rowText[ri];
                           return (
                             <Fragment key={chKey}>
                             {heading && (

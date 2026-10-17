@@ -32,7 +32,7 @@ const GRID_POINTS = 2000;
 const MARKER_TIME_COLORS = ["#f472b6", "#fb7185", "#fb923c", "#facc15", "#a3e635", "#34d399", "#22d3ee", "#60a5fa", "#a78bfa", "#e879f9"];
 /** Shift drops: one colour of their own, apart from the time markers. */
 const MARKER_SHIFT_COLOR = "#e5e7eb";
-const Y_AXIS_SIZE = 45;
+export const Y_AXIS_SIZE = 45;
 // Height (CSS px) of one timeslip zone's row in the bottom band. One row per
 // timeslip so two logs' slips stack instead of overprinting each other.
 const TIMESLIP_ROW_H = 16;
@@ -41,9 +41,10 @@ const TIMESLIP_ROW_H = 16;
 // axis) so they're directly comparable — e.g. all EGTs on one scale, engine +
 // driveshaft RPM on one scale. Returns the group id, or null for ungrouped.
 // Note: RPM matching is exact on purpose — there are many other channels
-// containing "RPM" (Idle Target RPM, Limiter RPM, TM Engine RPM…) that must NOT
-// be grouped with engine/driveshaft RPM.
-const SCALE_GROUP_LABELS: Record<string, string> = { egt: "EGT", rpm: "RPM", lambda: "Lambda" };
+// containing "RPM" (Idle Target RPM, Limiter RPM, TM Engine RPM Target Error…)
+// that must NOT be grouped with engine/driveshaft RPM. The torque management
+// RPM targets are the exception: they are what the RPM lines are chasing.
+const SCALE_GROUP_LABELS: Record<string, string> = { egt: "EGT", rpm: "RPM", lambda: "Lambda", boost: "Boost", "ign-corr": "Ignition correction" };
 
 // Near-flat channels in these unit families (pressures, temperatures,
 // voltage) get a minimum auto-scale span — a fraction of the channel's
@@ -57,7 +58,11 @@ const SPAN_FLOOR_FRAC = 0.12;
 function scaleGroupKey(name: string): string | null {
   const n = name.toLowerCase();
   if (n.includes("exhaust gas temp") || /^egt\b/.test(n)) return "egt";
-  if (name === "RPM" || name === "Driveshaft RPM") return "rpm";
+  // A target shares its scale with what it chases, so asked-for and got line up.
+  if (name === "RPM" || name === "Driveshaft RPM" || /RPM Target$/.test(name)) return "rpm";
+  if (name === "Manifold Pressure" || /^Boost Control Target Pressure\b/.test(name)) return "boost";
+  // Timing pulls and adds read against each other in degrees.
+  if (/Ignition Correction$/.test(name)) return "ign-corr";
   return null;
 }
 

@@ -13,7 +13,7 @@ import type { Tune, TuneMeta } from "./haltech-tune";
 import { QUANTITIES, resolveAlternate } from "./ecu/quantities";
 import type { UnitAlternate, UnitSystem } from "./ecu/types";
 
-interface Def {
+export interface Def {
   L?: string;
   /** Bit width; negative = signed. */
   t?: string;
@@ -92,7 +92,7 @@ export async function loadTuneDefs(meta: TuneMeta): Promise<TuneDefs | null> {
 
 // ── Decoding ──
 
-function readValues(hex: string | undefined, type: string | undefined): number[] {
+export function readValues(hex: string | undefined, type: string | undefined): number[] {
   if (!hex) return [];
   const bits = parseInt(type ?? "", 10) || 8;
   const bytes = Math.abs(bits) / 8;
@@ -111,7 +111,7 @@ function readValues(hex: string | undefined, type: string | undefined): number[]
   return out;
 }
 
-function dimsOf(d: string | undefined): [number, number, number] | null {
+export function dimsOf(d: string | undefined): [number, number, number] | null {
   const m = d?.match(/-?\d+/g);
   return m && m.length === 3 ? [Number(m[0]), Number(m[1]), Number(m[2])] : null;
 }
@@ -125,6 +125,11 @@ for (const q of Object.values(QUANTITIES)) {
 export interface UnitChoice {
   system: UnitSystem;
   overrides?: Record<string, string>;
+}
+
+/** The quantity a setting is held in, from its Haltech unit type. */
+export function quantityForUnitType(u: string | undefined): string | undefined {
+  return u ? slugByUnitType.get(u) : undefined;
 }
 
 function alternateFor(def: Def | undefined, units: UnitChoice): UnitAlternate | undefined {
@@ -580,7 +585,7 @@ const AREAS: { area: string; test: RegExp }[] = [
   { area: "Sensors & setup", test: /sensor|input|output|calibration|trigger|switch|engine$/i },
 ];
 
-export function changeArea(c: TuneChange): { area: string; rank: number } {
+export function changeArea(c: Pick<TuneChange, "name" | "group">): { area: string; rank: number } {
   // The group says it most reliably; the name catches what the tree files oddly.
   const where = [...c.group].reverse();
   for (const text of [...where, c.name]) {

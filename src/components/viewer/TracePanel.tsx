@@ -6,6 +6,8 @@ import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import type { ChannelUnitOverrides, UnitSystem, UnitOverrides } from "@/lib/units";
 import type { Id, Doc } from "../../../convex/_generated/dataModel";
 import { TraceContainer, TRACE_CHROME_PX } from "./TraceContainer";
+import { TimedStrips } from "./TimedStrips";
+import { TorquePanel } from "./TorquePanel";
 import { ScatterContainer } from "./ScatterContainer";
 import { ScatterConfigDialog } from "./ScatterConfigDialog";
 import { HeatmapContainer } from "./HeatmapContainer";
@@ -15,6 +17,8 @@ import { OverviewBar } from "./OverviewBar";
 import { PlusIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { inferPassWindow } from "@/lib/pass-window";
+import { TIMED_PAGE_ID, timedStrips } from "@/lib/timed-page";
+import { TORQUE_PAGE_ID } from "@/lib/torque-view";
 import { applyChannelSignalFilter, type ChannelSignalFilter } from "@/lib/signal-filter";
 
 // Arrow-key nudge for a parked marker line. Fine ≈ one sample at 100Hz.
@@ -30,6 +34,8 @@ interface Props {
   onRemovePage: (pageId: string) => void;
   onRenamePage: (pageId: string, label: string) => void;
   onSwitchPage: (pageId: string) => void;
+  /** Show another strip in the Timed tab's trace. */
+  onTimedFocus: (key: string) => void;
   onToggleTracePin: (traceId: string) => void;
   logs: LoadedLog[];
   syncKey: string;
@@ -114,6 +120,7 @@ export function TracePanel({
   onRemovePage,
   onRenamePage,
   onSwitchPage,
+  onTimedFocus,
   onToggleTracePin,
   logs,
   syncKey,
@@ -591,6 +598,10 @@ export function TracePanel({
     return expanded.length > 0 ? expanded[expanded.length - 1].id : null;
   }, [traces]);
 
+  // The Timed tab's strips sit above its one trace.
+  const timedPage = activePageId === TIMED_PAGE_ID ? pages.find((p) => p.id === TIMED_PAGE_ID) : undefined;
+  const strips = useMemo(() => (timedPage ? timedStrips(logs) : []), [timedPage, logs]);
+
   const maxYAxes = showAxes
     ? Math.max(1, ...traces.map(t => new Set(t.channels.map(c => c.channelName)).size))
     : undefined;
@@ -685,7 +696,10 @@ export function TracePanel({
         className="flex-1 overflow-y-auto overflow-x-hidden p-3 flex flex-col"
         onMouseLeave={() => setCursorTime(null)}
       >
-        {traces.length === 0 && scatters.length === 0 && heatmaps.length === 0 ? (
+        {activePageId === TORQUE_PAGE_ID ? (
+          // The Torque Mgmt tab is its own chart, given the whole height — pinned traces wait on the other tabs.
+          <TorquePanel logs={logs.filter((l) => !hiddenLogIds.includes(l.fileId))} />
+        ) : traces.length === 0 && scatters.length === 0 && heatmaps.length === 0 ? (
           <div
             className="flex items-center justify-center h-full text-sm text-muted-foreground"
             onDragEnter={handleBlankDragEnter}
@@ -705,6 +719,31 @@ export function TracePanel({
           </div>
         ) : (
           <>
+            {timedPage && (
+              <TimedStrips
+                strips={strips}
+                focus={timedPage.timedFocus}
+                onFocus={onTimedFocus}
+                logs={logs}
+                offsets={offsets}
+                hiddenLogIds={hiddenLogIds}
+                width={containerWidth - 24}
+                zoomRange={zoomRange}
+                globalRange={globalRange}
+                syncKey={syncKey}
+                cursorTime={effectiveCursorTime}
+                onCursorTime={handleCursorTime}
+                legendWidth={legendWidth}
+                legendCollapsed={legendCollapsed}
+                onSetLegendWidth={onSetLegendWidth}
+                statsColumns={avgOnSelection && !!selection && selection[0] !== selection[1]}
+                showAxes={showAxes}
+                maxYAxes={maxYAxes}
+                unitSystem={unitSystem}
+                unitOverrides={unitOverrides}
+                channelUnitOverrides={channelUnitOverrides}
+              />
+            )}
             {traces.map((trace, i) => (
               <TraceContainer
                 key={trace.id}

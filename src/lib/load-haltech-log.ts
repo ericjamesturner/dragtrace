@@ -1,10 +1,11 @@
 import type { Id } from "../../convex/_generated/dataModel";
 import { addComputedChannels } from "./computed-channels";
-import { parseDatalogBytes } from "./datalog-parser";
+import { fileExtension, parseDatalogBytes } from "./datalog-parser";
 import { enrichWithDefinitions } from "./ecu/enrich";
 import { DEFAULT_ECU_TYPE } from "./ecu/registry";
 import { detectRaceStartIndex } from "./haltech-parser";
 import type { LogSession, ParsedLog } from "./log-types";
+import { addTuneTimedChannels } from "./timed-tables";
 import { CHART_COLORS, type LoadedLog, type LogRecording } from "./viewer-types";
 
 // Seconds of data kept before the race start when opening a log.
@@ -193,6 +194,8 @@ export async function loadDatalog({
   const pass = passSessionIndex(source);
   const prepared = prepareLogRecordings(source);
   addComputedChannels(prepared.parsed);
+  // Only the .hlgzip carries the tune; an .hlg or a CSV is the log alone.
+  if (fileExtension(fileName) === "hlgzip") await addTuneTimedChannels(prepared.parsed, bytes);
 
   return {
     fileId,

@@ -37,6 +37,8 @@ import { RecordingPicker } from "./viewer/RecordingPicker";
 import { Share2Icon } from "lucide-react";
 import { fitPassWindow, inferPassWindow } from "@/lib/pass-window";
 import { HEALTH_PAGE_ID, buildHealthPage, clearHealthFocus, focusChannelNames, hasHealthPage, readHealthFocus, type HealthFocus } from "@/lib/health-focus";
+import { TIMED_PAGE_ID, TIMED_TRACE_ID, buildTimedPage, focusChannels, timedStrips } from "@/lib/timed-page";
+import { TORQUE_PAGE_ID, buildTorquePage } from "@/lib/torque-view";
 
 interface Props {
   vehicleId: Id<"vehicles">;
@@ -325,6 +327,41 @@ export function LogViewerReady({
     if (!wantedHealthPage || healthRemovedRef.current || hasHealthPage(config.pages, wantedHealthPage)) return;
     dispatch({ type: "upsertHealthPage", page: wantedHealthPage });
   }, [wantedHealthPage, config.pages]);
+
+  // The Timed tab: a strip for everything the tune runs off the launch clock
+  // and one trace for the strip picked, kept the same way as Health — topped
+  // up from each log's tune, never pruned.
+  const timedFocus = config.pages.find((p) => p.id === TIMED_PAGE_ID)?.timedFocus;
+  const wantedTimedPage = useMemo(
+    () => (publicMode ? null : buildTimedPage(logs, timedFocus)),
+    [publicMode, logs, timedFocus],
+  );
+  // The Torque Mgmt tab: torque management's cause and effect, drawn by its own panel.
+  const wantedTorquePage = useMemo(() => (publicMode ? null : buildTorquePage(logs)), [publicMode, logs]);
+  const torqueRemovedRef = useRef(false);
+  useEffect(() => {
+    if (!wantedTorquePage || torqueRemovedRef.current || config.pages.some((p) => p.id === TORQUE_PAGE_ID)) return;
+    dispatch({ type: "upsertHealthPage", page: wantedTorquePage });
+  }, [wantedTorquePage, config.pages]);
+  const handleTimedFocus = useCallback(
+    (key: string) => {
+      const strip = timedStrips(logs).find((s) => s.key === key);
+      if (!strip) return;
+      dispatch({
+        type: "setTimedFocus",
+        pageId: TIMED_PAGE_ID,
+        focus: key,
+        traceId: TIMED_TRACE_ID,
+        channels: focusChannels(strip, logs),
+      });
+    },
+    [logs],
+  );
+  const timedRemovedRef = useRef(false);
+  useEffect(() => {
+    if (!wantedTimedPage || timedRemovedRef.current || hasHealthPage(config.pages, wantedTimedPage)) return;
+    dispatch({ type: "upsertHealthPage", page: wantedTimedPage });
+  }, [wantedTimedPage, config.pages]);
 
   // A Health value clicked on the run sheet: go to the tab with just that
   // channel on. The switches it sets are saved like any; the marker and the
@@ -749,9 +786,12 @@ export function LogViewerReady({
               healthRemovedRef.current = true;
               closeHealth();
             }
+            if (pageId === TIMED_PAGE_ID) timedRemovedRef.current = true;
+            if (pageId === TORQUE_PAGE_ID) torqueRemovedRef.current = true;
             dispatch({ type: "removePage", pageId });
           }}
           onRenamePage={(pageId, label) => dispatch({ type: "renamePage", pageId, label })}
+          onTimedFocus={handleTimedFocus}
           onSwitchPage={(pageId) => {
             if (pageId !== HEALTH_PAGE_ID && healthFocus) closeHealth();
             dispatch({ type: "switchPage", pageId });

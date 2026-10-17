@@ -1,6 +1,7 @@
 import type { KnobReading, LaunchReading } from "./launch-readings";
 import type { BoxReading, DriveshaftReading, ShiftReading } from "./pass-readings";
 import type { BoostReading, CylinderGroup, FaultReading, InjectorReading, LimiterReading, PassLevel, SlipReading } from "./anomalies";
+import type { TorquePart } from "./torque-readings";
 
 /**
  * The precomputed shape of a pass, stored on the file when its dashboard
@@ -38,6 +39,8 @@ export interface PreviewPayload {
   slip?: SlipReading | null;
   injectors?: InjectorReading[] | null;
   box?: BoxReading | null;
+  /** What each torque management part did (stored from preview version 19). */
+  torque?: TorquePart[] | null;
 }
 
 export function parsePreview(raw: string | undefined | null): PreviewPayload | null {

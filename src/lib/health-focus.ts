@@ -127,7 +127,7 @@ export function buildHealthPage(logs: HealthLog[]): PageConfig | null {
   return traces.length ? { id: HEALTH_PAGE_ID, label: "Health", traces } : null;
 }
 
-/** Whether `config` already has every channel of `page` (so nothing needs adding). */
+/** Whether `config` already has every channel of `page` (so nothing needs adding). Works for any automatic tab. */
 export function hasHealthPage(pages: PageConfig[], page: PageConfig): boolean {
   const have = pages.find((p) => p.id === page.id);
   if (!have) return false;

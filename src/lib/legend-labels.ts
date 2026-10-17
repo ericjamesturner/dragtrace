@@ -213,3 +213,55 @@ export function categoryLabels(
   }
   return { order, labels };
 }
+
+/** The ECU's numbered slots a racer can name: "Generic Output 4", "Rotary Trim Module Position 1". */
+const SLOT = /^(Generic (Output|Sensor|Input)|Rotary Trim Module|Fuel Generic|Ignition Generic|Digital Input|Analog Input)\b/i;
+
+/**
+ * A racer's own name for a slot, which a log writes on either side of the
+ * ECU's: "Shifter (Generic Output 1 Table Output)" from NSP's log, "Generic
+ * Output 1 Out (Transbrake Button)" from its CSV export.
+ */
+export function racerLabel(name: string): string | null {
+  const m = /^(.+?) \((.+)\)$/.exec(name);
+  // "Generic Output 6 Table Output (tune)" is a replayed table, not a label.
+  if (!m || m[2] === "tune") return null;
+  if (SLOT.test(m[2])) return m[1];
+  if (SLOT.test(m[1])) return m[2];
+  return null;
+}
+
+/** One row's label, and what it can fall back on. */
+export interface RowName {
+  /** The label the row would show: its name, after any heading took its group's words off. */
+  label: string;
+  /** The channel's full name. */
+  name: string;
+  /** The ECU maker's own short name for it: "TrqMan ENG RPM Cut%", "MAP". */
+  shortName?: string;
+  /** The racer named it themselves: shown as they wrote it. */
+  own: boolean;
+}
+
+/**
+ * What a row shows. A name that fits stays whole; one that doesn't becomes
+ * the ECU maker's short name — the one their own software shows — and under
+ * a heading that already says the group, without the short name's group word:
+ * "TrqMan ENG RPM Cut%" under "Torque Management" is "ENG RPM Cut%". A
+ * racer's label for a slot ("Shifter") beats both.
+ */
+export function rowLabel(r: RowName): string {
+  if (r.own) return r.label;
+  const racer = racerLabel(r.name);
+  if (racer) return racer;
+  if (r.label.length <= FITS_CHARS || !r.shortName) return r.label;
+  const short = r.shortName.trim();
+  const words = short.split(/\s+/);
+  return r.label !== r.name && words.length > 1 ? words.slice(1).join(" ") : short;
+}
+
+/** Every row's label; two rows that would read the same keep their full labels, so they can be told apart. */
+export function rowLabels(rows: RowName[]): string[] {
+  const shown = rows.map(rowLabel);
+  return shown.map((s, i) => (shown.indexOf(s) !== shown.lastIndexOf(s) && s !== rows[i].label ? rows[i].label : s));
+}

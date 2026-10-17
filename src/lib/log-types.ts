@@ -1,3 +1,5 @@
+import type { TimedLane } from "./timed-tables";
+
 export interface ChannelDef {
   name: string;
   id: number;
@@ -53,4 +55,6 @@ export interface ParsedLog {
   metadata: Record<string, string>;
   channelDefs: ChannelDef[];
   sessions: LogSession[];
+  /** The tune's timed tables that act on this log, when the file carried a tune. */
+  timed?: TimedLane[];
 }
