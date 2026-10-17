@@ -72,7 +72,7 @@ function scaleGroupKey(name: string): string | null {
  * meaning "reset to full range". Shifts (rather than squashes) when one side
  * overshoots, preserving the requested span. Ported from halog clampRange.
  */
-function clampWheelRange(
+export function clampWheelRange(
   min: number,
   max: number,
   full: [number, number],
@@ -90,7 +90,7 @@ function clampWheelRange(
 }
 
 /** Convert a hex color + opacity (0-1) to an rgba() string. */
-function hexToRgba(hex: string, opacity: number): string {
+export function hexToRgba(hex: string, opacity: number): string {
   if (opacity >= 1) return hex;
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);

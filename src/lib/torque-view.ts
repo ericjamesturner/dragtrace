@@ -76,8 +76,6 @@ export interface TorqueView {
   knob: number | null;
   /** Most worked first. */
   controls: TorqueControl[];
-  /** Seconds after the launch worth showing: up to just after torque management lets go. */
-  window: [number, number];
 }
 
 /** Whether the log carries what the Torque Mgmt tab needs. */
@@ -122,26 +120,14 @@ export function readTorqueView(log: LoadedLog): TorqueView | null {
   if (controls.length === 0) return null;
   controls.sort((a, b) => b.activity - a.activity);
 
-  const timed = read(TIMED);
-  const total = read(COMBINED);
-  // Show up to half a second after the last thing torque management did.
-  let last = 0;
-  for (let i = 0; i < t.length; i++) {
-    if (t[i] < 0) continue;
-    const busy =
-      (timed && Math.abs(timed[i]) > 0.2) ||
-      controls.some((c) => (c.cut && c.cut[i] > 0.05) || (c.timing && Math.abs(c.timing[i]) > 0.2));
-    if (busy) last = t[i];
-  }
   const knobs = read(KNOB);
   const atLaunch = t.findIndex((x) => x >= 0);
   return {
     t,
-    timed,
-    total,
+    timed: read(TIMED),
+    total: read(COMBINED),
     knob: knobs && atLaunch >= 0 && Number.isFinite(knobs[atLaunch]) ? Math.round(knobs[atLaunch]) : null,
     controls,
-    window: [-0.3, Math.min(t[t.length - 1], Math.max(2.5, last + 0.5))],
   };
 }
 

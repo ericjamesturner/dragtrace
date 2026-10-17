@@ -123,12 +123,12 @@ const LEGEND_STATS_W = 380;
 /** Seconds kept either side of the run when zooming to the pass. */
 
 /** Trace-header switch: an icon and its name, lit when the overlay is drawn. */
-const HDR_PILL =
+export const HDR_PILL =
   "flex h-6 shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-md px-2 text-[11px] leading-none transition-colors";
 /** Icon-only version of the same control, square. */
 const HDR_ICON = "flex size-6 shrink-0 items-center justify-center rounded-md";
-const HDR_PILL_ON = "bg-primary/15 text-primary";
-const HDR_PILL_OFF = "text-muted-foreground hover:bg-foreground/10 hover:text-foreground";
+export const HDR_PILL_ON = "bg-primary/15 text-primary";
+export const HDR_PILL_OFF = "text-muted-foreground hover:bg-foreground/10 hover:text-foreground";
 
 const WIDTH_OPTIONS = [1, 1.5, 2.5, 4];
 const STYLE_OPTIONS: { label: string; dash: number[] | undefined }[] = [
@@ -217,7 +217,7 @@ const LEGEND_TIP_OFFSET = 28;
 // Race line defaults to dashed when unset, so "Solid" is an explicit [] (empty)
 // to distinguish it from "use default".
 /** Shared start of the long channel names below it, e.g. "Torque Management". */
-function LegendHeading({
+export function LegendHeading({
   text,
   title,
   toggle,

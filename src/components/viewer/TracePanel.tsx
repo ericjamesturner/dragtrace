@@ -598,6 +598,9 @@ export function TracePanel({
     return expanded.length > 0 ? expanded[expanded.length - 1].id : null;
   }, [traces]);
 
+  // The Torque Mgmt chart rebuilds when its logs change, so hand it the same list until they do.
+  const torqueLogs = useMemo(() => logs.filter((l) => !hiddenLogIds.includes(l.fileId)), [logs, hiddenLogIds]);
+
   // The Timed tab's strips sit above its one trace.
   const timedPage = activePageId === TIMED_PAGE_ID ? pages.find((p) => p.id === TIMED_PAGE_ID) : undefined;
   const strips = useMemo(() => (timedPage ? timedStrips(logs) : []), [timedPage, logs]);
@@ -698,7 +701,27 @@ export function TracePanel({
       >
         {activePageId === TORQUE_PAGE_ID ? (
           // The Torque Mgmt tab is its own chart, given the whole height — pinned traces wait on the other tabs.
-          <TorquePanel logs={logs.filter((l) => !hiddenLogIds.includes(l.fileId))} />
+          <TorquePanel
+            logs={torqueLogs}
+            width={containerWidth - 24}
+            offsets={offsets}
+            zoomRange={zoomRange}
+            globalRange={globalRange}
+            inferredPassWindow={inferredPassWindow}
+            syncKey={syncKey}
+            cursorTime={effectiveCursorTime}
+            onCursorTime={handleCursorTime}
+            onZoom={handleZoom}
+            onResetZoom={handleResetZoom}
+            timeslipZones={timeslipZones}
+            raceLine={raceLine}
+            wheelZoomEnabled={wheelZoomEnabled}
+            wheelZoomFactor={wheelZoomFactor}
+            wheelMode={wheelMode}
+            legendWidth={legendWidth}
+            legendCollapsed={legendCollapsed}
+            onSetLegendWidth={onSetLegendWidth}
+          />
         ) : traces.length === 0 && scatters.length === 0 && heatmaps.length === 0 ? (
           <div
             className="flex items-center justify-center h-full text-sm text-muted-foreground"
