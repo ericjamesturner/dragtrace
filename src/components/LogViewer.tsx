@@ -336,13 +336,30 @@ export function LogViewerReady({
     () => (publicMode ? null : buildTimedPage(logs, timedFocus)),
     [publicMode, logs, timedFocus],
   );
-  // The Torque Mgmt tab: torque management's cause and effect, drawn by its own panel.
-  const wantedTorquePage = useMemo(() => (publicMode ? null : buildTorquePage(logs)), [publicMode, logs]);
+  // The Torque Mgmt tab: torque management's cause and effect, as styled
+  // traces. A pinned trace already showing the RPM takes its target instead
+  // of the tab repeating the RPM — added once, when the tab is made or topped
+  // up, so taking it off again sticks.
+  const pinnedTraces = useMemo(
+    () => config.pages.filter((p) => p.id !== TORQUE_PAGE_ID).flatMap((p) => p.traces.filter((t) => t.pinned)),
+    [config.pages],
+  );
+  const wantedTorque = useMemo(
+    () => (publicMode ? { page: null, merges: [] } : buildTorquePage(logs, pinnedTraces)),
+    [publicMode, logs, pinnedTraces],
+  );
   const torqueRemovedRef = useRef(false);
   useEffect(() => {
-    if (!wantedTorquePage || torqueRemovedRef.current || config.pages.some((p) => p.id === TORQUE_PAGE_ID)) return;
-    dispatch({ type: "upsertHealthPage", page: wantedTorquePage });
-  }, [wantedTorquePage, config.pages]);
+    const { page, merges } = wantedTorque;
+    if (!page || torqueRemovedRef.current || hasHealthPage(config.pages, page)) return;
+    dispatch({ type: "upsertHealthPage", page });
+    for (const m of merges) {
+      const trace = pinnedTraces.find((t) => t.id === m.traceId);
+      if (trace?.channels.some((c) => c.logFileId === m.logFileId && c.channelName === m.target)) continue;
+      dispatch({ type: "addChannel", traceId: m.traceId, channel: { logFileId: m.logFileId, channelName: m.target, dash: [5, 4], color: "#a3a3a3" } });
+      dispatch({ type: "setChannelDraw", traceId: m.traceId, logFileId: m.logFileId, channelName: m.actual, draw: { fillTo: m.target } });
+    }
+  }, [wantedTorque, config.pages, pinnedTraces]);
   const handleTimedFocus = useCallback(
     (key: string) => {
       const strip = timedStrips(logs).find((s) => s.key === key);
@@ -830,6 +847,9 @@ export function LogViewerReady({
           }
           onSetChannelDash={(traceId, logFileId, channelName, dash) =>
             dispatch({ type: "setChannelDash", traceId, logFileId, channelName, dash })
+          }
+          onSetChannelDraw={(traceId, logFileId, channelName, draw) =>
+            dispatch({ type: "setChannelDraw", traceId, logFileId, channelName, draw })
           }
           onSetChannelAxisRange={(traceId, logFileId, channelName, axisMin, axisMax) =>
             dispatch({ type: "setChannelAxisRange", traceId, logFileId, channelName, axisMin, axisMax })

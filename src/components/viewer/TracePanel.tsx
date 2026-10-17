@@ -1,13 +1,12 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import type { ChannelMarkers } from "@/lib/channel-markers";
-import type { LoadedLog, TraceConfig, ChannelOnTrace, PageConfig, HighlightZoneConfig, ScatterConfig, HeatmapConfig, ScatterSuggestion } from "@/lib/viewer-types";
+import type { LoadedLog, TraceConfig, ChannelOnTrace, ChannelDraw, PageConfig, HighlightZoneConfig, ScatterConfig, HeatmapConfig, ScatterSuggestion } from "@/lib/viewer-types";
 import { MIN_TRACE_HEIGHT } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import type { ChannelUnitOverrides, UnitSystem, UnitOverrides } from "@/lib/units";
 import type { Id, Doc } from "../../../convex/_generated/dataModel";
 import { TraceContainer, TRACE_CHROME_PX } from "./TraceContainer";
 import { TimedStrips } from "./TimedStrips";
-import { TorquePanel } from "./TorquePanel";
 import { ScatterContainer } from "./ScatterContainer";
 import { ScatterConfigDialog } from "./ScatterConfigDialog";
 import { HeatmapContainer } from "./HeatmapContainer";
@@ -18,7 +17,6 @@ import { PlusIcon } from "lucide-react";
 import { Tip } from "@/components/ui/tooltip";
 import { inferPassWindow } from "@/lib/pass-window";
 import { TIMED_PAGE_ID, timedStrips } from "@/lib/timed-page";
-import { TORQUE_PAGE_ID } from "@/lib/torque-view";
 import { applyChannelSignalFilter, type ChannelSignalFilter } from "@/lib/signal-filter";
 
 // Arrow-key nudge for a parked marker line. Fine ≈ one sample at 100Hz.
@@ -74,6 +72,7 @@ interface Props {
   onSetChannelOpacity: (traceId: string, logFileId: Id<"files">, channelName: string, opacity: number) => void;
   onSetChannelWidth: (traceId: string, logFileId: Id<"files">, channelName: string, width: number) => void;
   onSetChannelDash: (traceId: string, logFileId: Id<"files">, channelName: string, dash: number[] | undefined) => void;
+  onSetChannelDraw: (traceId: string, logFileId: Id<"files">, channelName: string, draw: ChannelDraw) => void;
   onSetChannelAxisRange: (traceId: string, logFileId: Id<"files">, channelName: string, axisMin?: number, axisMax?: number) => void;
   onSetChannelSignalFilter: (traceId: string, logFileId: Id<"files">, channelName: string, signalFilter?: ChannelSignalFilter) => void;
   onSetChannelColorBy: (traceId: string, logFileId: Id<"files">, channelName: string, colorBy?: string, colorByMin?: number, colorByMax?: number, colorByLowColor?: string, colorByHighColor?: string) => void;
@@ -158,6 +157,7 @@ export function TracePanel({
   onSetChannelOpacity,
   onSetChannelWidth,
   onSetChannelDash,
+  onSetChannelDraw,
   onSetChannelAxisRange,
   onSetChannelSignalFilter,
   onSetChannelColorBy,
@@ -598,9 +598,6 @@ export function TracePanel({
     return expanded.length > 0 ? expanded[expanded.length - 1].id : null;
   }, [traces]);
 
-  // The Torque Mgmt chart rebuilds when its logs change, so hand it the same list until they do.
-  const torqueLogs = useMemo(() => logs.filter((l) => !hiddenLogIds.includes(l.fileId)), [logs, hiddenLogIds]);
-
   // The Timed tab's strips sit above its one trace.
   const timedPage = activePageId === TIMED_PAGE_ID ? pages.find((p) => p.id === TIMED_PAGE_ID) : undefined;
   const strips = useMemo(() => (timedPage ? timedStrips(logs) : []), [timedPage, logs]);
@@ -699,30 +696,7 @@ export function TracePanel({
         className="flex-1 overflow-y-auto overflow-x-hidden p-3 flex flex-col"
         onMouseLeave={() => setCursorTime(null)}
       >
-        {activePageId === TORQUE_PAGE_ID ? (
-          // The Torque Mgmt tab is its own chart, given the whole height — pinned traces wait on the other tabs.
-          <TorquePanel
-            logs={torqueLogs}
-            width={containerWidth - 24}
-            offsets={offsets}
-            zoomRange={zoomRange}
-            globalRange={globalRange}
-            inferredPassWindow={inferredPassWindow}
-            syncKey={syncKey}
-            cursorTime={effectiveCursorTime}
-            onCursorTime={handleCursorTime}
-            onZoom={handleZoom}
-            onResetZoom={handleResetZoom}
-            timeslipZones={timeslipZones}
-            raceLine={raceLine}
-            wheelZoomEnabled={wheelZoomEnabled}
-            wheelZoomFactor={wheelZoomFactor}
-            wheelMode={wheelMode}
-            legendWidth={legendWidth}
-            legendCollapsed={legendCollapsed}
-            onSetLegendWidth={onSetLegendWidth}
-          />
-        ) : traces.length === 0 && scatters.length === 0 && heatmaps.length === 0 ? (
+        {traces.length === 0 && scatters.length === 0 && heatmaps.length === 0 ? (
           <div
             className="flex items-center justify-center h-full text-sm text-muted-foreground"
             onDragEnter={handleBlankDragEnter}
@@ -843,6 +817,7 @@ export function TracePanel({
                 onSetChannelWidth={(logFileId, channelName, w) =>
                   onSetChannelWidth(trace.id, logFileId, channelName, w)
                 }
+                onSetChannelDraw={(logFileId, channelName, draw) => onSetChannelDraw(trace.id, logFileId, channelName, draw)}
                 onSetChannelDash={(logFileId, channelName, dash) =>
                   onSetChannelDash(trace.id, logFileId, channelName, dash)
                 }

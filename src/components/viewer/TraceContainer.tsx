@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useMemo, useRef, useState, useEffect } from "react";
 import { fitPassWindow } from "@/lib/pass-window";
-import type { LoadedLog, ChannelOnTrace, TraceConfig, HighlightZoneConfig } from "@/lib/viewer-types";
+import type { LoadedLog, ChannelOnTrace, ChannelDraw, ChannelStyle, TraceConfig, HighlightZoneConfig } from "@/lib/viewer-types";
 import { resolveChannelStyle, CHART_COLORS, MIN_TRACE_HEIGHT } from "@/lib/viewer-types";
 import type { Id, Doc } from "../../../convex/_generated/dataModel";
 import { TraceChart } from "./TraceChart";
@@ -123,14 +123,22 @@ const LEGEND_STATS_W = 380;
 /** Seconds kept either side of the run when zooming to the pass. */
 
 /** Trace-header switch: an icon and its name, lit when the overlay is drawn. */
-export const HDR_PILL =
+const HDR_PILL =
   "flex h-6 shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-md px-2 text-[11px] leading-none transition-colors";
 /** Icon-only version of the same control, square. */
 const HDR_ICON = "flex size-6 shrink-0 items-center justify-center rounded-md";
-export const HDR_PILL_ON = "bg-primary/15 text-primary";
-export const HDR_PILL_OFF = "text-muted-foreground hover:bg-foreground/10 hover:text-foreground";
+const HDR_PILL_ON = "bg-primary/15 text-primary";
+const HDR_PILL_OFF = "text-muted-foreground hover:bg-foreground/10 hover:text-foreground";
 
 const WIDTH_OPTIONS = [1, 1.5, 2.5, 4];
+
+const DRAW_OPTIONS: { style: ChannelStyle; label: string; tip: string }[] = [
+  { style: "line", label: "Line", tip: "A line, as usual" },
+  { style: "bars", label: "Bars", tip: "Bars from zero: up for plus, down for minus" },
+  { style: "barsDown", label: "Hanging", tip: "Bars hanging down from zero — for something that takes away, like a power cut" },
+];
+/** Below-zero colours that read as the other side: under target, timing put back. */
+const NEG_COLORS = ["#3b82f6", "#93c5fd", "#f59e0b", "#22c55e", "#ef4444", "#a3a3a3"];
 const STYLE_OPTIONS: { label: string; dash: number[] | undefined }[] = [
   { label: "Solid", dash: undefined },
   { label: "Dashed", dash: [7, 5] },
@@ -217,7 +225,7 @@ const LEGEND_TIP_OFFSET = 28;
 // Race line defaults to dashed when unset, so "Solid" is an explicit [] (empty)
 // to distinguish it from "use default".
 /** Shared start of the long channel names below it, e.g. "Torque Management". */
-export function LegendHeading({
+function LegendHeading({
   text,
   title,
   toggle,
@@ -666,6 +674,7 @@ interface Props {
   onSetChannelOpacity: (logFileId: Id<"files">, channelName: string, opacity: number) => void;
   onSetChannelWidth: (logFileId: Id<"files">, channelName: string, width: number) => void;
   onSetChannelDash: (logFileId: Id<"files">, channelName: string, dash: number[] | undefined) => void;
+  onSetChannelDraw: (logFileId: Id<"files">, channelName: string, draw: ChannelDraw) => void;
   onSetChannelAxisRange: (logFileId: Id<"files">, channelName: string, axisMin?: number, axisMax?: number) => void;
   onSetChannelSignalFilter: (logFileId: Id<"files">, channelName: string, signalFilter?: ChannelSignalFilter) => void;
   onSetChannelColorBy: (logFileId: Id<"files">, channelName: string, colorBy?: string, colorByMin?: number, colorByMax?: number, colorByLowColor?: string, colorByHighColor?: string) => void;
@@ -753,6 +762,7 @@ export function TraceContainer({
   onSetChannelOpacity,
   onSetChannelWidth,
   onSetChannelDash,
+  onSetChannelDraw,
   onSetChannelAxisRange,
   onSetChannelSignalFilter,
   onSetChannelColorBy,
@@ -1077,9 +1087,12 @@ export function TraceContainer({
         const existing = ranges.get(ch.channelName);
         let min = existing?.[0] ?? Infinity;
         let max = existing?.[1] ?? -Infinity;
+        // A target reading zero is switched off (the chart leaves it undrawn), so it sets no scale.
+        const isTarget = logChannels.some((c) => c.fillTo === ch.channelName);
         for (let j = 0; j < data.length; j++) {
           const v = data[j];
           if (v !== v) continue; // NaN
+          if (isTarget && v === 0) continue;
           if (v < min) min = v;
           if (v > max) max = v;
         }
@@ -2529,6 +2542,87 @@ export function TraceContainer({
                         );
                       })}
                     </div>
+                  </div>
+
+                  {/* How it draws: a line, bars from zero, or bars hanging
+                      down for something that takes away — and the channel it
+                      chases or stacks on. */}
+                  <div>
+                    <div className={`${fieldLabel} mb-1.5`}>Draw as</div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {DRAW_OPTIONS.map((o) => (
+                        <button
+                          key={o.style}
+                          title={o.tip}
+                          onClick={() => onSetChannelDraw(contextMenu.logFileId, contextMenu.channelName, { style: o.style === "line" ? undefined : o.style })}
+                          className={`${segBtn} text-xs ${(cmCh?.style ?? "line") === o.style ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}
+                        >
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+                    {cmCh?.style && cmCh.style !== "line" && (
+                      <div className="mt-2 flex items-center gap-1.5">
+                        <span className={`${fieldLabel} mr-1`}>Below zero</span>
+                        {NEG_COLORS.map((c) => (
+                          <button
+                            key={c}
+                            title={c}
+                            onClick={() => onSetChannelDraw(contextMenu.logFileId, contextMenu.channelName, { colorNeg: c })}
+                            className={`size-5 cursor-pointer rounded border ${cmCh.colorNeg === c ? "border-foreground" : "border-white/10"}`}
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                        <button
+                          title="Same colour both ways"
+                          onClick={() => onSetChannelDraw(contextMenu.logFileId, contextMenu.channelName, { colorNeg: undefined })}
+                          className="size-5 cursor-pointer rounded-full border border-white/30 text-[11px] leading-none text-muted-foreground hover:text-foreground"
+                        >
+                          ↺
+                        </button>
+                      </div>
+                    )}
+                    {(() => {
+                      const others = trace.channels.filter(
+                        (c) => (c.logFileId as string) === (contextMenu.logFileId as string) && c.channelName !== contextMenu.channelName,
+                      );
+                      const barOthers = others.filter((c) => c.style === "bars" || c.style === "barsDown");
+                      const select = "h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-1.5 text-xs";
+                      return (
+                        <>
+                          {others.length > 0 && (
+                            <label className="mt-2 flex items-center gap-2" title="Fill the gap to the channel this one chases: red where it runs above, blue below.">
+                              <span className={`${fieldLabel} w-16 shrink-0`}>Fill gap to</span>
+                              <select
+                                className={select}
+                                value={cmCh?.fillTo ?? ""}
+                                onChange={(e) => onSetChannelDraw(contextMenu.logFileId, contextMenu.channelName, { fillTo: e.target.value || undefined })}
+                              >
+                                <option value="">Nothing</option>
+                                {others.map((c) => (
+                                  <option key={c.channelName} value={c.channelName}>{c.label ?? c.channelName}</option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                          {cmCh?.style && cmCh.style !== "line" && barOthers.length > 0 && (
+                            <label className="mt-2 flex items-center gap-2" title="Stack these bars on another channel's, where both point the same way.">
+                              <span className={`${fieldLabel} w-16 shrink-0`}>Stack on</span>
+                              <select
+                                className={select}
+                                value={cmCh.stackOn ?? ""}
+                                onChange={(e) => onSetChannelDraw(contextMenu.logFileId, contextMenu.channelName, { stackOn: e.target.value || undefined })}
+                              >
+                                <option value="">Nothing</option>
+                                {barOthers.map((c) => (
+                                  <option key={c.channelName} value={c.channelName}>{c.label ?? c.channelName}</option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
 
                   <div>

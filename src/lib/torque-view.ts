@@ -1,5 +1,4 @@
-import type { LoadedLog } from "./viewer-types";
-import type { PageConfig } from "./viewer-types";
+import type { LoadedLog, PageConfig, TraceConfig } from "./viewer-types";
 
 /**
  * What torque management did through a pass, laid out for the Torque Mgmt
@@ -131,7 +130,60 @@ export function readTorqueView(log: LoadedLog): TorqueView | null {
   };
 }
 
-/** The tab itself: a page of its own, drawn by the Torque Mgmt panel rather than traces. */
-export function buildTorquePage(logs: Pick<LoadedLog, "parsed">[]): PageConfig | null {
-  return logs.some(hasTorqueView) ? { id: TORQUE_PAGE_ID, label: "Torque Mgmt", traces: [] } : null;
+/** The Torque Mgmt tab's traces, by fixed id so a newly loaded log tops them up. */
+const TRACE = { rpm: "tm-rpm", error: "tm-error", cut: "tm-cut", timing: "tm-timing", timed: "tm-timed" } as const;
+
+/**
+ * The tab: traces read top to bottom as cause and effect — the RPM against
+ * its target with the gap filled, how far over or under it ran as bars
+ * around zero, then what that does: the power cut hanging down and the
+ * timing pulled or put back for it. Last, the timed pull, which runs by time
+ * alone whatever the RPM does, on a trace of its own. Each log brings the
+ * control torque management worked on most. The first run gets the tab's
+ * colours; later runs take the usual palette so they can be told apart.
+ * Heights are fit weights, sharing the space the way the parts need it.
+ */
+export interface TorqueMerge {
+  /** The pinned trace that already shows the RPM. */
+  traceId: string;
+  logFileId: LoadedLog["fileId"];
+  actual: string;
+  target: string;
+}
+
+export function buildTorquePage(logs: LoadedLog[], pinned: TraceConfig[]): { page: PageConfig | null; merges: TorqueMerge[] } {
+  const traces: Record<keyof typeof TRACE, TraceConfig["channels"]> = { rpm: [], error: [], cut: [], timing: [], timed: [] };
+  const merges: TorqueMerge[] = [];
+  let first = true;
+  for (const log of logs) {
+    if (!hasTorqueView(log)) continue;
+    const view = readTorqueView(log);
+    const kind = view?.controls[0]?.kind ?? "engine";
+    const c = CONTROLS.find((x) => x.kind === kind)!;
+    const names = new Set(log.parsed.channelDefs.map((d) => d.name));
+    const has = (n: string) => names.has(n);
+    const colour = (hex: string) => (first ? { color: hex } : {});
+    const fileId = log.fileId;
+    // A pinned trace that already shows the RPM takes the target, rather
+    // than the tab showing the same RPM twice.
+    const pinnedWithActual = pinned.find((t) => t.channels.some((ch) => ch.logFileId === fileId && ch.channelName === c.actual));
+    if (has(c.actual) && has(c.target) && pinnedWithActual) {
+      merges.push({ traceId: pinnedWithActual.id, logFileId: fileId, actual: c.actual, target: c.target });
+    } else if (has(c.actual) && has(c.target)) {
+      traces.rpm.push({ logFileId: fileId, channelName: c.actual, fillTo: c.target, ...colour("#e5e5e5") });
+      traces.rpm.push({ logFileId: fileId, channelName: c.target, dash: [5, 4], ...colour("#a3a3a3") });
+    }
+    if (has(c.error)) {
+      traces.error.push({ logFileId: fileId, channelName: c.error, style: "bars", colorNeg: "#3b82f6", axisMin: -500, axisMax: 500, ...colour("#ef4444") });
+    }
+    if (has(c.cut)) traces.cut.push({ logFileId: fileId, channelName: c.cut, style: "barsDown", ...colour("#f97316") });
+    if (has(c.timing)) traces.timing.push({ logFileId: fileId, channelName: c.timing, style: "bars", colorNeg: "#93c5fd", ...colour("#f59e0b") });
+    if (has(TIMED)) traces.timed.push({ logFileId: fileId, channelName: TIMED, style: "bars", ...colour("#3b82f6") });
+    first = false;
+  }
+  const weights: Record<keyof typeof TRACE, number> = { rpm: 300, error: 140, cut: 125, timing: 140, timed: 160 };
+  const out = (Object.keys(TRACE) as (keyof typeof TRACE)[])
+    .filter((k) => traces[k].length > 0)
+    .map((k) => ({ id: TRACE[k], channels: traces[k], height: weights[k] }));
+  return { page: out.length ? { id: TORQUE_PAGE_ID, label: "Torque Mgmt", traces: out } : null, merges };
 }

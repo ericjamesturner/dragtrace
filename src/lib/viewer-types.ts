@@ -113,7 +113,24 @@ export interface ChannelOnTrace {
   colorByHighColor?: string;
   /** Automatic markers on the line: values after launch, shift drops. */
   markers?: ChannelMarkers;
+  /**
+   * How the channel draws. A line, the default; bars from zero, up for plus
+   * and down for minus; or bars hanging down from zero on a flipped scale,
+   * for something that takes away — a power cut reads as falling, not rising.
+   */
+  style?: ChannelStyle;
+  /** Bar colour below zero, when it means something else: under target, timing put back. */
+  colorNeg?: string;
+  /** A channel on the same trace this one chases: the gap between them is filled, red above and blue below. */
+  fillTo?: string;
+  /** A bar channel on the same trace to stack on, where both point the same way. */
+  stackOn?: string;
 }
+
+export type ChannelStyle = "line" | "bars" | "barsDown";
+
+/** The drawing options a channel can change in one go. */
+export type ChannelDraw = Pick<ChannelOnTrace, "style" | "colorNeg" | "fillTo" | "stackOn">;
 
 export interface HighlightZoneConfig {
   id: string;
@@ -303,6 +320,7 @@ export type ViewerAction =
   | { type: "setChannelOpacity"; traceId: string; logFileId: Id<"files">; channelName: string; opacity: number }
   | { type: "setChannelWidth"; traceId: string; logFileId: Id<"files">; channelName: string; width: number }
   | { type: "setChannelDash"; traceId: string; logFileId: Id<"files">; channelName: string; dash: number[] | undefined }
+  | { type: "setChannelDraw"; traceId: string; logFileId: Id<"files">; channelName: string; draw: ChannelDraw }
   | { type: "setChannelAxisRange"; traceId: string; logFileId: Id<"files">; channelName: string; axisMin?: number; axisMax?: number }
   | { type: "setChannelSignalFilter"; traceId: string; logFileId: Id<"files">; channelName: string; signalFilter?: ChannelSignalFilter }
   | { type: "toggleLogVisibility"; logFileId: Id<"files"> }
@@ -737,6 +755,14 @@ export function viewerReducer(state: ViewerConfig, action: ViewerAction): Viewer
           (c) => ({ ...c, dash: action.dash }),
         ),
       };
+    case "setChannelDraw":
+      return {
+        ...state,
+        pages: mapChannelInPages(
+          state.pages, action.traceId, action.logFileId, action.channelName,
+          (c) => ({ ...c, ...action.draw }),
+        ),
+      };
     case "setChannelAxisRange":
       return {
         ...state,
@@ -1055,7 +1081,10 @@ export function getPinnedFromOtherIds(config: ViewerConfig): Set<string> {
 /**
  * Migrate a saved config from the old flat-traces format to the pages format.
  */
-/** Strip stale color overrides from channels — the palette now handles colors. */
+/**
+ * Strip color overrides from channels carried over from the old flat format —
+ * the palette handles those. A color picked since is the racer's and stays.
+ */
 function stripStaleColors(pages: PageConfig[]): PageConfig[] {
   return pages.map((p) => ({
     ...p,
@@ -1245,7 +1274,7 @@ export function migrateConfig(raw: Record<string, unknown>): ViewerConfig {
     const config = raw as unknown as ViewerConfig;
     return seedTimeslipTraces(
       liftTimeWindow(
-        homeLegends(applyChannelRenames({ ...config, pages: stripStaleColors(config.pages) })),
+        homeLegends(applyChannelRenames(config)),
       ),
     );
   }

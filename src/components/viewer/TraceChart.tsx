@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
 import { buildSelectionCsv } from "@/lib/csv-export";
 import "uplot/dist/uPlot.min.css";
-import { resolveChannelStyle } from "@/lib/viewer-types";
+import { resolveChannelStyle, type ChannelStyle } from "@/lib/viewer-types";
 import type { ChannelOnTrace, LoadedLog } from "@/lib/viewer-types";
 import type { EvaluatedZone } from "@/hooks/useEvaluatedZones";
 import {
@@ -72,7 +72,7 @@ function scaleGroupKey(name: string): string | null {
  * meaning "reset to full range". Shifts (rather than squashes) when one side
  * overshoots, preserving the requested span. Ported from halog clampRange.
  */
-export function clampWheelRange(
+function clampWheelRange(
   min: number,
   max: number,
   full: [number, number],
@@ -90,7 +90,7 @@ export function clampWheelRange(
 }
 
 /** Convert a hex color + opacity (0-1) to an rgba() string. */
-export function hexToRgba(hex: string, opacity: number): string {
+function hexToRgba(hex: string, opacity: number): string {
   if (opacity >= 1) return hex;
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
@@ -358,7 +358,7 @@ export function TraceChart({
   // Build a stable key for dependencies
   const groupsKey = logGroups
     .map((g) =>
-      `${g.log.fileId}:${g.timeOffset}:${g.channels.map((c) => `${c.channelName}:${channelUnitOverrides?.[c.channelName] ?? ""}:${c.color ?? ""}:${c.opacity ?? ""}:${c.width ?? ""}:${(c.dash ?? []).join(".")}:${c.axisMin ?? ""}:${c.axisMax ?? ""}:${c.signalFilter?.kind ?? ""}:${c.signalFilter?.timeConstantMs ?? ""}:${c.colorBy ?? ""}:${c.colorBy ? channelUnitOverrides?.[c.colorBy] ?? "" : ""}:${c.colorByMin ?? ""}:${c.colorByMax ?? ""}:${c.colorByLowColor ?? ""}:${c.colorByHighColor ?? ""}`).join(",")}`
+      `${g.log.fileId}:${g.timeOffset}:${g.channels.map((c) => `${c.channelName}:${channelUnitOverrides?.[c.channelName] ?? ""}:${c.color ?? ""}:${c.opacity ?? ""}:${c.width ?? ""}:${(c.dash ?? []).join(".")}:${c.axisMin ?? ""}:${c.axisMax ?? ""}:${c.signalFilter?.kind ?? ""}:${c.signalFilter?.timeConstantMs ?? ""}:${c.colorBy ?? ""}:${c.colorBy ? channelUnitOverrides?.[c.colorBy] ?? "" : ""}:${c.colorByMin ?? ""}:${c.colorByMax ?? ""}:${c.colorByLowColor ?? ""}:${c.colorByHighColor ?? ""}:${c.style ?? ""}:${c.colorNeg ?? ""}:${c.fillTo ?? ""}:${c.stackOn ?? ""}`).join(",")}`
     )
     .join("|");
 
@@ -411,6 +411,11 @@ export function TraceChart({
       colorByHighColor?: string;
       colorByMin?: number;
       colorByMax?: number;
+      logFileId: string;
+      style?: ChannelStyle;
+      colorNeg?: string;
+      fillTo?: string;
+      stackOn?: string;
     }
     const seriesData: (number | null)[][] = [];
     const seriesMeta: SeriesMeta[] = [];
@@ -431,6 +436,14 @@ export function TraceChart({
       shifts: ShiftMarker[];
     }[] = [];
 
+    // A target reads zero while the function it belongs to is off — before
+    // the launch, say — and that isn't a speed to chase: leave it undrawn.
+    // Blanked before resampling, so the grid never blends zero into the first
+    // real target and draws a spike at the launch.
+    const fillTargets = new Set(
+      logGroups.flatMap((g) => g.channels.filter((c) => c.fillTo).map((c) => `${c.logFileId}:${c.fillTo}`)),
+    );
+
     for (const group of logGroups) {
       const session = group.log.parsed.sessions[group.log.activeSessionIndex];
       if (!session) continue;
@@ -439,11 +452,14 @@ export function TraceChart({
         const ch = group.channels[chIdx];
         const rawData = session.channels.get(ch.channelName);
         if (!rawData) continue;
-        const data = applyChannelSignalFilter(
+        const filtered = applyChannelSignalFilter(
           session.timestamps,
           rawData,
           ch.signalFilter,
         );
+        const data = fillTargets.has(`${ch.logFileId}:${ch.channelName}`)
+          ? filtered.map((v) => (v === 0 ? NaN : v))
+          : filtered;
 
         const resampled = resampleToGrid(session.timestamps, data, group.timeOffset, gridTs);
         seriesData.push(resampled);
@@ -494,6 +510,11 @@ export function TraceChart({
           colorByHighColor: ch.colorByHighColor,
           colorByMin: ch.colorByMin,
           colorByMax: ch.colorByMax,
+          logFileId: ch.logFileId as string,
+          style: ch.style,
+          colorNeg: ch.colorNeg,
+          fillTo: ch.fillTo,
+          stackOn: ch.stackOn,
         });
       }
     }
@@ -501,6 +522,38 @@ export function TraceChart({
     if (seriesMeta.length === 0) return;
 
     const plotData = [gridTs, ...seriesData] as uPlot.AlignedData;
+
+    // Bars stand on zero, or on the bar they stack on where both point the
+    // same way. Worked out before the scales, which make room for the tops.
+    const isBars = (m: SeriesMeta) => m.style === "bars" || m.style === "barsDown";
+    const indexByKey = new Map(seriesMeta.map((m, i) => [m.key, i]));
+    const partnerIndex = (m: SeriesMeta, name: string | undefined) =>
+      name ? indexByKey.get(`${m.logFileId}:${name}`) : undefined;
+    const barBase: ((number | null)[] | null)[] = seriesMeta.map(() => null);
+    const barTop: ((number | null)[] | null)[] = seriesMeta.map(() => null);
+    const stack = (i: number, seen: Set<number>) => {
+      if (barTop[i] || !isBars(seriesMeta[i])) return;
+      seen.add(i);
+      const j = partnerIndex(seriesMeta[i], seriesMeta[i].stackOn);
+      const on = j !== undefined && !seen.has(j) && isBars(seriesMeta[j]) ? j : undefined;
+      if (on !== undefined) stack(on, seen);
+      const under = on !== undefined ? barTop[on] : null;
+      const own = seriesData[i];
+      const base = own.map((v, k) => {
+        const u = under?.[k];
+        return v != null && u != null && Math.sign(u) === Math.sign(v) ? u : 0;
+      });
+      barBase[i] = base;
+      barTop[i] = own.map((v, k) => (v == null ? null : base[k]! + v));
+    };
+    seriesMeta.forEach((_, i) => stack(i, new Set()));
+    // A target shares the scale of what chases it, and a stacked bar the
+    // scale of the bar under it, so the gap and the stack read true.
+    const scaleLead = new Map<string, string>();
+    for (const m of seriesMeta) {
+      if (m.fillTo) scaleLead.set(m.fillTo, m.channelName);
+      if (m.stackOn && isBars(m)) scaleLead.set(m.channelName, m.stackOn);
+    }
 
     // Build uPlot config
     const series: uPlot.Series[] = [{}]; // x-series
@@ -556,9 +609,10 @@ export function TraceChart({
     }
 
     const scaleIdOf = (channelName: string) => {
-      const g = groupIdOf(channelName);
-      const base = g ? `g_${g}` : channelName;
-      return `${base}:${resolvedUnitKeyByChannel.get(channelName) ?? ""}`;
+      const lead = scaleLead.get(channelName) ?? channelName;
+      const g = groupIdOf(lead);
+      const base = g ? `g_${g}` : lead;
+      return `${base}:${resolvedUnitKeyByChannel.get(lead) ?? ""}`;
     };
 
     const scaleKeyById = new Map<string, string>(); // scaleId -> "y0"/"y1"…
@@ -615,6 +669,22 @@ export function TraceChart({
         if (crossChart[0] < autoMin) autoMin = crossChart[0];
         if (crossChart[1] > autoMax) autoMax = crossChart[1];
       }
+      // Bars stand on zero, and a stack reaches as far as its top.
+      const scaleMembers = channelsInScale.get(scaleId) ?? [];
+      let hasBars = false;
+      let hangs = false;
+      seriesMeta.forEach((m, i) => {
+        if (!isBars(m) || !scaleMembers.includes(m.channelName)) return;
+        hasBars = true;
+        if (m.style === "barsDown") hangs = true;
+        autoMin = Math.min(autoMin, 0);
+        autoMax = Math.max(autoMax, 0);
+        for (const v of barTop[i] ?? []) {
+          if (v == null) continue;
+          if (v < autoMin) autoMin = v;
+          if (v > autoMax) autoMax = v;
+        }
+      });
       if (autoMin === Infinity) { autoMin = 0; autoMax = 1; }
       // Minimum-span floor for calm sensor families (see SPAN_FLOOR_UNITS)
       if (manualMin === undefined && manualMax === undefined) {
@@ -658,10 +728,14 @@ export function TraceChart({
         if (autoMin >= bounds[0]) paddedMin = Math.max(paddedMin, bounds[0]);
         if (autoMax <= bounds[1]) paddedMax = Math.min(paddedMax, bounds[1]);
       }
+      // Bars that only go one way sit right on the edge, with no air under zero.
+      if (hasBars && autoMin === 0) paddedMin = 0;
+      if (hasBars && autoMax === 0) paddedMax = 0;
       const lo = manualMin ?? paddedMin;
       const hi = manualMax ?? paddedMax;
       scaleRangeByKey.set(scaleKey, [lo, hi]);
-      scales[scaleKey] = { range: () => [lo, hi] };
+      // Hanging bars: the scale runs top-down, so more reads as further down.
+      scales[scaleKey] = { range: () => [lo, hi], ...(hangs ? { dir: -1 as const } : {}) };
     }
 
     // Report the resolved per-channel ranges so axis editors can show what
@@ -699,15 +773,17 @@ export function TraceChart({
       const scaleKey = scaleKeyById.get(scaleId)!;
 
       const isColorBy = !!(meta.colorBy && meta.colorByVals);
+      const drawnByPlugin = isColorBy || isBars(meta);
       series.push({
         label: meta.channelName,
-        stroke: isColorBy ? "transparent" : hexToRgba(meta.color, meta.opacity),
+        stroke: drawnByPlugin ? "transparent" : hexToRgba(meta.color, meta.opacity),
         width: meta.width,
         scale: scaleKey,
         spanGaps: false,
         dash: meta.dash,
-        // Suppress uPlot's own line; the gradient is painted by the draw plugin.
-        ...(isColorBy ? { paths: (() => null) as unknown as uPlot.Series.PathBuilder } : {}),
+        // Suppress uPlot's own line; the gradient or the bars are painted by a draw plugin.
+        ...(drawnByPlugin ? { paths: (() => null) as unknown as uPlot.Series.PathBuilder } : {}),
+        ...(isBars(meta) ? { points: { show: false } } : {}),
       });
 
       if (!addedScales.has(scaleKey)) {
@@ -770,8 +846,75 @@ export function TraceChart({
       }
     }
 
-    // Race start marker plugin
     const plugins: uPlot.Plugin[] = [];
+
+    // Target fills, zero lines and bars — drawn first, so lines sit on top.
+    const fills = seriesMeta
+      .map((m, i) => ({ i, j: partnerIndex(m, m.fillTo) }))
+      .filter((f): f is { i: number; j: number } => f.j !== undefined && f.j !== f.i);
+    const bars = seriesMeta.map((m, i) => ({ m, i })).filter(({ m }) => isBars(m));
+    if (fills.length > 0 || bars.length > 0) {
+      plugins.push({
+        hooks: {
+          drawClear: [
+            (u: uPlot) => {
+              const ctx = u.ctx;
+              const { left, top, width: w, height: h } = u.bbox;
+              const step = Math.max(1, u.valToPos(gridTs[1], "x", true) - u.valToPos(gridTs[0], "x", true));
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(left, top, w, h);
+              ctx.clip();
+              for (const { i, j } of fills) {
+                const key = u.series[i + 1].scale!;
+                const a = seriesData[i];
+                const b = seriesData[j];
+                for (let k = 0; k < gridTs.length; k++) {
+                  const va = a[k];
+                  const vb = b[k];
+                  if (va == null || vb == null) continue;
+                  const ya = u.valToPos(va, key, true);
+                  const yb = u.valToPos(vb, key, true);
+                  ctx.fillStyle = va > vb ? "rgba(239,68,68,0.4)" : "rgba(59,130,246,0.22)";
+                  ctx.fillRect(u.valToPos(gridTs[k], "x", true) - step / 2, Math.min(ya, yb), step + 0.5, Math.abs(ya - yb));
+                }
+              }
+              const zeroed = new Set<string>();
+              for (const { m, i } of bars) {
+                const key = u.series[i + 1].scale!;
+                if (!zeroed.has(key)) {
+                  zeroed.add(key);
+                  const y0 = u.valToPos(0, key, true);
+                  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+                  ctx.lineWidth = devicePixelRatio;
+                  ctx.beginPath();
+                  ctx.moveTo(left, y0);
+                  ctx.lineTo(left + w, y0);
+                  ctx.stroke();
+                }
+                const pos = hexToRgba(m.color, m.opacity * 0.85);
+                const neg = hexToRgba(m.colorNeg ?? m.color, m.opacity * 0.85);
+                const base = barBase[i]!;
+                const tops = barTop[i]!;
+                const own = seriesData[i];
+                for (let k = 0; k < gridTs.length; k++) {
+                  const v = own[k];
+                  const t = tops[k];
+                  if (v == null || t == null || v === 0) continue;
+                  const y0 = u.valToPos(base[k] ?? 0, key, true);
+                  const y1 = u.valToPos(t, key, true);
+                  ctx.fillStyle = v > 0 ? pos : neg;
+                  ctx.fillRect(u.valToPos(gridTs[k], "x", true) - step / 2, Math.min(y0, y1), step + 0.5, Math.abs(y1 - y0));
+                }
+              }
+              ctx.restore();
+            },
+          ],
+        },
+      });
+    }
+
+    // Race start marker plugin
     if (raceStartTimes.length > 0) {
       plugins.push({
         hooks: {
